@@ -61,23 +61,21 @@ async function request<T>(url: string, init?: RequestInit) {
 
 export async function syncPublicProfile(payload: ProfileSyncPayload) {
   const url = getBackendApiUrl('/api/users/profile-sync');
-  if (!url) return null;
-  try {
-    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    const token = getBackendUserTokenForUser(payload.user_id);
-    if (token) headers['x-user-token'] = token;
-    const res = await request<ProfileSyncResponse>(url, {
-      method: 'POST',
-      headers,
-      body: JSON.stringify(payload),
-    });
-    if (res?.session_token) {
-      setBackendUserSession({ userId: payload.user_id, token: String(res.session_token) });
-    }
-    return res;
-  } catch {
-    return null;
+  if (!url) {
+    throw new Error('Backend URL missing.');
   }
+  const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+  const token = getBackendUserTokenForUser(payload.user_id);
+  if (token) headers['x-user-token'] = token;
+  const res = await request<ProfileSyncResponse>(url, {
+    method: 'POST',
+    headers,
+    body: JSON.stringify(payload),
+  });
+  if (res?.session_token) {
+    setBackendUserSession({ userId: payload.user_id, token: String(res.session_token) });
+  }
+  return res;
 }
 
 export async function getPublicProfile(userId: number) {

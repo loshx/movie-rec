@@ -17,11 +17,20 @@ import { GlassView } from '@/components/glass-view';
 import { useAuth } from '@/contexts/AuthContext';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
-import { syncCommentAvatarsForUser } from '@/db/user-movies';
+import {
+  getUserFavoriteActors,
+  getUserFavoriteDirectors,
+  getUserFavorites,
+  getUserListPrivacy,
+  getUserRatings,
+  getUserWatched,
+  getUserWatchlist,
+  syncCommentAvatarsForUser,
+} from '@/db/user-movies';
 import { syncGalleryCommentAvatarsForUser } from '@/db/gallery';
 import { hasCloudinaryConfig, uploadImageToCloudinary } from '@/lib/cloudinary';
 import { backendDeleteOwnCloudinaryImage } from '@/lib/cinema-backend';
-import { bootstrapBackendUserSession } from '@/lib/social-backend';
+import { bootstrapBackendUserSession, syncPublicProfile } from '@/lib/social-backend';
 
 const NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
 
@@ -115,13 +124,13 @@ export default function ProfileEditScreen() {
       return;
     }
     try {
+      await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
       let nextAvatarUrl = cleanAvatarUrl;
       if (shouldUploadAvatarToCloudinary(nextAvatarUrl) && nextAvatarUrl !== previousAvatarUrl) {
         if (!hasCloudinaryConfig()) {
           setMessage('Cloudinary upload is not configured on this build.');
           return;
         }
-        await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
         setMessage('Uploading profile image...');
         const uploaded = await uploadImageToCloudinary(nextAvatarUrl, {
           userId: user.id,
@@ -139,6 +148,38 @@ export default function ProfileEditScreen() {
 
       await syncCommentAvatarsForUser(user.id, nextAvatarUrl || null);
       await syncGalleryCommentAvatarsForUser(user.id, nextAvatarUrl || null);
+
+      const [privacy, watchlist, favorites, watched, rated, favoriteActors, favoriteDirectors] = await Promise.all([
+        getUserListPrivacy(user.id),
+        getUserWatchlist(user.id),
+        getUserFavorites(user.id),
+        getUserWatched(user.id),
+        getUserRatings(user.id),
+        getUserFavoriteActors(user.id),
+        getUserFavoriteDirectors(user.id),
+      ]);
+
+      await syncPublicProfile({
+        user_id: user.id,
+        nickname: cleanNickname,
+        name: name.trim() || null,
+        bio: bio.trim() || null,
+        avatar_url: nextAvatarUrl || null,
+        privacy: {
+          watchlist: privacy.watchlist,
+          favorites: privacy.favorites,
+          watched: privacy.watched,
+          rated: privacy.rated,
+          favorite_actors: true,
+          favorite_directors: true,
+        },
+        watchlist,
+        favorites,
+        watched,
+        rated,
+        favorite_actors: favoriteActors,
+        favorite_directors: favoriteDirectors,
+      });
 
       if (previousAvatarUrl && previousAvatarUrl !== nextAvatarUrl && isCloudinaryUrl(previousAvatarUrl)) {
         await backendDeleteOwnCloudinaryImage(previousAvatarUrl, user.id).catch(() => {});
