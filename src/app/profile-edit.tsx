@@ -21,6 +21,7 @@ import { syncCommentAvatarsForUser } from '@/db/user-movies';
 import { syncGalleryCommentAvatarsForUser } from '@/db/gallery';
 import { hasCloudinaryConfig, uploadImageToCloudinary } from '@/lib/cloudinary';
 import { backendDeleteOwnCloudinaryImage } from '@/lib/cinema-backend';
+import { bootstrapBackendUserSession } from '@/lib/social-backend';
 
 const NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
 
@@ -120,6 +121,7 @@ export default function ProfileEditScreen() {
           setMessage('Cloudinary upload is not configured on this build.');
           return;
         }
+        await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
         setMessage('Uploading profile image...');
         const uploaded = await uploadImageToCloudinary(nextAvatarUrl, {
           userId: user.id,

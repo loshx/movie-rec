@@ -183,7 +183,9 @@ export async function backendGetCloudinaryUploadSignature(
   options?: { userId?: number | null; folder?: string | null; adminKey?: string | null }
 ) {
   const url = getBackendApiUrl('/api/media/cloudinary/sign-upload');
-  if (!url) return null;
+  if (!url) {
+    throw new Error('Backend URL missing. Set EXPO_PUBLIC_BACKEND_URL.');
+  }
   try {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     withUserTokenHeader(headers, options?.userId ?? null);
@@ -202,7 +204,8 @@ export async function backendGetCloudinaryUploadSignature(
       setBackendUserSession({ userId: Number(options?.userId), token: String(res.session_token) });
     }
     return res;
-  } catch {
-    return null;
+  } catch (err) {
+    const message = err instanceof Error ? err.message : 'Unknown backend error.';
+    throw new Error(`Cloudinary signature request failed: ${message}`);
   }
 }
