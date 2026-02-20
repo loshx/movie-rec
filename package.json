@@ -10,7 +10,8 @@
     "web": "expo start --web",
     "lint": "expo lint",
     "cinema:ws": "node ./server/cinema-ws-server.js",
-    "backend": "node ./server/cinema-ws-server.js"
+    "backend": "node ./server/cinema-ws-server.js",
+    "ml:report": "node ./scripts/ml-report.js"
   },
   "dependencies": {
     "@expo/log-box": "^55.0.6",
@@ -26,7 +27,7 @@
     "expo-blur": "~55.0.5",
     "expo-constants": "~55.0.3",
     "expo-crypto": "~55.0.5",
-    "expo-dev-client": "~55.0.5",
+    "expo-dev-client": "~55.0.6",
     "expo-device": "~55.0.6",
     "expo-font": "~55.0.3",
     "expo-glass-effect": "~55.0.5",

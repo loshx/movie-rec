@@ -1,4 +1,5 @@
 import { GALLERY_SEED } from '@/data/gallery-seed';
+import { getBackendApiUrl, hasBackendApi } from '@/lib/cinema-backend';
 
 export type GalleryDetails = Record<string, string>;
 
@@ -47,6 +48,70 @@ const STORAGE_KEY = 'movie_rec_gallery_items_v2';
 const GALLERY_SEED_DISABLED_KEY = 'movie_rec_gallery_seed_disabled_v1';
 
 const SEED_ITEMS: Omit<GalleryItem, 'id'>[] = GALLERY_SEED;
+
+type RemoteGalleryItem = {
+  id: number | string;
+  title: string;
+  image: string;
+  tag: string;
+  height: number;
+  shot_id?: string | null;
+  title_header?: string | null;
+  image_id?: string | null;
+  image_url?: string | null;
+  palette_hex?: string[] | null;
+  details?: GalleryDetails | null;
+  likes_count?: number;
+  comments_count?: number;
+  liked_by_me?: boolean | number;
+  favorited_by_me?: boolean | number;
+};
+
+type RemoteGalleryComment = {
+  id: number;
+  gallery_id: number;
+  user_id: number;
+  nickname: string;
+  avatar_url?: string | null;
+  text: string;
+  parent_id?: number | null;
+  created_at: string;
+};
+
+async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (!hasBackendApi()) return null;
+  const url = getBackendApiUrl(path);
+  if (!url) return null;
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> | undefined),
+    };
+    const res = await fetch(url, { ...init, headers });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+function isRestrictedShotdeckUrl(value: string) {
+  return /^https?:\/\/(?:www\.)?shotdeck\.com\/assets\/images\/stills\//i.test(value);
+}
+
+function isLegacyShotdeckPlaceholder(value: string) {
+  return value.startsWith('data:image/svg+xml;utf8,') && /source restricted/i.test(value);
+}
+
+function fallbackGalleryImage(item: { imageId?: string | null; shotId?: string | null; title?: string | null }) {
+  const rawSeed =
+    String(item.imageId ?? '').trim() ||
+    String(item.shotId ?? '').trim() ||
+    String(item.title ?? '').trim() ||
+    'gallery';
+  const seed = encodeURIComponent(rawSeed.replace(/\s+/g, '-').slice(0, 80));
+  return `https://picsum.photos/seed/${seed}/600/900`;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -149,14 +214,73 @@ function resolveGalleryImage(item: {
   imageUrl?: string | null;
   shotId?: string | null;
   imageId?: string | null;
+  title?: string | null;
 }) {
-  const direct = normalizeWebImageUri(item.image);
-  if (direct) return direct;
-  const url = normalizeWebImageUri(item.imageUrl);
-  if (url) return url;
-  const shotdeck = deriveShotdeckUrl(item);
-  if (shotdeck) return shotdeck;
-  return '';
+  const directRaw = String(item.image ?? '').trim();
+  const direct = normalizeWebImageUri(directRaw);
+  if (direct && !isRestrictedShotdeckUrl(direct) && !isLegacyShotdeckPlaceholder(direct)) return direct;
+
+  const urlRaw = String(item.imageUrl ?? '').trim();
+  const url = normalizeWebImageUri(urlRaw);
+  if (url && !isRestrictedShotdeckUrl(url) && !isLegacyShotdeckPlaceholder(url)) return url;
+
+  const derivedShotdeck = deriveShotdeckUrl(item);
+  if (isRestrictedShotdeckUrl(directRaw) || isRestrictedShotdeckUrl(urlRaw) || isRestrictedShotdeckUrl(derivedShotdeck)) {
+    return fallbackGalleryImage(item);
+  }
+
+  const normalizedDerived = normalizeWebImageUri(derivedShotdeck);
+  if (normalizedDerived) return normalizedDerived;
+  return fallbackGalleryImage(item);
+}
+
+function mapRemoteGalleryItem(row: RemoteGalleryItem): GalleryItem {
+  const image = resolveGalleryImage({
+    image: row.image,
+    imageUrl: row.image_url,
+    shotId: row.shot_id,
+    imageId: row.image_id,
+    title: row.title,
+  });
+  return {
+    id: String(row.id),
+    title: row.title,
+    image,
+    height: normalizeHeight(row.height),
+    tag: String(row.tag || 'gallery'),
+    shotId: row.shot_id ?? null,
+    titleHeader: row.title_header ?? null,
+    imageId: row.image_id ?? null,
+    imageUrl: normalizeWebImageUri(row.image_url) || image,
+    paletteHex: Array.isArray(row.palette_hex)
+      ? row.palette_hex.map((x) => String(x)).filter((x) => /^#[0-9a-fA-F]{6}$/.test(x))
+      : [],
+    details: normalizeDetails(row.details ?? {}),
+  };
+}
+
+function mapRemoteGalleryFeedItem(row: RemoteGalleryItem): GalleryFeedItem {
+  const base = mapRemoteGalleryItem(row);
+  return {
+    ...base,
+    likesCount: Number(row.likes_count ?? 0),
+    commentsCount: Number(row.comments_count ?? 0),
+    likedByMe: !!row.liked_by_me,
+    favoritedByMe: !!row.favorited_by_me,
+  };
+}
+
+function mapRemoteGalleryComment(row: RemoteGalleryComment): GalleryComment {
+  return {
+    id: Number(row.id),
+    galleryId: Number(row.gallery_id),
+    userId: Number(row.user_id),
+    nickname: String(row.nickname || `user_${row.user_id}`),
+    avatarUrl: row.avatar_url ?? null,
+    text: String(row.text || ''),
+    parentId: row.parent_id ?? null,
+    createdAt: String(row.created_at || nowIso()),
+  };
 }
 
 function seedKey(item: { imageId?: string | null; shotId?: string | null; title: string }) {
@@ -242,6 +366,22 @@ function isSeedDisabled() {
 const state = loadState();
 
 export async function getGalleryItems(opts?: { userId?: number; query?: string }): Promise<GalleryFeedItem[]> {
+  if (hasBackendApi()) {
+    const search = new URLSearchParams();
+    if (Number(opts?.userId ?? 0) > 0) {
+      search.set('user_id', String(Number(opts?.userId ?? 0)));
+    }
+    const query = String(opts?.query ?? '').trim();
+    if (query) search.set('query', query);
+    const payload = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
+      `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`
+    );
+    if (Array.isArray(payload?.items)) {
+      const remoteItems = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
+      if (remoteItems.length > 0) return remoteItems;
+    }
+  }
+
   const userId = Number(opts?.userId ?? 0);
   const query = String(opts?.query ?? '').trim().toLowerCase();
   const filtered = query
@@ -277,6 +417,23 @@ export async function getGalleryItems(opts?: { userId?: number; query?: string }
 }
 
 export async function addGalleryItem(input: Omit<GalleryItem, 'id'>) {
+  const remote = await requestBackendJson<{ item?: RemoteGalleryItem }>('/api/gallery', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: input.title,
+      image: input.image,
+      tag: input.tag,
+      height: input.height,
+      shot_id: input.shotId ?? null,
+      title_header: input.titleHeader ?? null,
+      image_id: input.imageId ?? null,
+      image_url: input.imageUrl ?? null,
+      palette_hex: input.paletteHex ?? [],
+      details: input.details ?? {},
+    }),
+  });
+  if (remote?.item) return;
+
   const next: GalleryItem = {
     id: String(state.idSeq++),
     title: input.title.trim(),
@@ -295,6 +452,11 @@ export async function addGalleryItem(input: Omit<GalleryItem, 'id'>) {
 }
 
 export async function deleteGalleryItem(id: string) {
+  const remote = await requestBackendJson<{ ok?: boolean }>(`/api/gallery/${encodeURIComponent(String(Number(id)))}`, {
+    method: 'DELETE',
+  });
+  if (remote?.ok) return;
+
   const galleryId = Number(id);
   state.items = state.items.filter((item) => item.id !== id);
   state.likes = state.likes.filter((x) => x.galleryId !== galleryId);
@@ -304,6 +466,12 @@ export async function deleteGalleryItem(id: string) {
 }
 
 export async function toggleGalleryLike(userId: number, galleryId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-like`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (typeof remote?.active === 'boolean') return remote.active;
+
   const idx = state.likes.findIndex((x) => x.galleryId === galleryId && x.userId === userId);
   if (idx >= 0) {
     state.likes.splice(idx, 1);
@@ -316,6 +484,12 @@ export async function toggleGalleryLike(userId: number, galleryId: number) {
 }
 
 export async function toggleGalleryFavorite(userId: number, galleryId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-favorite`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (typeof remote?.active === 'boolean') return remote.active;
+
   const idx = state.favorites.findIndex((x) => x.galleryId === galleryId && x.userId === userId);
   if (idx >= 0) {
     state.favorites.splice(idx, 1);
@@ -328,6 +502,11 @@ export async function toggleGalleryFavorite(userId: number, galleryId: number) {
 }
 
 export async function getGalleryComments(galleryId: number): Promise<GalleryComment[]> {
+  const remote = await requestBackendJson<{ comments?: RemoteGalleryComment[] }>(`/api/gallery/${galleryId}/comments`);
+  if (Array.isArray(remote?.comments)) {
+    return remote.comments.map(mapRemoteGalleryComment);
+  }
+
   const users = getAuthUsersMap();
   let changed = false;
   const list = state.comments
@@ -355,6 +534,17 @@ export async function getGalleryComments(galleryId: number): Promise<GalleryComm
 }
 
 export async function addGalleryComment(userId: number, galleryId: number, text: string, parentId?: number | null) {
+  const remote = await requestBackendJson<{ comment?: RemoteGalleryComment }>(`/api/gallery/${galleryId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: userId,
+      gallery_id: galleryId,
+      text,
+      parent_id: parentId ?? null,
+    }),
+  });
+  if (remote?.comment) return;
+
   const clean = text.trim();
   if (!clean) throw new Error('Comment is empty.');
   const user = getAuthUsersMap().get(Number(userId));
@@ -386,6 +576,13 @@ export async function syncGalleryCommentAvatarsForUser(userId: number, avatarUrl
 }
 
 export async function getUserFavoriteGallery(userId: number): Promise<GalleryItem[]> {
+  const remote = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
+    `/api/users/${encodeURIComponent(String(userId))}/gallery-favorites`
+  );
+  if (Array.isArray(remote?.items)) {
+    return remote.items.map(mapRemoteGalleryItem);
+  }
+
   const ids = new Set(state.favorites.filter((x) => x.userId === userId).map((x) => x.galleryId));
   return state.items.filter((item) => ids.has(Number(item.id)));
 }

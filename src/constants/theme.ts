@@ -23,26 +23,34 @@ export const Colors = {
 
 export type ThemeColor = keyof typeof Colors.light & keyof typeof Colors.dark;
 
-export const Fonts = Platform.select({
+const platformFonts = Platform.select({
   ios: {
-    sans: 'system-ui',
-    serif: 'ui-serif',
-    rounded: 'ui-rounded',
-    mono: 'ui-monospace',
+    light: 'Verdana',
+    bold: 'Verdana-Bold',
   },
-  default: {
-    sans: 'normal',
-    serif: 'serif',
-    rounded: 'normal',
-    mono: 'monospace',
+  android: {
+    // Verdana is not guaranteed on Android, so we use the closest stable fallback.
+    light: 'sans-serif',
+    bold: 'sans-serif-medium',
   },
   web: {
-    sans: 'var(--font-display)',
-    serif: 'var(--font-serif)',
-    rounded: 'var(--font-rounded)',
-    mono: 'var(--font-mono)',
+    light: 'Verdana, Geneva, sans-serif',
+    bold: 'Verdana, Geneva, sans-serif',
   },
-});
+  default: {
+    light: 'sans-serif',
+    bold: 'sans-serif',
+  },
+})!;
+
+export const Fonts = {
+  light: platformFonts.light,
+  bold: platformFonts.bold,
+  sans: platformFonts.light,
+  serif: platformFonts.light,
+  rounded: platformFonts.light,
+  mono: platformFonts.bold,
+} as const;
 
 export const Spacing = {
   half: 2,

@@ -1,5 +1,6 @@
 import { getDb } from './database';
 import { GALLERY_SEED } from '@/data/gallery-seed';
+import { getBackendApiUrl, hasBackendApi } from '@/lib/cinema-backend';
 
 export type GalleryDetails = Record<string, string>;
 
@@ -35,7 +36,120 @@ export type GalleryComment = {
   createdAt: string;
 };
 
-const SEED_ITEMS: Array<Omit<GalleryItem, 'id'>> = GALLERY_SEED;
+const SEED_ITEMS: Omit<GalleryItem, 'id'>[] = GALLERY_SEED;
+
+type RemoteGalleryItem = {
+  id: number | string;
+  title: string;
+  image: string;
+  tag: string;
+  height: number;
+  shot_id?: string | null;
+  title_header?: string | null;
+  image_id?: string | null;
+  image_url?: string | null;
+  palette_hex?: string[] | null;
+  details?: GalleryDetails | null;
+  likes_count?: number;
+  comments_count?: number;
+  liked_by_me?: boolean | number;
+  favorited_by_me?: boolean | number;
+};
+
+type RemoteGalleryComment = {
+  id: number;
+  gallery_id: number;
+  user_id: number;
+  nickname: string;
+  avatar_url?: string | null;
+  text: string;
+  parent_id?: number | null;
+  created_at: string;
+};
+
+async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (!hasBackendApi()) return null;
+  const url = getBackendApiUrl(path);
+  if (!url) return null;
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> | undefined),
+    };
+    const res = await fetch(url, { ...init, headers });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
+function mapRemoteGalleryItem(row: RemoteGalleryItem): GalleryItem {
+  const image = resolveGalleryImage({
+    image: row.image,
+    imageUrl: row.image_url,
+    shotId: row.shot_id,
+    imageId: row.image_id,
+    title: row.title,
+  });
+  return {
+    id: String(row.id),
+    title: row.title,
+    image,
+    tag: row.tag,
+    height: normalizeHeight(row.height),
+    shotId: row.shot_id ?? null,
+    titleHeader: row.title_header ?? null,
+    imageId: row.image_id ?? null,
+    imageUrl: normalizeRemoteImageUri(row.image_url) || image,
+    paletteHex: Array.isArray(row.palette_hex)
+      ? row.palette_hex.map((x) => String(x)).filter((x) => /^#[0-9a-fA-F]{6}$/.test(x))
+      : [],
+    details: (row.details ?? {}) as GalleryDetails,
+  };
+}
+
+function mapRemoteGalleryFeedItem(row: RemoteGalleryItem): GalleryFeedItem {
+  const base = mapRemoteGalleryItem(row);
+  return {
+    ...base,
+    likesCount: Number(row.likes_count ?? 0),
+    commentsCount: Number(row.comments_count ?? 0),
+    likedByMe: !!row.liked_by_me,
+    favoritedByMe: !!row.favorited_by_me,
+  };
+}
+
+function mapRemoteGalleryComment(row: RemoteGalleryComment): GalleryComment {
+  return {
+    id: Number(row.id),
+    galleryId: Number(row.gallery_id),
+    userId: Number(row.user_id),
+    nickname: String(row.nickname || `user_${row.user_id}`),
+    avatarUrl: row.avatar_url ?? null,
+    text: String(row.text || ''),
+    parentId: row.parent_id ?? null,
+    createdAt: String(row.created_at || nowIso()),
+  };
+}
+
+function isRestrictedShotdeckUrl(value: string) {
+  return /^https?:\/\/(?:www\.)?shotdeck\.com\/assets\/images\/stills\//i.test(value);
+}
+
+function isLegacyShotdeckPlaceholder(value: string) {
+  return value.startsWith('data:image/svg+xml;utf8,') && /source restricted/i.test(value);
+}
+
+function fallbackGalleryImage(item: { imageId?: string | null; shotId?: string | null; title?: string | null }) {
+  const rawSeed =
+    String(item.imageId ?? '').trim() ||
+    String(item.shotId ?? '').trim() ||
+    String(item.title ?? '').trim() ||
+    'gallery';
+  const seed = encodeURIComponent(rawSeed.replace(/\s+/g, '-').slice(0, 80));
+  return `https://picsum.photos/seed/${seed}/600/900`;
+}
 
 function nowIso() {
   return new Date().toISOString();
@@ -45,6 +159,61 @@ function normalizeHeight(value: unknown) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed)) return 240;
   return Math.max(160, Math.min(520, Math.round(parsed)));
+}
+
+function normalizeRemoteImageUri(uri: string | null | undefined) {
+  const clean = String(uri ?? '').trim();
+  if (!clean) return '';
+  if (clean.startsWith('data:image/')) return clean;
+  if (clean.startsWith('http://') || clean.startsWith('https://') || clean.startsWith('data:image/')) {
+    return clean;
+  }
+  return '';
+}
+
+function deriveShotdeckUrl(item: { shotId?: string | null; imageId?: string | null }) {
+  const id = String(item.imageId ?? '').trim() || String(item.shotId ?? '').trim();
+  if (!id) return '';
+  return `https://shotdeck.com/assets/images/stills/${id}.jpg`;
+}
+
+function resolveGalleryImage(item: {
+  image?: string | null;
+  imageUrl?: string | null;
+  shotId?: string | null;
+  imageId?: string | null;
+  title?: string | null;
+}) {
+  const directRaw = String(item.image ?? '').trim();
+  const direct = normalizeRemoteImageUri(directRaw);
+  if (direct && !isRestrictedShotdeckUrl(direct) && !isLegacyShotdeckPlaceholder(direct)) return direct;
+
+  const urlRaw = String(item.imageUrl ?? '').trim();
+  const url = normalizeRemoteImageUri(urlRaw);
+  if (url && !isRestrictedShotdeckUrl(url) && !isLegacyShotdeckPlaceholder(url)) return url;
+
+  const derivedShotdeck = deriveShotdeckUrl(item);
+  if (isRestrictedShotdeckUrl(directRaw) || isRestrictedShotdeckUrl(urlRaw) || isRestrictedShotdeckUrl(derivedShotdeck)) {
+    return fallbackGalleryImage(item);
+  }
+
+  const normalizedDerived = normalizeRemoteImageUri(derivedShotdeck);
+  if (normalizedDerived) return normalizedDerived;
+  return fallbackGalleryImage(item);
+}
+
+function dedupeKey(item: { imageId?: string | null; shotId?: string | null; title?: string | null }) {
+  const imageId = String(item.imageId ?? '').trim().toLowerCase();
+  const shotId = String(item.shotId ?? '').trim().toLowerCase();
+  if (imageId || shotId) return `${imageId}::${shotId}`;
+  return `title:${String(item.title ?? '').trim().toLowerCase()}`;
+}
+
+function titleKey(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
 }
 
 function parsePaletteJson(raw: string | null | undefined) {
@@ -108,50 +277,162 @@ function parseDetailsJson(raw: string | null | undefined): GalleryDetails {
   }
 }
 
+let ensureSeededOncePromise: Promise<void> | null = null;
+
 async function ensureSeeded() {
   const db = await getDb();
-  for (const item of SEED_ITEMS) {
-    const existing = await db.getFirstAsync<{ id: number }>(
-      `
-      SELECT id
-      FROM gallery_items
-      WHERE
-        (COALESCE(image_id, '') != '' AND image_id = ?)
-        OR (COALESCE(shot_id, '') != '' AND shot_id = ?)
-        OR (
-          COALESCE(image_id, '') = ''
-          AND COALESCE(shot_id, '') = ''
-          AND image = ?
-        )
-      LIMIT 1
-      `,
-      item.imageId ?? '',
-      item.shotId ?? '',
-      item.image
+  const seedByTitle = new Map(SEED_ITEMS.map((item) => [titleKey(item.title), item]));
+  const existingRows = await db.getAllAsync<{
+    id: number;
+    title: string;
+    image: string | null;
+    shot_id: string | null;
+    image_id: string | null;
+    image_url: string | null;
+  }>(
+    `
+    SELECT id, title, image, shot_id, image_id, image_url
+    FROM gallery_items
+    ORDER BY id ASC
+    `
+  );
+
+  // Normalize existing rows so mobile/web can always load a valid remote URL.
+  for (const row of existingRows) {
+    const seed = seedByTitle.get(titleKey(row.title));
+    const seedResolved = seed ? resolveGalleryImage(seed) : '';
+    const resolved = resolveGalleryImage({
+      image: row.image,
+      imageUrl: row.image_url,
+      shotId: row.shot_id,
+      imageId: row.image_id,
+    });
+    const targetImage = resolved || seedResolved;
+    if (!targetImage) continue;
+
+    const nextShotId = String(row.shot_id ?? '').trim() || String(seed?.shotId ?? '').trim() || null;
+    const nextImageId = String(row.image_id ?? '').trim() || String(seed?.imageId ?? '').trim() || null;
+    const nextImageUrl =
+      normalizeRemoteImageUri(row.image_url) ||
+      normalizeRemoteImageUri(seed?.imageUrl) ||
+      targetImage;
+
+    await db.runAsync(
+      'UPDATE gallery_items SET image = ?, image_url = ?, shot_id = COALESCE(?, shot_id), image_id = COALESCE(?, image_id) WHERE id = ?',
+      targetImage,
+      nextImageUrl,
+      nextShotId,
+      nextImageId,
+      row.id
     );
-    if (existing) continue;
+  }
+
+  // Remove historical duplicates by title, keep the row with strongest identifiers.
+  const normalizedRows = await db.getAllAsync<{
+    id: number;
+    title: string;
+    image: string | null;
+    shot_id: string | null;
+    image_id: string | null;
+    image_url: string | null;
+  }>('SELECT id, title, image, shot_id, image_id, image_url FROM gallery_items ORDER BY id DESC');
+  const bestByTitle = new Map<string, number>();
+  const duplicateIds: number[] = [];
+  for (const row of normalizedRows) {
+    const key = titleKey(row.title);
+    const score =
+      (normalizeRemoteImageUri(row.image) ? 3 : 0) +
+      (normalizeRemoteImageUri(row.image_url) ? 2 : 0) +
+      (String(row.shot_id ?? '').trim() ? 1 : 0) +
+      (String(row.image_id ?? '').trim() ? 1 : 0);
+    if (!bestByTitle.has(key)) {
+      bestByTitle.set(key, row.id);
+      continue;
+    }
+    const currentBestId = bestByTitle.get(key)!;
+    const currentBest = normalizedRows.find((x) => x.id === currentBestId);
+    const currentScore =
+      (normalizeRemoteImageUri(currentBest?.image) ? 3 : 0) +
+      (normalizeRemoteImageUri(currentBest?.image_url) ? 2 : 0) +
+      (String(currentBest?.shot_id ?? '').trim() ? 1 : 0) +
+      (String(currentBest?.image_id ?? '').trim() ? 1 : 0);
+    if (score > currentScore) {
+      duplicateIds.push(currentBestId);
+      bestByTitle.set(key, row.id);
+    } else {
+      duplicateIds.push(row.id);
+    }
+  }
+  for (const id of duplicateIds) {
+    await db.runAsync('DELETE FROM gallery_items WHERE id = ?', id);
+  }
+
+  const existingKeys = new Set(
+    normalizedRows
+      .filter((row) => !duplicateIds.includes(row.id))
+      .map((row) =>
+      dedupeKey({
+        imageId: row.image_id,
+        shotId: row.shot_id,
+        title: row.title,
+      })
+      )
+  );
+
+  for (const item of SEED_ITEMS) {
+    const key = dedupeKey(item);
+    if (existingKeys.has(key)) continue;
+    const resolvedImage = resolveGalleryImage(item);
+    if (!resolvedImage) continue;
 
     await db.runAsync(
       `INSERT INTO gallery_items
        (title, image, tag, height, shot_id, title_header, image_id, image_url, palette_json, details_json, created_at)
        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
       item.title,
-      item.image,
+      resolvedImage,
       item.tag,
       normalizeHeight(item.height),
       item.shotId ?? null,
       item.titleHeader ?? null,
       item.imageId ?? null,
-      item.imageUrl ?? null,
+      normalizeRemoteImageUri(item.imageUrl) || resolvedImage,
       JSON.stringify(item.paletteHex ?? []),
       JSON.stringify(item.details ?? {}),
       nowIso()
     );
+    existingKeys.add(key);
   }
 }
 
+async function ensureSeededOnce() {
+  if (!ensureSeededOncePromise) {
+    ensureSeededOncePromise = ensureSeeded().catch((error) => {
+      ensureSeededOncePromise = null;
+      throw error;
+    });
+  }
+  return ensureSeededOncePromise;
+}
+
 export async function getGalleryItems(opts?: { userId?: number; query?: string }): Promise<GalleryFeedItem[]> {
-  await ensureSeeded();
+  if (hasBackendApi()) {
+    const search = new URLSearchParams();
+    if (Number(opts?.userId ?? 0) > 0) {
+      search.set('user_id', String(Number(opts?.userId ?? 0)));
+    }
+    const query = String(opts?.query ?? '').trim();
+    if (query) search.set('query', query);
+    const payload = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
+      `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`
+    );
+    if (Array.isArray(payload?.items)) {
+      const remoteItems = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
+      if (remoteItems.length > 0) return remoteItems;
+    }
+  }
+
+  await ensureSeededOnce();
   const db = await getDb();
   const userId = Number(opts?.userId ?? 0);
   const query = String(opts?.query ?? '').trim().toLowerCase();
@@ -198,39 +479,85 @@ export async function getGalleryItems(opts?: { userId?: number; query?: string }
     likeQuery
   );
 
-  return rows.map((row) => ({
-    id: String(row.id),
-    title: row.title,
-    image: row.image,
-    tag: row.tag,
-    height: normalizeHeight(row.height),
-    shotId: row.shot_id,
-    titleHeader: row.title_header,
-    imageId: row.image_id,
-    imageUrl: row.image_url,
-    paletteHex: parsePaletteJson(row.palette_json),
-    details: parseDetailsJson(row.details_json),
-    likesCount: Number(row.likes_count ?? 0),
-    commentsCount: Number(row.comments_count ?? 0),
-    likedByMe: Number(row.liked_by_me ?? 0) > 0,
-    favoritedByMe: Number(row.favorited_by_me ?? 0) > 0,
-  }));
+  const seen = new Set<string>();
+  const seenTitle = new Set<string>();
+  return rows
+    .map((row) => {
+      const image = resolveGalleryImage({
+        image: row.image,
+        imageUrl: row.image_url,
+        shotId: row.shot_id,
+        imageId: row.image_id,
+      });
+      return {
+        id: String(row.id),
+        title: row.title,
+        image,
+        tag: row.tag,
+        height: normalizeHeight(row.height),
+        shotId: row.shot_id,
+        titleHeader: row.title_header,
+        imageId: row.image_id,
+        imageUrl: normalizeRemoteImageUri(row.image_url) || image,
+        paletteHex: parsePaletteJson(row.palette_json),
+        details: parseDetailsJson(row.details_json),
+        likesCount: Number(row.likes_count ?? 0),
+        commentsCount: Number(row.comments_count ?? 0),
+        likedByMe: Number(row.liked_by_me ?? 0) > 0,
+        favoritedByMe: Number(row.favorited_by_me ?? 0) > 0,
+      };
+    })
+    .filter((row) => !!row.image)
+    .filter((row) => {
+      const key = dedupeKey({
+        imageId: row.imageId,
+        shotId: row.shotId,
+        title: row.title,
+      });
+      const tKey = titleKey(row.title);
+      if (seen.has(key)) return false;
+      if (seenTitle.has(tKey)) return false;
+      seen.add(key);
+      seenTitle.add(tKey);
+      return true;
+    });
 }
 
 export async function addGalleryItem(input: Omit<GalleryItem, 'id'>) {
+  const remote = await requestBackendJson<{ item?: RemoteGalleryItem }>('/api/gallery', {
+    method: 'POST',
+    body: JSON.stringify({
+      title: input.title,
+      image: input.image,
+      tag: input.tag,
+      height: input.height,
+      shot_id: input.shotId ?? null,
+      title_header: input.titleHeader ?? null,
+      image_id: input.imageId ?? null,
+      image_url: input.imageUrl ?? null,
+      palette_hex: input.paletteHex ?? [],
+      details: input.details ?? {},
+    }),
+  });
+  if (remote?.item) return;
+
   const db = await getDb();
+  const resolvedImage = resolveGalleryImage(input);
+  if (!resolvedImage) {
+    throw new Error('Image URL must be a public http(s) URL.');
+  }
   await db.runAsync(
     `INSERT INTO gallery_items
      (title, image, tag, height, shot_id, title_header, image_id, image_url, palette_json, details_json, created_at)
      VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`,
     input.title.trim(),
-    input.image.trim(),
+    resolvedImage,
     input.tag.trim().toLowerCase(),
     normalizeHeight(input.height),
     input.shotId?.trim() || null,
     input.titleHeader?.trim() || null,
     input.imageId?.trim() || null,
-    input.imageUrl?.trim() || null,
+    normalizeRemoteImageUri(input.imageUrl) || resolvedImage,
     JSON.stringify(input.paletteHex ?? []),
     JSON.stringify(input.details ?? {}),
     nowIso()
@@ -238,11 +565,22 @@ export async function addGalleryItem(input: Omit<GalleryItem, 'id'>) {
 }
 
 export async function deleteGalleryItem(id: string) {
+  const remote = await requestBackendJson<{ ok?: boolean }>(`/api/gallery/${encodeURIComponent(String(Number(id)))}`, {
+    method: 'DELETE',
+  });
+  if (remote?.ok) return;
+
   const db = await getDb();
   await db.runAsync('DELETE FROM gallery_items WHERE id = ?', Number(id));
 }
 
 export async function toggleGalleryLike(userId: number, galleryId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-like`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (typeof remote?.active === 'boolean') return remote.active;
+
   const db = await getDb();
   const exists = await db.getFirstAsync<{ ok: number }>(
     'SELECT 1 as ok FROM gallery_likes WHERE user_id = ? AND gallery_id = ?',
@@ -263,6 +601,12 @@ export async function toggleGalleryLike(userId: number, galleryId: number) {
 }
 
 export async function toggleGalleryFavorite(userId: number, galleryId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-favorite`, {
+    method: 'POST',
+    body: JSON.stringify({ user_id: userId }),
+  });
+  if (typeof remote?.active === 'boolean') return remote.active;
+
   const db = await getDb();
   const exists = await db.getFirstAsync<{ ok: number }>(
     'SELECT 1 as ok FROM gallery_favorites WHERE user_id = ? AND gallery_id = ?',
@@ -283,6 +627,11 @@ export async function toggleGalleryFavorite(userId: number, galleryId: number) {
 }
 
 export async function getGalleryComments(galleryId: number): Promise<GalleryComment[]> {
+  const remote = await requestBackendJson<{ comments?: RemoteGalleryComment[] }>(`/api/gallery/${galleryId}/comments`);
+  if (Array.isArray(remote?.comments)) {
+    return remote.comments.map(mapRemoteGalleryComment);
+  }
+
   const db = await getDb();
   const rows = await db.getAllAsync<{
     id: number;
@@ -316,6 +665,17 @@ export async function getGalleryComments(galleryId: number): Promise<GalleryComm
 }
 
 export async function addGalleryComment(userId: number, galleryId: number, text: string, parentId?: number | null) {
+  const remote = await requestBackendJson<{ comment?: RemoteGalleryComment }>(`/api/gallery/${galleryId}/comments`, {
+    method: 'POST',
+    body: JSON.stringify({
+      user_id: userId,
+      gallery_id: galleryId,
+      text,
+      parent_id: parentId ?? null,
+    }),
+  });
+  if (remote?.comment) return;
+
   const db = await getDb();
   const clean = text.trim();
   if (!clean) throw new Error('Comment is empty.');
@@ -334,6 +694,13 @@ export async function syncGalleryCommentAvatarsForUser(_userId: number, _avatarU
 }
 
 export async function getUserFavoriteGallery(userId: number): Promise<GalleryItem[]> {
+  const remote = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
+    `/api/users/${encodeURIComponent(String(userId))}/gallery-favorites`
+  );
+  if (Array.isArray(remote?.items)) {
+    return remote.items.map(mapRemoteGalleryItem);
+  }
+
   const db = await getDb();
   const rows = await db.getAllAsync<{
     id: number;
@@ -360,13 +727,23 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
   return rows.map((row) => ({
     id: String(row.id),
     title: row.title,
-    image: row.image,
+    image: resolveGalleryImage({
+      image: row.image,
+      imageUrl: row.image_url,
+      shotId: row.shot_id,
+      imageId: row.image_id,
+    }),
     tag: row.tag,
     height: normalizeHeight(row.height),
     shotId: row.shot_id,
     titleHeader: row.title_header,
     imageId: row.image_id,
-    imageUrl: row.image_url,
+    imageUrl: normalizeRemoteImageUri(row.image_url) || resolveGalleryImage({
+      image: row.image,
+      imageUrl: row.image_url,
+      shotId: row.shot_id,
+      imageId: row.image_id,
+    }),
     paletteHex: parsePaletteJson(row.palette_json),
     details: parseDetailsJson(row.details_json),
   }));
@@ -380,8 +757,10 @@ export async function clearGalleryAll() {
     DELETE FROM gallery_favorites;
     DELETE FROM gallery_items;
   `);
+  ensureSeededOncePromise = null;
 }
 
 export async function restoreGallerySeed() {
-  await ensureSeeded();
+  ensureSeededOncePromise = null;
+  await ensureSeededOnce();
 }

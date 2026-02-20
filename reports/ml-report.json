@@ -1,0 +1,66 @@
+{
+  "generated_at": "2026-02-20T08:24:33.176Z",
+  "top_k": 20,
+  "min_history_per_user": 5,
+  "config": {
+    "ml_api_configured": false,
+    "tmdb_configured": true,
+    "store_path": "D:\\APP\\movie-rec\\server\\data\\cinema-events.json"
+  },
+  "dataset": {
+    "users_evaluated": 2,
+    "users_movie": 2,
+    "users_tv": 0
+  },
+  "results": {
+    "movie": {
+      "ml": null,
+      "tmdb": {
+        "model": "TMDB-baseline",
+        "users": 2,
+        "topK": 20,
+        "precision_at_k": 0,
+        "recall_at_k": 0,
+        "hit_rate": 0,
+        "coverage": 0,
+        "diversity": null,
+        "unique_recommended_count": 0
+      },
+      "per_user": [
+        {
+          "user_id": 5,
+          "media_type": "movie",
+          "history_size": 9,
+          "train_size": 8,
+          "holdout_size": 1,
+          "holdout_ids": [
+            32296
+          ],
+          "ml_recommended_ids": null,
+          "tmdb_recommended_ids": []
+        },
+        {
+          "user_id": 7,
+          "media_type": "movie",
+          "history_size": 7,
+          "train_size": 6,
+          "holdout_size": 1,
+          "holdout_ids": [
+            11036
+          ],
+          "ml_recommended_ids": null,
+          "tmdb_recommended_ids": []
+        }
+      ]
+    },
+    "tv": {
+      "ml": null,
+      "tmdb": null,
+      "per_user": []
+    }
+  },
+  "notes": [
+    "ML API URL is missing, ML metrics could not be computed. Set EXPO_PUBLIC_ML_API_URL or ML_API_URL.",
+    "Not enough tv history to evaluate (minimum history per user: 5)."
+  ]
+}

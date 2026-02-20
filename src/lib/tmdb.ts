@@ -7,8 +7,16 @@ const extra = Constants.expoConfig?.extra as
     }
   | undefined;
 
-const TMDB_TOKEN = extra?.EXPO_PUBLIC_TMDB_TOKEN;
-const TMDB_API_KEY = extra?.EXPO_PUBLIC_TMDB_API_KEY;
+const TMDB_TOKEN = (
+  process.env.EXPO_PUBLIC_TMDB_TOKEN ??
+  extra?.EXPO_PUBLIC_TMDB_TOKEN ??
+  ''
+).trim();
+const TMDB_API_KEY = (
+  process.env.EXPO_PUBLIC_TMDB_API_KEY ??
+  extra?.EXPO_PUBLIC_TMDB_API_KEY ??
+  ''
+).trim();
 
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
@@ -116,6 +124,18 @@ export async function getSimilarMovies(id: number, page = 1) {
 export async function getSimilarTv(id: number, page = 1) {
   return tmdbFetch<{ results: TvShow[]; total_pages: number }>(
     `/tv/${id}/similar?language=en-US&page=${page}`
+  );
+}
+
+export async function getMovieRecommendations(id: number, page = 1) {
+  return tmdbFetch<{ results: Movie[]; total_pages: number }>(
+    `/movie/${id}/recommendations?language=en-US&page=${page}`
+  );
+}
+
+export async function getTvRecommendations(id: number, page = 1) {
+  return tmdbFetch<{ results: TvShow[]; total_pages: number }>(
+    `/tv/${id}/recommendations?language=en-US&page=${page}`
   );
 }
 

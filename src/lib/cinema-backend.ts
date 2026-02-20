@@ -25,6 +25,17 @@ export type BackendCinemaInput = {
   createdBy?: number | null;
 };
 
+export type BackendCloudinarySignature = {
+  resource_type: 'image' | 'video';
+  upload_url: string;
+  cloud_name: string;
+  api_key: string;
+  timestamp: number;
+  signature: string;
+  public_id: string;
+  folder: string;
+};
+
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_BACKEND_URL?: string;
   EXPO_PUBLIC_ADMIN_API_KEY?: string;
@@ -131,4 +142,25 @@ export async function backendDeleteCloudinaryImage(imageUrl: string) {
       image_url: imageUrl,
     }),
   });
+}
+
+export async function backendGetCloudinaryUploadSignature(
+  resourceType: 'image' | 'video',
+  options?: { userId?: number | null; folder?: string | null }
+) {
+  const url = getBackendApiUrl('/api/media/cloudinary/sign-upload');
+  if (!url) return null;
+  try {
+    return await requestJson<BackendCloudinarySignature>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        resource_type: resourceType,
+        user_id: options?.userId ?? null,
+        folder: options?.folder ?? null,
+      }),
+    });
+  } catch {
+    return null;
+  }
 }

@@ -68,6 +68,32 @@ type ProfileSectionKey =
   | 'rated'
   | 'following';
 
+const PROFILE_LIST_LIMIT = 36;
+const PROFILE_FETCH_CONCURRENCY = 4;
+const PROFILE_SYNC_DEBOUNCE_MS = 1800;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+) {
+  if (items.length === 0) return [] as R[];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const slots = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(
+    Array.from({ length: slots }).map(async () => {
+      while (true) {
+        const current = nextIndex;
+        if (current >= items.length) return;
+        nextIndex += 1;
+        results[current] = await worker(items[current], current);
+      }
+    })
+  );
+  return results;
+}
+
 export default function ProfileScreen() {
   const { user, logout } = useAuth();
   const detailsCacheRef = useRef<Map<string, ProfileMovieItem>>(new Map());
@@ -75,6 +101,8 @@ export default function ProfileScreen() {
   const invalidKeysRef = useRef<Set<string>>(new Set());
   const actorCacheRef = useRef<Map<number, ProfileActorItem>>(new Map());
   const actorInFlightRef = useRef<Map<number, Promise<ProfileActorItem | null>>>(new Map());
+  const lastListsLoadAtRef = useRef(0);
+  const lastSyncedSignatureRef = useRef('');
   const heroOpacity = useRef(new Animated.Value(0)).current;
   const heroTranslateY = useRef(new Animated.Value(16)).current;
   const bodyOpacity = useRef(new Animated.Value(0)).current;
@@ -297,6 +325,7 @@ export default function ProfileScreen() {
 
     setLoadingLists(true);
     try {
+      const followingPromise = getFollowingProfiles(user.id).catch(() => []);
       const [watchRows, favRows, actorRows, directorRows, watchedRows, ratedRows, savedPrivacy, galleryRows] = await Promise.all([
         getUserWatchlist(user.id),
         getUserFavorites(user.id),
@@ -308,13 +337,20 @@ export default function ProfileScreen() {
         getUserFavoriteGallery(user.id),
       ]);
 
+      const limitedWatchRows = watchRows.slice(0, PROFILE_LIST_LIMIT);
+      const limitedFavRows = favRows.slice(0, PROFILE_LIST_LIMIT);
+      const limitedActorRows = actorRows.slice(0, PROFILE_LIST_LIMIT);
+      const limitedDirectorRows = directorRows.slice(0, PROFILE_LIST_LIMIT);
+      const limitedWatchedRows = watchedRows.slice(0, PROFILE_LIST_LIMIT);
+      const limitedRatedRows = ratedRows.slice(0, PROFILE_LIST_LIMIT);
+
       const [watchData, favData, actorData, directorData, watchedData, ratedData] = await Promise.all([
-        Promise.all(watchRows.map(resolveMovieItem)),
-        Promise.all(favRows.map(resolveMovieItem)),
-        Promise.all(actorRows.map(resolveActorItem)),
-        Promise.all(directorRows.map(resolveActorItem)),
-        Promise.all(watchedRows.map(resolveMovieItem)),
-        Promise.all(ratedRows.map(resolveMovieItem)),
+        mapWithConcurrency(limitedWatchRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+        mapWithConcurrency(limitedFavRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+        mapWithConcurrency(limitedActorRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveActorItem(row)),
+        mapWithConcurrency(limitedDirectorRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveActorItem(row)),
+        mapWithConcurrency(limitedWatchedRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+        mapWithConcurrency(limitedRatedRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
       ]);
 
       setWatchlistItems(watchData.filter((item): item is ProfileMovieItem => !!item));
@@ -325,8 +361,9 @@ export default function ProfileScreen() {
       setWatchedItems(watchedData.filter((item): item is ProfileMovieItem => !!item));
       setRatedItems(ratedData.filter((item): item is ProfileMovieItem => !!item));
       setPrivacy(savedPrivacy);
-      const following = await getFollowingProfiles(user.id);
+      const following = await followingPromise;
       setFollowingTaste(following);
+      lastListsLoadAtRef.current = Date.now();
     } catch {
       setWatchlistItems([]);
       setFavoriteItems([]);
@@ -360,32 +397,56 @@ export default function ProfileScreen() {
   );
 
   useEffect(() => {
-    if (!user) return;
+    if (!user || loadingLists) return;
+    const signature = JSON.stringify({
+      user_id: user.id,
+      privacy,
+      watchlist: watchlistItems.map((item) => `${item.tmdbId}:${item.mediaType}`),
+      favorites: favoriteItems.map((item) => `${item.tmdbId}:${item.mediaType}`),
+      watched: watchedItems.map((item) => `${item.tmdbId}:${item.mediaType}`),
+      rated: ratedItems.map((item) => `${item.tmdbId}:${item.rating ?? ''}:${item.mediaType}`),
+      favorite_actors: favoriteActorItems.map((item) => item.personId),
+      favorite_directors: favoriteDirectorItems.map((item) => item.personId),
+    });
+    if (signature === lastSyncedSignatureRef.current) return;
+
+    const payload = {
+      user_id: user.id,
+      nickname: user.nickname,
+      name: user.name,
+      bio: (user as any)?.bio ?? null,
+      avatar_url: (user as any)?.avatar_url ?? null,
+      privacy: {
+        watchlist: privacy.watchlist,
+        favorites: privacy.favorites,
+        watched: privacy.watched,
+        rated: privacy.rated,
+        favorite_actors: true,
+        favorite_directors: true,
+      },
+      watchlist: watchlistItems,
+      favorites: favoriteItems,
+      watched: watchedItems,
+      rated: ratedItems,
+      favorite_actors: favoriteActorItems,
+      favorite_directors: favoriteDirectorItems,
+    };
     const timer = setTimeout(() => {
-      void syncPublicProfile({
-        user_id: user.id,
-        nickname: user.nickname,
-        name: user.name,
-        bio: (user as any)?.bio ?? null,
-        avatar_url: (user as any)?.avatar_url ?? null,
-        privacy: {
-          watchlist: privacy.watchlist,
-          favorites: privacy.favorites,
-          watched: privacy.watched,
-          rated: privacy.rated,
-          favorite_actors: true,
-          favorite_directors: true,
-        },
-        watchlist: watchlistItems,
-        favorites: favoriteItems,
-        watched: watchedItems,
-        rated: ratedItems,
-        favorite_actors: favoriteActorItems,
-        favorite_directors: favoriteDirectorItems,
-      }).catch(() => {});
-    }, 400);
+      lastSyncedSignatureRef.current = signature;
+      void syncPublicProfile(payload).catch(() => {});
+    }, PROFILE_SYNC_DEBOUNCE_MS);
     return () => clearTimeout(timer);
-  }, [favoriteActorItems, favoriteDirectorItems, favoriteItems, privacy.favorites, privacy.rated, privacy.watchlist, privacy.watched, ratedItems, user, watchedItems, watchlistItems]);
+  }, [
+    favoriteActorItems,
+    favoriteDirectorItems,
+    favoriteItems,
+    loadingLists,
+    privacy,
+    ratedItems,
+    user,
+    watchedItems,
+    watchlistItems,
+  ]);
 
   useFocusEffect(
     useCallback(() => {
@@ -393,7 +454,10 @@ export default function ProfileScreen() {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
       runEnterAnimation();
-      void loadLists();
+      const now = Date.now();
+      if (now - lastListsLoadAtRef.current >= 90 * 1000) {
+        void loadLists();
+      }
     }, [loadLists, runEnterAnimation])
   );
 

@@ -372,6 +372,12 @@
           "title": "F1",
           "poster": "https://image.tmdb.org/t/p/w185/vqBmyAj0Xm9LnS1xe1MSlMAJyHq.jpg",
           "mediaType": "movie"
+        },
+        {
+          "tmdbId": 550,
+          "title": "Fight Club",
+          "poster": "https://image.tmdb.org/t/p/w185/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
+          "mediaType": "movie"
         }
       ],
       "watched": [
@@ -391,6 +397,12 @@
           "tmdbId": 911430,
           "title": "F1",
           "poster": "https://image.tmdb.org/t/p/w185/vqBmyAj0Xm9LnS1xe1MSlMAJyHq.jpg",
+          "mediaType": "movie"
+        },
+        {
+          "tmdbId": 550,
+          "title": "Fight Club",
+          "poster": "https://image.tmdb.org/t/p/w185/pB8BM7pdSp6B6Ih7QZ4DrQ3PmJK.jpg",
           "mediaType": "movie"
         }
       ],
@@ -423,7 +435,7 @@
           "profile": "https://image.tmdb.org/t/p/w185/xuAIuYSmsUzKlUMBFGVZaWsY3DZ.jpg"
         }
       ],
-      "updated_at": "2026-02-17T17:29:13.788Z"
+      "updated_at": "2026-02-19T18:27:57.114Z"
     },
     "3": {
       "user_id": 3,
@@ -665,5 +677,27 @@
     "3": [
       2
     ]
-  }
+  },
+  "movieStates": {
+    "1": {
+      "user_id": 1,
+      "privacy": {
+        "watchlist": false,
+        "favorites": false,
+        "watched": false,
+        "rated": false
+      },
+      "watchlist": [],
+      "favorites": [],
+      "watched": [],
+      "ratings": [],
+      "updated_at": "2026-02-20T08:01:33.034Z"
+    }
+  },
+  "galleryIdSeq": 2,
+  "galleryCommentIdSeq": 1,
+  "galleryItems": [],
+  "galleryLikes": [],
+  "galleryFavorites": [],
+  "galleryComments": []
 }

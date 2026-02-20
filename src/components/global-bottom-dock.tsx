@@ -1,11 +1,10 @@
-import React, { useRef, useEffect, useState } from 'react';
-import { Animated, Platform, Pressable, StyleSheet, useColorScheme, Vibration, View } from 'react-native';
+import React, { useEffect, useState } from 'react';
+import { Pressable, StyleSheet, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { usePathname, useRouter } from 'expo-router';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
-import { Colors, Spacing } from '@/constants/theme';
-import { GlassView } from '@/components/glass-view';
+import { Spacing } from '@/constants/theme';
 import { getCinemaEventByStatusNow } from '@/db/cinema';
 
 type DockRoute = {
@@ -20,9 +19,8 @@ const ROUTES: DockRoute[] = [
   { key: 'cinema', href: '/cinema', icon: 'videocam' },
   { key: 'profile', href: '/profile', icon: 'person' },
 ];
-const BTN_SIZE = 42;
-const BTN_GAP = Spacing.two;
-const INDICATOR_WIDTH = 22;
+const BTN_SIZE = 48;
+const BTN_GAP = 8;
 
 function normalizePath(pathname: string) {
   return pathname.endsWith('/') && pathname.length > 1 ? pathname.slice(0, -1) : pathname;
@@ -33,6 +31,7 @@ function shouldHideDock(pathname: string, cinemaHasEvent: boolean) {
     pathname.startsWith('/(auth)') ||
     pathname.startsWith('/login') ||
     pathname.startsWith('/register') ||
+    pathname.startsWith('/movie/') ||
     (pathname.startsWith('/cinema') && cinemaHasEvent) ||
     pathname.startsWith('/onboarding-watched') ||
     pathname.startsWith('/admin')
@@ -43,39 +42,16 @@ function DockButton({
   active,
   icon,
   onPress,
-  activeColor,
 }: {
   active: boolean;
   icon: keyof typeof Ionicons.glyphMap;
   onPress: () => void;
-  activeColor: string;
 }) {
-  const scale = useRef(new Animated.Value(active ? 1 : 0)).current;
-
-  useEffect(() => {
-    Animated.spring(scale, {
-      toValue: active ? 1 : 0,
-      useNativeDriver: true,
-      damping: 14,
-      stiffness: 180,
-    }).start();
-  }, [active, scale]);
-
   return (
-    <Pressable onPress={onPress} style={({ pressed }) => [styles.dockBtn, pressed && styles.pressed]}>
-      <Animated.View
-        style={{
-          transform: [
-            {
-              scale: scale.interpolate({
-                inputRange: [0, 1],
-                outputRange: [0.95, 1.08],
-              }),
-            },
-          ],
-        }}>
-        <Ionicons name={icon} size={20} color={active ? activeColor : '#fff'} />
-      </Animated.View>
+    <Pressable
+      onPress={onPress}
+      style={({ pressed }) => [styles.dockBtn, active ? styles.dockBtnActive : null, pressed && styles.pressed]}>
+      <Ionicons name={icon} size={22} color={active ? '#0E131A' : '#E8EEF7'} />
     </Pressable>
   );
 }
@@ -85,8 +61,6 @@ export function GlobalBottomDock() {
   const pathnameRaw = usePathname() || '/';
   const pathname = normalizePath(pathnameRaw);
   const insets = useSafeAreaInsets();
-  const scheme = useColorScheme();
-  const colors = Colors[scheme === 'dark' ? 'dark' : 'light'];
   const [cinemaHasEvent, setCinemaHasEvent] = useState(false);
 
   useEffect(() => {
@@ -121,63 +95,29 @@ export function GlobalBottomDock() {
         : pathname.startsWith('/profile') || pathname.startsWith('/user') || pathname.startsWith('/profile-edit')
           ? '/profile'
           : '/';
-  const activeIndex = Math.max(
-    0,
-    ROUTES.findIndex((route) => route.href === activeHref)
-  );
-  const indicatorX = useRef(new Animated.Value(activeIndex * (BTN_SIZE + BTN_GAP))).current;
-
-  useEffect(() => {
-    Animated.spring(indicatorX, {
-      toValue: activeIndex * (BTN_SIZE + BTN_GAP),
-      useNativeDriver: true,
-      damping: 18,
-      stiffness: 220,
-    }).start();
-  }, [activeIndex, indicatorX]);
 
   if (hidden) return null;
 
   const onDockPress = (href: DockRoute['href']) => {
-    if (Platform.OS !== 'web') {
-      Vibration.vibrate(8);
-    }
+    if (href === activeHref) return;
     router.push(href);
   };
 
   return (
     <View pointerEvents="box-none" style={styles.host}>
       <View style={[styles.wrap, { bottom: Math.max(insets.bottom, Spacing.two) }]}>
-        <GlassView intensity={30} tint={scheme === 'dark' ? 'dark' : 'light'} style={styles.glass}>
-          <View
-            style={[
-              styles.inner,
-              {
-                borderColor: scheme === 'dark' ? 'rgba(255,255,255,0.1)' : 'rgba(0,0,0,0.08)',
-                backgroundColor: scheme === 'dark' ? 'rgba(20,20,20,0.45)' : 'rgba(255,255,255,0.6)',
-              },
-            ]}>
-            <Animated.View
-              pointerEvents="none"
-              style={[
-                styles.activeIndicator,
-                {
-                  width: INDICATOR_WIDTH,
-                  transform: [{ translateX: indicatorX }],
-                },
-              ]}
-            />
+        <View style={styles.shell}>
+          <View style={styles.inner}>
             {ROUTES.map((route) => (
               <DockButton
                 key={route.key}
                 icon={route.icon}
                 active={activeHref === route.href}
-                activeColor={colors.text}
                 onPress={() => onDockPress(route.href)}
               />
             ))}
           </View>
-        </GlassView>
+        </View>
       </View>
     </View>
   );
@@ -186,6 +126,8 @@ export function GlobalBottomDock() {
 const styles = StyleSheet.create({
   host: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 1200,
+    elevation: 1200,
   },
   wrap: {
     position: 'absolute',
@@ -193,38 +135,37 @@ const styles = StyleSheet.create({
     right: 0,
     paddingHorizontal: Spacing.three,
     alignItems: 'center',
+    zIndex: 1200,
+    elevation: 1200,
   },
-  glass: {
+  shell: {
     borderRadius: 999,
     overflow: 'hidden',
+    backgroundColor: '#0E131A',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   inner: {
-    position: 'relative',
     flexDirection: 'row',
     alignItems: 'center',
-    gap: Spacing.two,
-    paddingHorizontal: Spacing.five,
-    paddingVertical: Spacing.two,
-    borderWidth: 1,
+    gap: BTN_GAP,
+    paddingHorizontal: Spacing.three,
+    paddingVertical: 8,
     borderRadius: 999,
+    backgroundColor: '#0E131A',
   },
   dockBtn: {
     width: BTN_SIZE,
     height: BTN_SIZE,
-    borderRadius: 21,
+    borderRadius: BTN_SIZE / 2,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(255,255,255,0.08)',
+    backgroundColor: '#161E29',
   },
-  activeIndicator: {
-    position: 'absolute',
-    left: Spacing.five + (BTN_SIZE - INDICATOR_WIDTH) / 2,
-    bottom: 4,
-    height: 3,
-    borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.95)',
+  dockBtnActive: {
+    backgroundColor: '#E8EEF7',
   },
   pressed: {
-    opacity: 0.7,
+    opacity: 0.85,
   },
 });

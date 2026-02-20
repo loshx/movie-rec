@@ -138,6 +138,80 @@ const DEFAULT_PRIVACY: UserListPrivacy = {
   rated: false,
 };
 
+type RemoteMovieListEntry = {
+  tmdb_id: number;
+  media_type?: 'movie' | 'tv' | string;
+  created_at?: string;
+};
+
+type RemoteMovieRatingEntry = RemoteMovieListEntry & {
+  rating: number;
+  updated_at?: string;
+};
+
+type RemoteMovieStatePayload = {
+  state?: {
+    privacy?: UserListPrivacy;
+    watchlist?: RemoteMovieListEntry[];
+    favorites?: RemoteMovieListEntry[];
+    watched?: RemoteMovieListEntry[];
+    ratings?: RemoteMovieRatingEntry[];
+  };
+  item_state?: {
+    in_watchlist?: boolean;
+    in_favorites?: boolean;
+    watched?: boolean;
+    rating?: number | null;
+  };
+};
+
+function normalizeMediaType(value: unknown): 'movie' | 'tv' {
+  return String(value ?? '').toLowerCase() === 'tv' ? 'tv' : 'movie';
+}
+
+function normalizePrivacy(value: Partial<UserListPrivacy> | undefined | null): UserListPrivacy {
+  return {
+    watchlist: !!value?.watchlist,
+    favorites: !!value?.favorites,
+    watched: !!value?.watched,
+    rated: !!value?.rated,
+  };
+}
+
+function mapRemoteList(rows: RemoteMovieListEntry[] | undefined): UserListItem[] {
+  return (rows ?? []).map((row) => ({
+    tmdbId: Number(row.tmdb_id),
+    createdAt: String(row.created_at ?? nowIso()),
+    mediaType: normalizeMediaType(row.media_type),
+  }));
+}
+
+function mapRemoteRatings(rows: RemoteMovieRatingEntry[] | undefined): UserListItem[] {
+  return (rows ?? []).map((row) => ({
+    tmdbId: Number(row.tmdb_id),
+    rating: Number(row.rating),
+    createdAt: String(row.updated_at ?? row.created_at ?? nowIso()),
+    mediaType: normalizeMediaType(row.media_type),
+  }));
+}
+
+async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+  if (!hasBackendApi()) return null;
+  const url = getBackendApiUrl(path);
+  if (!url) return null;
+  try {
+    const headers: Record<string, string> = {
+      'Content-Type': 'application/json',
+      ...(init?.headers as Record<string, string> | undefined),
+    };
+    const res = await fetch(url, { ...init, headers });
+    if (!res.ok) return null;
+    return (await res.json()) as T;
+  } catch {
+    return null;
+  }
+}
+
 function parseCompositeKey(key: string) {
   const [user, tmdb] = key.split(':');
   const userId = Number(user);
@@ -147,6 +221,21 @@ function parseCompositeKey(key: string) {
 }
 
 export async function getMovieState(userId: number, tmdbId: number): Promise<MovieState> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(
+    `/api/users/${userId}/movie-state?tmdb_id=${encodeURIComponent(String(tmdbId))}`
+  );
+  if (remote?.item_state) {
+    return {
+      inWatchlist: !!remote.item_state.in_watchlist,
+      inFavorites: !!remote.item_state.in_favorites,
+      watched: !!remote.item_state.watched,
+      rating:
+        typeof remote.item_state.rating === 'number' && Number.isFinite(remote.item_state.rating)
+          ? remote.item_state.rating
+          : null,
+    };
+  }
+
   const key = `${userId}:${tmdbId}`;
   const watch = !!state.watchlist[key];
   const fav = !!state.favorites[key];
@@ -156,15 +245,33 @@ export async function getMovieState(userId: number, tmdbId: number): Promise<Mov
 }
 
 export async function getUserListPrivacy(userId: number): Promise<UserListPrivacy> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  if (remote?.state?.privacy) {
+    return normalizePrivacy(remote.state.privacy);
+  }
   return state.privacy[String(userId)] ?? { ...DEFAULT_PRIVACY };
 }
 
 export async function setUserListPrivacy(userId: number, privacy: UserListPrivacy) {
+  const remote = await requestBackendJson<{ privacy?: UserListPrivacy }>(
+    `/api/users/${userId}/movie-state/privacy`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ privacy }),
+    }
+  );
+  if (remote?.privacy) return;
+
   state.privacy[String(userId)] = { ...privacy };
   saveState(state);
 }
 
 export async function getUserWatchlist(userId: number): Promise<UserListItem[]> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  if (remote?.state?.watchlist) {
+    return mapRemoteList(remote.state.watchlist);
+  }
+
   return Object.entries(state.watchlist)
     .filter(([, inList]) => !!inList)
     .map(([key]) => parseCompositeKey(key))
@@ -177,6 +284,11 @@ export async function getUserWatchlist(userId: number): Promise<UserListItem[]> 
 }
 
 export async function getUserFavorites(userId: number): Promise<UserListItem[]> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  if (remote?.state?.favorites) {
+    return mapRemoteList(remote.state.favorites);
+  }
+
   return Object.entries(state.favorites)
     .filter(([, inList]) => !!inList)
     .map(([key]) => parseCompositeKey(key))
@@ -189,6 +301,11 @@ export async function getUserFavorites(userId: number): Promise<UserListItem[]> 
 }
 
 export async function getUserRatings(userId: number): Promise<UserListItem[]> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  if (remote?.state?.ratings) {
+    return mapRemoteRatings(remote.state.ratings);
+  }
+
   const items: UserListItem[] = [];
   for (const [key, rating] of Object.entries(state.ratings)) {
     const parsed = parseCompositeKey(key);
@@ -204,6 +321,11 @@ export async function getUserRatings(userId: number): Promise<UserListItem[]> {
 }
 
 export async function getUserWatched(userId: number): Promise<UserListItem[]> {
+  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  if (remote?.state?.watched) {
+    return mapRemoteList(remote.state.watched);
+  }
+
   return Object.entries(state.watched)
     .filter(([, inList]) => !!inList)
     .map(([key]) => parseCompositeKey(key))
@@ -262,6 +384,28 @@ export async function toggleFavoriteDirector(userId: number, personId: number) {
 }
 
 export async function toggleWatchlist(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({
+      list: 'watchlist',
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+    }),
+  });
+  if (typeof remote?.active === 'boolean') {
+    if (remote.active) {
+      void ingestMlInteraction({
+        user_id: userId,
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        event_type: 'watchlist',
+        event_value: 1,
+        occurred_at: nowIso(),
+      }).catch(() => {});
+    }
+    return remote.active;
+  }
+
   const key = `${userId}:${tmdbId}`;
   state.watchlist[key] = !state.watchlist[key];
   if (state.watchlist[key]) state.watchlistMediaType[key] = mediaType;
@@ -281,6 +425,28 @@ export async function toggleWatchlist(userId: number, tmdbId: number, mediaType:
 }
 
 export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({
+      list: 'favorites',
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+    }),
+  });
+  if (typeof remote?.active === 'boolean') {
+    if (remote.active) {
+      void ingestMlInteraction({
+        user_id: userId,
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        event_type: 'favorite',
+        event_value: 1,
+        occurred_at: nowIso(),
+      }).catch(() => {});
+    }
+    return remote.active;
+  }
+
   const key = `${userId}:${tmdbId}`;
   state.favorites[key] = !state.favorites[key];
   if (state.favorites[key]) state.favoritesMediaType[key] = mediaType;
@@ -300,6 +466,28 @@ export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 
 }
 
 export async function toggleWatched(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({
+      list: 'watched',
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+    }),
+  });
+  if (typeof remote?.active === 'boolean') {
+    if (remote.active) {
+      void ingestMlInteraction({
+        user_id: userId,
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        event_type: 'watched',
+        event_value: 1,
+        occurred_at: nowIso(),
+      }).catch(() => {});
+    }
+    return remote.active;
+  }
+
   const key = `${userId}:${tmdbId}`;
   state.watched[key] = !state.watched[key];
   if (state.watched[key]) state.watchedMediaType[key] = mediaType;
@@ -324,6 +512,28 @@ export async function setWatched(
   watched: boolean,
   mediaType: 'movie' | 'tv' = 'movie'
 ) {
+  const remote = await requestBackendJson<{ watched?: boolean }>(`/api/users/${userId}/movie-state/watched`, {
+    method: 'POST',
+    body: JSON.stringify({
+      tmdb_id: tmdbId,
+      watched,
+      media_type: mediaType,
+    }),
+  });
+  if (typeof remote?.watched === 'boolean') {
+    if (remote.watched) {
+      void ingestMlInteraction({
+        user_id: userId,
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+        event_type: 'watched',
+        event_value: 1,
+        occurred_at: nowIso(),
+      }).catch(() => {});
+    }
+    return remote.watched;
+  }
+
   const key = `${userId}:${tmdbId}`;
   state.watched[key] = watched;
   if (watched) state.watchedMediaType[key] = mediaType;
@@ -348,6 +558,26 @@ export async function setRating(
   rating: number,
   mediaType: 'movie' | 'tv' = 'movie'
 ) {
+  const remote = await requestBackendJson<{ ok?: boolean }>(`/api/users/${userId}/movie-state/rating`, {
+    method: 'POST',
+    body: JSON.stringify({
+      tmdb_id: tmdbId,
+      rating,
+      media_type: mediaType,
+    }),
+  });
+  if (remote?.ok) {
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'rating',
+      event_value: rating,
+      occurred_at: nowIso(),
+    }).catch(() => {});
+    return;
+  }
+
   const key = `${userId}:${tmdbId}`;
   state.ratings[key] = rating;
   state.ratingsMediaType[key] = mediaType;

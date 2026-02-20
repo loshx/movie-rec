@@ -2,7 +2,8 @@ import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react'
 import {
   ActivityIndicator,
   Dimensions,
-  KeyboardAvoidingView,
+  FlatList,
+  Keyboard,
   Linking,
   Modal,
   Platform,
@@ -11,7 +12,6 @@ import {
   StyleSheet,
   Text,
   TextInput,
-  Vibration,
   View,
 } from 'react-native';
 import { Image } from 'expo-image';
@@ -20,17 +20,17 @@ import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import Animated, {
+  cancelAnimation,
   runOnJS,
   useAnimatedStyle,
   useSharedValue,
+  withRepeat,
   withSequence,
-  withSpring,
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import ImageColors from 'react-native-image-colors';
 
-import { GlassView } from '@/components/glass-view';
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import {
@@ -47,12 +47,14 @@ import {
   backdropUrl,
   getMovieById,
   getMovieCredits,
+  getMovieRecommendations,
   getMovieWatchProviders,
   getMovieVideos,
   getSimilarMovies,
   getSimilarTv,
   getTvById,
   getTvCredits,
+  getTvRecommendations,
   getTvWatchProviders,
   getTvVideos,
   Movie,
@@ -93,49 +95,6 @@ function formatCommentTime(value?: string | null) {
   });
 }
 
-type DockActionButtonProps = {
-  icon: React.ComponentProps<typeof Ionicons>['name'];
-  label: string;
-  active?: boolean;
-  activeColor?: string;
-  onPress: () => void | Promise<void>;
-};
-
-function DockActionButton({
-  icon,
-  label,
-  active = false,
-  activeColor = '#fff',
-  onPress,
-}: DockActionButtonProps) {
-  const pressed = useSharedValue(0);
-  const animatedStyle = useAnimatedStyle(() => ({
-    transform: [{ scale: 1 - pressed.value * 0.08 }, { translateY: -pressed.value * 2 }],
-    opacity: 1 - pressed.value * 0.06,
-  }));
-
-  return (
-    <Animated.View style={animatedStyle}>
-      <Pressable
-        onPress={onPress}
-        onPressIn={() => {
-          pressed.value = withSpring(1, { damping: 16, stiffness: 260 });
-        }}
-        onPressOut={() => {
-          pressed.value = withSpring(0, { damping: 18, stiffness: 220 });
-        }}
-        style={[styles.dockBtn, active && styles.dockBtnActive]}>
-        <Ionicons
-          name={icon}
-          size={18}
-          color={active ? activeColor : '#fff'}
-        />
-        <Text style={styles.dockBtnLabel}>{label}</Text>
-      </Pressable>
-    </Animated.View>
-  );
-}
-
 export default function MovieDetailScreen() {
   const theme = useTheme();
   const { user } = useAuth();
@@ -163,18 +122,19 @@ export default function MovieDetailScreen() {
   const [comments, setComments] = useState<MovieComment[]>([]);
   const [commentText, setCommentText] = useState('');
   const [replyTo, setReplyTo] = useState<MovieComment | null>(null);
+  const [trailerOpen, setTrailerOpen] = useState(false);
   const [aboutOpen, setAboutOpen] = useState(false);
   const [commentsOpen, setCommentsOpen] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const sheetY = useSharedValue(0);
   const sheetStart = useSharedValue(0);
+  const promptDragging = useSharedValue(0);
+  const promptArrowY = useSharedValue(0);
   const watchModalOpacity = useSharedValue(0);
   const watchModalScale = useSharedValue(0.92);
-  const watchButtonShakeX = useSharedValue(0);
   const watchToastOpacity = useSharedValue(0);
   const watchToastTranslateY = useSharedValue(14);
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-  const sheetPeek = 72;
-  const sheetClosedY = screenHeight - sheetPeek;
   const heroHeight = Math.round(Math.min(screenHeight * 0.7, screenWidth * 1.5));
 
   const accent = useMemo(() => {
@@ -185,6 +145,7 @@ export default function MovieDetailScreen() {
   const [accentColor, setAccentColor] = useState(accent);
   const watchToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
+  const nearBottomArmedRef = useRef(false);
 
   const heroGradientColors = useMemo<readonly [string, string, string, string]>(() => {
     if (theme.mode === 'light') {
@@ -218,10 +179,14 @@ export default function MovieDetailScreen() {
   }, [mediaType, tmdbId]);
 
   useEffect(() => {
+    setTrailerOpen(false);
+  }, [mediaType, tmdbId]);
+
+  useEffect(() => {
     if (!movie) return;
     if (Platform.OS === 'web') return;
     const imageForColor =
-      posterUrl(movie.poster_path, 'w342') ||
+      posterUrl(movie.poster_path, 'w185') ||
       backdropUrl(movie.backdrop_path, 'w780');
     if (!imageForColor) return;
     let canceled = false;
@@ -257,8 +222,9 @@ export default function MovieDetailScreen() {
     let mounted = true;
     (async () => {
       try {
-        const [videosRes, similarRes, creditsRes, providersRes] = await Promise.all([
+        const [videosRes, recommendationRes, similarFallbackRes, creditsRes, providersRes] = await Promise.all([
           mediaType === 'tv' ? getTvVideos(tmdbId) : getMovieVideos(tmdbId),
+          mediaType === 'tv' ? getTvRecommendations(tmdbId, 1) : getMovieRecommendations(tmdbId, 1),
           mediaType === 'tv' ? getSimilarTv(tmdbId, 1) : getSimilarMovies(tmdbId, 1),
           mediaType === 'tv' ? getTvCredits(tmdbId) : getMovieCredits(tmdbId),
           mediaType === 'tv' ? getTvWatchProviders(tmdbId) : getMovieWatchProviders(tmdbId),
@@ -271,12 +237,15 @@ export default function MovieDetailScreen() {
           videos.find((v) => v.site === 'YouTube' && v.type === 'Trailer') ??
           videos.find((v) => v.site === 'YouTube');
         setTrailer(best ?? null);
-        setSimilar((similarRes.results ?? []).filter((item) => !!item.poster_path).slice(0, 12));
+        const recommendationItems = (recommendationRes.results ?? []).filter((item) => !!item.poster_path);
+        const fallbackItems = (similarFallbackRes.results ?? []).filter((item) => !!item.poster_path);
+        const similarItems = recommendationItems.length > 0 ? recommendationItems : fallbackItems;
+        setSimilar(similarItems.slice(0, 10));
         setCast(
           (creditsRes.cast ?? [])
             .filter((person) => !!person.profile_path)
             .sort((a, b) => (a.order ?? 999) - (b.order ?? 999))
-            .slice(0, 18)
+            .slice(0, 12)
         );
         const chosenDirector =
           (creditsRes.crew ?? []).find((person) => person.job === 'Director' && !!person.profile_path) ??
@@ -350,8 +319,26 @@ export default function MovieDetailScreen() {
   }, [refreshComments, refreshState, user]);
 
   useEffect(() => {
-    sheetY.value = sheetClosedY;
-  }, [sheetClosedY, sheetY]);
+    if (!commentsOpen) {
+      sheetY.value = screenHeight;
+    }
+  }, [commentsOpen, screenHeight, sheetY]);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
 
   useFocusEffect(
     useCallback(() => {
@@ -371,18 +358,94 @@ export default function MovieDetailScreen() {
     opacity: watchModalOpacity.value,
     transform: [{ scale: watchModalScale.value }],
   }));
-  const watchButtonShakeStyle = useAnimatedStyle(() => ({
-    transform: [{ translateX: watchButtonShakeX.value }],
-  }));
   const watchToastAnimatedStyle = useAnimatedStyle(() => ({
     opacity: watchToastOpacity.value,
     transform: [{ translateY: watchToastTranslateY.value }],
   }));
+  const promptArrowStyle = useAnimatedStyle(() => ({
+    transform: [{ translateY: promptArrowY.value }],
+  }));
+
+  useEffect(() => {
+    if (commentsOpen) {
+      cancelAnimation(promptArrowY);
+      promptArrowY.value = 0;
+      return;
+    }
+    promptArrowY.value = withRepeat(
+      withSequence(
+        withTiming(-8, { duration: 520 }),
+        withTiming(0, { duration: 520 })
+      ),
+      -1,
+      false
+    );
+    return () => {
+      cancelAnimation(promptArrowY);
+      promptArrowY.value = 0;
+    };
+  }, [commentsOpen, promptArrowY]);
+
+  const closeCommentsSheet = useCallback(() => {
+    Keyboard.dismiss();
+    nearBottomArmedRef.current = false;
+    sheetY.value = withTiming(screenHeight, { duration: 220 }, (finished) => {
+      if (finished) {
+        runOnJS(setCommentsOpen)(false);
+      }
+    });
+  }, [screenHeight, sheetY]);
+
+  const dismissKeyboard = useCallback(() => {
+    Keyboard.dismiss();
+  }, []);
 
   const openCommentsSheet = useCallback(() => {
+    if (commentsOpen) return;
+    nearBottomArmedRef.current = false;
     setCommentsOpen(true);
-    sheetY.value = withSpring(0, { damping: 18, stiffness: 160 });
-  }, [sheetY]);
+    sheetY.value = screenHeight;
+    requestAnimationFrame(() => {
+      sheetY.value = withTiming(0, { duration: 230 });
+    });
+  }, [commentsOpen, screenHeight, sheetY]);
+
+  const commentsPromptGesture = useMemo(
+    () =>
+      Gesture.Pan()
+        .onStart(() => {
+          sheetStart.value = screenHeight;
+          promptDragging.value = 0;
+        })
+        .onUpdate((event) => {
+          if (event.translationY > -2) return;
+          if (!promptDragging.value) {
+            promptDragging.value = 1;
+            sheetY.value = screenHeight;
+            runOnJS(setCommentsOpen)(true);
+          }
+          const next = Math.max(0, Math.min(screenHeight, sheetStart.value + event.translationY));
+          sheetY.value = next;
+        })
+        .onEnd((event) => {
+          if (!promptDragging.value) return;
+          promptDragging.value = 0;
+          const shouldOpen =
+            sheetY.value < screenHeight * 0.78 ||
+            event.translationY < -86 ||
+            event.velocityY < -780;
+          if (shouldOpen) {
+            sheetY.value = withTiming(0, { duration: 220 });
+            return;
+          }
+          sheetY.value = withTiming(screenHeight, { duration: 190 }, (finished) => {
+            if (finished) {
+              runOnJS(setCommentsOpen)(false);
+            }
+          });
+        }),
+    [promptDragging, screenHeight, sheetStart, sheetY]
+  );
 
   useEffect(() => {
     if (showWatchProviders) {
@@ -395,21 +458,13 @@ export default function MovieDetailScreen() {
   }, [showWatchProviders, watchModalOpacity, watchModalScale]);
 
   const triggerWatchUnavailableFeedback = useCallback(() => {
-    watchButtonShakeX.value = withSequence(
-      withTiming(-9, { duration: 45 }),
-      withTiming(9, { duration: 70 }),
-      withTiming(-7, { duration: 60 }),
-      withTiming(6, { duration: 55 }),
-      withTiming(0, { duration: 45 })
-    );
-    Vibration.vibrate(14);
     setWatchToastVisible(true);
     if (watchToastTimerRef.current) clearTimeout(watchToastTimerRef.current);
     watchToastTimerRef.current = setTimeout(() => {
       setWatchToastVisible(false);
       watchToastTimerRef.current = null;
     }, 2100);
-  }, [watchButtonShakeX]);
+  }, []);
 
   useEffect(() => {
     watchToastOpacity.value = withTiming(watchToastVisible ? 1 : 0, { duration: 180 });
@@ -430,6 +485,62 @@ export default function MovieDetailScreen() {
     router.replace('/');
   }, []);
 
+  const tryOpenCommentsFromBottom = useCallback(
+    (event: {
+      nativeEvent: {
+        contentOffset: { y: number };
+        layoutMeasurement: { height: number };
+        contentSize: { height: number };
+      };
+    }) => {
+      if (commentsOpen) return;
+      const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
+      const nearBottom = contentOffset.y + layoutMeasurement.height >= contentSize.height - 18;
+      if (nearBottom) {
+        if (nearBottomArmedRef.current) {
+          openCommentsSheet();
+          nearBottomArmedRef.current = false;
+          return;
+        }
+        nearBottomArmedRef.current = true;
+        return;
+      }
+      nearBottomArmedRef.current = false;
+    },
+    [commentsOpen, openCommentsSheet]
+  );
+
+  const rootComments = useMemo(
+    () =>
+      comments
+        .filter((c) => !c.parent_id)
+        .sort(
+          (a, b) =>
+            new Date(String(b.created_at ?? '')).getTime() -
+            new Date(String(a.created_at ?? '')).getTime()
+        ),
+    [comments]
+  );
+  const repliesByParent = useMemo(
+    () => {
+      const grouped = comments.reduce<Record<number, MovieComment[]>>((acc, c) => {
+        if (!c.parent_id) return acc;
+        acc[c.parent_id] = acc[c.parent_id] ?? [];
+        acc[c.parent_id].push(c);
+        return acc;
+      }, {});
+      Object.values(grouped).forEach((list) => {
+        list.sort(
+          (a, b) =>
+            new Date(String(b.created_at ?? '')).getTime() -
+            new Date(String(a.created_at ?? '')).getTime()
+        );
+      });
+      return grouped;
+    },
+    [comments]
+  );
+
   if (loading || !movie) {
     return (
       <View style={[styles.loader, { backgroundColor: theme.background }]}>
@@ -440,10 +551,12 @@ export default function MovieDetailScreen() {
 
   const onSendComment = async () => {
     if (!user) return;
+    const nextComment = commentText.trim();
+    if (!nextComment) return;
     await addComment(
       user.id,
       tmdbId,
-      commentText,
+      nextComment,
       replyTo?.id ?? null,
       user.nickname,
       normalizeCommentAvatarUri((user as any)?.avatar_url ?? null)
@@ -453,26 +566,6 @@ export default function MovieDetailScreen() {
     refreshComments();
   };
   const trailerUrl = trailer?.key ? `https://www.youtube.com/watch?v=${trailer.key}` : null;
-
-  const rootComments = comments
-    .filter((c) => !c.parent_id)
-    .sort(
-      (a, b) =>
-        new Date(String(b.created_at ?? '')).getTime() -
-        new Date(String(a.created_at ?? '')).getTime()
-    );
-  const repliesByParent = comments.reduce<Record<number, MovieComment[]>>((acc, c) => {
-    if (c.parent_id) {
-      acc[c.parent_id] = acc[c.parent_id] ?? [];
-      acc[c.parent_id].push(c);
-      acc[c.parent_id].sort(
-        (a, b) =>
-          new Date(String(b.created_at ?? '')).getTime() -
-          new Date(String(a.created_at ?? '')).getTime()
-      );
-    }
-    return acc;
-  }, {});
 
   const titleText = movie ? ('title' in movie ? movie.title : movie.name) : '';
   const overviewText = movie?.overview ?? '';
@@ -490,57 +583,28 @@ export default function MovieDetailScreen() {
     undefined;
   const hasHeroImage = !!heroImageUri;
   const hasVoteAverage = (movie.vote_average ?? 0) > 0;
-  const watchBgUri =
-    posterUrl(movie?.poster_path, 'w342') ??
-    backdropUrl(movie?.backdrop_path, 'w780') ??
-    undefined;
   const isWeb = Platform.OS === 'web';
-  const watchBorderColor = isWeb ? 'rgba(255,255,255,0.34)' : accentColor;
-  const watchGlowColors: readonly [string, string, string, string] = isWeb
-    ? [
-        'rgba(255,255,255,0.18)',
-        'rgba(255,255,255,0.10)',
-        'rgba(255,255,255,0.05)',
-        'rgba(255,255,255,0.02)',
-      ]
-    : [
-        `${accentColor}F2`,
-        `${accentColor}A8`,
-        `${accentColor}52`,
-        'rgba(255,255,255,0.08)',
-      ];
   const activeActionColor = isWeb ? '#E5E7EB' : accentColor;
   const floatingBackTop = Math.max(insets.top + 8, 16);
+  const commentsKeyboardOffset = Math.max(0, keyboardHeight - insets.bottom);
+  const commentsComposerBottom = Math.max(insets.bottom + 10, 14);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
-      <KeyboardAvoidingView behavior={Platform.OS === 'ios' ? 'padding' : undefined} style={styles.flex}>
+      <View style={styles.flex}>
         <Pressable onPress={handleBackPress} style={[styles.floatingBackBtn, { top: floatingBackTop }]}>
           <Ionicons name="chevron-back" size={20} color="#fff" />
         </Pressable>
         <ScrollView
           ref={scrollRef}
           showsVerticalScrollIndicator={false}
-          contentContainerStyle={styles.scroll}
+          contentContainerStyle={[
+            styles.scroll,
+            { paddingBottom: Math.max(insets.bottom + 4, 8) },
+          ]}
           scrollEnabled={!commentsOpen}
-          onScrollEndDrag={(event) => {
-            if (commentsOpen) return;
-            const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-            const nearBottom =
-              contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
-            if (nearBottom) {
-              openCommentsSheet();
-            }
-          }}
-          onMomentumScrollEnd={(event) => {
-            if (commentsOpen) return;
-            const { contentOffset, layoutMeasurement, contentSize } = event.nativeEvent;
-            const nearBottom =
-              contentOffset.y + layoutMeasurement.height >= contentSize.height - 24;
-            if (nearBottom) {
-              openCommentsSheet();
-            }
-          }}>
+          onScrollEndDrag={tryOpenCommentsFromBottom}
+          onMomentumScrollEnd={tryOpenCommentsFromBottom}>
           {hasHeroImage ? (
             <View style={[styles.hero, { backgroundColor: theme.background, height: heroHeight }]}>
               <Image
@@ -548,6 +612,8 @@ export default function MovieDetailScreen() {
                 style={styles.heroImage}
                 contentFit="cover"
                 contentPosition="top"
+                transition={120}
+                cachePolicy="memory-disk"
               />
               <LinearGradient
                 colors={heroGradientColors}
@@ -581,93 +647,66 @@ export default function MovieDetailScreen() {
           ) : null}
 
           <View style={styles.actionsRow}>
-            <Animated.View style={watchButtonShakeStyle}>
+            <Pressable
+              style={styles.watchBtn}
+              onPress={() => {
+                if (watchProviders.length > 0) {
+                  setShowWatchProviders((prev) => !prev);
+                  return;
+                }
+                if (watchProvidersLink) {
+                  Linking.openURL(watchProvidersLink).catch(() => {});
+                  return;
+                }
+                triggerWatchUnavailableFeedback();
+              }}>
+              <Ionicons name="play-circle-outline" size={20} color="#fff" />
+              <Text style={styles.watchText}>Watch</Text>
+            </Pressable>
+            <View style={styles.quickActionsRow}>
               <Pressable
-                style={[styles.watchBtn, { borderColor: watchBorderColor }]}
-                onPress={() => {
-                  if (watchProviders.length > 0) {
-                    setShowWatchProviders((prev) => !prev);
-                    return;
-                  }
-                  if (watchProvidersLink) {
-                    Linking.openURL(watchProvidersLink).catch(() => {});
-                    return;
-                  }
-                  triggerWatchUnavailableFeedback();
+                style={[styles.quickActionBtn, state.inWatchlist && styles.quickActionBtnActive]}
+                onPress={async () => {
+                  if (!user) return;
+                  await toggleWatchlist(user.id, tmdbId, mediaType);
+                  refreshState();
                 }}>
-                {watchBgUri ? (
-                  <Image
-                    source={{ uri: watchBgUri }}
-                    style={styles.watchBgImage}
-                    contentFit="cover"
-                    blurRadius={18}
-                  />
-                ) : null}
-                <LinearGradient
-                  colors={['rgba(0,0,0,0.08)', 'rgba(0,0,0,0.48)']}
-                  style={styles.watchBgTint}
+                <Ionicons
+                  name={state.inWatchlist ? 'bookmark' : 'bookmark-outline'}
+                  size={16}
+                  color={state.inWatchlist ? activeActionColor : '#fff'}
                 />
-                <LinearGradient colors={watchGlowColors} style={styles.watchGlow} />
-                <LinearGradient
-                  colors={[
-                    'rgba(255,255,255,0.42)',
-                    'rgba(255,255,255,0.10)',
-                    'rgba(255,255,255,0)',
-                  ]}
-                  start={{ x: 0.5, y: 0 }}
-                  end={{ x: 0.5, y: 1 }}
-                  style={styles.watchHighlight}
-                />
-                <GlassView
-                  intensity={52}
-                  tint={theme.mode === 'light' ? 'light' : 'dark'}
-                  style={styles.watchGlass}>
-                  <Text style={styles.watchText}>WATCH</Text>
-                </GlassView>
+                <Text style={styles.quickActionText}>Watchlist</Text>
               </Pressable>
-            </Animated.View>
-            <GlassView intensity={40} tint={theme.mode === 'light' ? 'light' : 'dark'} style={styles.quickDock}>
-              <View style={styles.quickDockRow}>
-                <DockActionButton
-                  icon={state.inWatchlist ? 'time' : 'time-outline'}
-                  label="Watchlist"
-                  active={state.inWatchlist}
-                  activeColor={activeActionColor}
-                  onPress={async () => {
-                    if (!user) return;
-                    await toggleWatchlist(user.id, tmdbId, mediaType);
-                    refreshState();
-                  }}
+              <Pressable
+                style={[styles.quickActionBtn, state.inFavorites && styles.quickActionBtnActive]}
+                onPress={async () => {
+                  if (!user) return;
+                  await toggleFavorite(user.id, tmdbId, mediaType);
+                  refreshState();
+                }}>
+                <Ionicons
+                  name={state.inFavorites ? 'heart' : 'heart-outline'}
+                  size={16}
+                  color={state.inFavorites ? '#EF4444' : '#fff'}
                 />
-                <DockActionButton
-                  icon={state.inFavorites ? 'heart' : 'heart-outline'}
-                  label="Like"
-                  active={state.inFavorites}
-                  activeColor="#EF4444"
-                  onPress={async () => {
-                    if (!user) return;
-                    await toggleFavorite(user.id, tmdbId, mediaType);
-                    refreshState();
-                  }}
+                <Text style={styles.quickActionText}>Favorite</Text>
+              </Pressable>
+              <Pressable
+                style={[styles.quickActionBtn, state.watched && styles.quickActionBtnActive]}
+                onPress={async () => {
+                  if (!user) return;
+                  await toggleWatched(user.id, tmdbId, mediaType);
+                  refreshState();
+                }}>
+                <Ionicons
+                  name={state.watched ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                  size={16}
+                  color={state.watched ? '#22C55E' : '#fff'}
                 />
-                <DockActionButton
-                  icon={state.watched ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                  label={state.watched ? 'Watched' : 'Seen'}
-                  active={state.watched}
-                  activeColor="#22C55E"
-                  onPress={async () => {
-                    if (!user) return;
-                    await toggleWatched(user.id, tmdbId, mediaType);
-                    refreshState();
-                  }}
-                />
-                <DockActionButton
-                  icon="chatbubble-ellipses-outline"
-                  label="Comments"
-                  onPress={openCommentsSheet}
-                />
-              </View>
-            </GlassView>
+                <Text style={styles.quickActionText}>Watched</Text>
+              </Pressable>
+            </View>
           </View>
 
           <View style={styles.starsRow}>
@@ -695,14 +734,23 @@ export default function MovieDetailScreen() {
           <View style={styles.extraSection}>
             <Text style={styles.sectionLabel}>TRAILER</Text>
             {trailer && trailer.site === 'YouTube' && Platform.OS !== 'web' ? (
-              <View style={styles.trailerPlayerWrap}>
-                <YoutubePlayer
-                  height={208}
-                  play={false}
-                  videoId={trailer.key}
-                  initialPlayerParams={{ modestbranding: true }}
-                />
-              </View>
+              trailerOpen ? (
+                <View style={styles.trailerPlayerWrap}>
+                  <YoutubePlayer
+                    height={208}
+                    play={false}
+                    videoId={trailer.key}
+                    initialPlayerParams={{ modestbranding: true }}
+                  />
+                </View>
+              ) : (
+                <Pressable style={styles.trailerBtn} onPress={() => setTrailerOpen(true)}>
+                  <Ionicons name="play-circle" size={17} color="#fff" />
+                  <Text style={styles.trailerText} numberOfLines={1}>
+                    Play trailer
+                  </Text>
+                </Pressable>
+              )
             ) : trailerUrl ? (
               <Pressable style={styles.trailerBtn} onPress={() => Linking.openURL(trailerUrl)}>
                 <Ionicons name="logo-youtube" size={16} color="#fff" />
@@ -718,10 +766,18 @@ export default function MovieDetailScreen() {
           <View style={styles.extraSection}>
             <Text style={styles.sectionLabel}>SIMILAR MOVIES</Text>
             {similar.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.similarRow}>
-                {similar.map((item, idx) => (
+              <FlatList
+                horizontal
+                data={similar}
+                keyExtractor={(item) => String(item.id)}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.similarRow}
+                initialNumToRender={6}
+                maxToRenderPerBatch={6}
+                windowSize={4}
+                removeClippedSubviews
+                renderItem={({ item }) => (
                   <Pressable
-                    key={`${item.id}-${idx}`}
                     style={styles.similarCard}
                     onPress={() =>
                       router.push({
@@ -733,15 +789,17 @@ export default function MovieDetailScreen() {
                       source={{ uri: posterUrl(item.poster_path, 'w342') ?? undefined }}
                       style={styles.similarPoster}
                       contentFit="cover"
+                      transition={120}
+                      cachePolicy="memory-disk"
                     />
-                    <GlassView intensity={28} tint="dark" style={styles.similarGlass}>
+                    <View style={styles.similarGlass}>
                       <Text style={styles.similarTitle} numberOfLines={1}>
                         {'title' in item ? item.title : item.name}
                       </Text>
-                    </GlassView>
+                    </View>
                   </Pressable>
-                ))}
-              </ScrollView>
+                )}
+              />
             ) : (
               <Text style={styles.emptyText}>No recommendations right now.</Text>
             )}
@@ -753,15 +811,21 @@ export default function MovieDetailScreen() {
               <Pressable
                 style={styles.castCard}
                 onPress={() => router.push({ pathname: '/person/[id]', params: { id: String(director.id), role: 'director' } })}>
-                <Image source={{ uri: posterUrl(director.profile_path, 'w342') ?? undefined }} style={styles.castImage} contentFit="cover" />
-                <GlassView intensity={28} tint="dark" style={styles.castGlass}>
+                <Image
+                  source={{ uri: posterUrl(director.profile_path, 'w342') ?? undefined }}
+                  style={styles.castImage}
+                  contentFit="cover"
+                  transition={120}
+                  cachePolicy="memory-disk"
+                />
+                <View style={styles.castGlass}>
                   <Text style={styles.castName} numberOfLines={1}>
                     {director.name}
                   </Text>
                   <Text style={styles.castRole} numberOfLines={1}>
                     Director
                   </Text>
-                </GlassView>
+                </View>
               </Pressable>
             ) : (
               <Text style={styles.emptyText}>Director unavailable.</Text>
@@ -771,10 +835,18 @@ export default function MovieDetailScreen() {
           <View style={styles.extraSection}>
             <Text style={styles.sectionLabel}>ACTORS</Text>
             {cast.length > 0 ? (
-              <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.castRow}>
-                {cast.map((person) => (
+              <FlatList
+                horizontal
+                data={cast}
+                keyExtractor={(person) => String(person.id)}
+                showsHorizontalScrollIndicator={false}
+                contentContainerStyle={styles.castRow}
+                initialNumToRender={6}
+                maxToRenderPerBatch={6}
+                windowSize={4}
+                removeClippedSubviews
+                renderItem={({ item: person }) => (
                   <Pressable
-                    key={person.id}
                     style={styles.castCard}
                     onPress={() =>
                       router.push({ pathname: '/person/[id]', params: { id: String(person.id), role: 'actor' } })
@@ -783,8 +855,10 @@ export default function MovieDetailScreen() {
                       source={{ uri: posterUrl(person.profile_path, 'w342') ?? undefined }}
                       style={styles.castImage}
                       contentFit="cover"
+                      transition={120}
+                      cachePolicy="memory-disk"
                     />
-                    <GlassView intensity={28} tint="dark" style={styles.castGlass}>
+                    <View style={styles.castGlass}>
                       <Text style={styles.castName} numberOfLines={1}>
                         {person.name}
                       </Text>
@@ -793,130 +867,161 @@ export default function MovieDetailScreen() {
                           {person.character}
                         </Text>
                       ) : null}
-                    </GlassView>
+                    </View>
                   </Pressable>
-                ))}
-              </ScrollView>
+                )}
+              />
             ) : (
               <Text style={styles.emptyText}>Cast unavailable.</Text>
             )}
           </View>
 
+          <GestureDetector gesture={commentsPromptGesture}>
+            <View style={styles.commentsPrompt}>
+              <Animated.View style={promptArrowStyle}>
+                <Ionicons name="chevron-up" size={24} color="#fff" />
+              </Animated.View>
+              <Text style={styles.commentsPromptText}>swipe up to open comments</Text>
+            </View>
+          </GestureDetector>
+
         </ScrollView>
 
-        <GestureDetector
-          gesture={Gesture.Pan()
-            .onStart(() => {
-              sheetStart.value = sheetY.value;
-            })
-            .onUpdate((event) => {
-              const next = Math.max(0, Math.min(sheetClosedY, sheetStart.value + event.translationY));
-              sheetY.value = next;
-            })
-            .onEnd(() => {
-              const shouldOpen = sheetY.value < screenHeight * 0.35;
-              const target = shouldOpen ? 0 : sheetClosedY;
-              sheetY.value = withSpring(target, { damping: 18, stiffness: 160 });
-              runOnJS(setCommentsOpen)(shouldOpen);
-            })}>
-          <Animated.View
-            pointerEvents="auto"
-            style={[
-              styles.commentsSheet,
-              sheetStyle,
-            ]}>
-            <View style={styles.sheetHandle}>
-              <Text style={styles.commentsTitle}>COMMENTS</Text>
-              <Ionicons name="chevron-down" size={22} color="#fff" />
-            </View>
-            <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.commentsWrap}>
-              {rootComments.map((comment) => (
-                <View key={comment.id} style={styles.commentCard}>
-                  {/** Avoid rendering invalid/truncated avatar URLs on web. */}
-                  {(() => {
-                    const avatarUri = normalizeCommentAvatarUri(comment.avatar_url ?? null);
-                    return (
-                  <Pressable
-                    style={styles.avatarCircle}
-                    onPress={() => router.push(`/user/${comment.public_user_id ?? comment.user_id}` as any)}
-                  >
-                    {avatarUri ? (
-                      <Image source={{ uri: avatarUri }} style={styles.avatarCircleImage} contentFit="cover" />
-                    ) : (
-                      <Text style={styles.avatarFallbackText}>?</Text>
-                    )}
-                  </Pressable>
-                    );
-                  })()}
-                  <View style={styles.commentBody}>
-                    <View style={styles.commentMeta}>
+        {commentsOpen ? (
+          <GestureDetector
+            gesture={Gesture.Pan()
+              .onStart(() => {
+                sheetStart.value = sheetY.value;
+              })
+              .onUpdate((event) => {
+                const next = Math.max(0, Math.min(screenHeight, sheetStart.value + event.translationY));
+                sheetY.value = next;
+              })
+              .onEnd((event) => {
+                const shouldClose = sheetY.value > screenHeight * 0.22 || event.velocityY > 650;
+                if (shouldClose) {
+                  runOnJS(dismissKeyboard)();
+                  sheetY.value = withTiming(screenHeight, { duration: 220 }, (finished) => {
+                    if (finished) {
+                      runOnJS(setCommentsOpen)(false);
+                    }
+                  });
+                } else {
+                  sheetY.value = withTiming(0, { duration: 180 });
+                }
+              })}>
+            <Animated.View
+              pointerEvents="auto"
+              style={[
+                styles.commentsSheet,
+                { top: Math.max(insets.top + 8, 12) },
+                sheetStyle,
+              ]}>
+              <View style={styles.sheetHandle}>
+                <Text style={styles.commentsTitle}>COMMENTS</Text>
+                <Pressable onPress={closeCommentsSheet} style={styles.sheetCloseBtn}>
+                  <Ionicons name="chevron-down" size={22} color="#fff" />
+                </Pressable>
+              </View>
+              <ScrollView
+                style={styles.commentsScroll}
+                showsVerticalScrollIndicator={false}
+                keyboardDismissMode="interactive"
+                keyboardShouldPersistTaps="handled"
+                contentContainerStyle={styles.commentsWrap}>
+                {rootComments.map((comment) => {
+                  const avatarUri = normalizeCommentAvatarUri(comment.avatar_url ?? null);
+                  return (
+                    <View key={comment.id} style={styles.commentCard}>
                       <Pressable
-                        style={styles.commentNamePressable}
+                        style={styles.avatarCircle}
                         onPress={() => router.push(`/user/${comment.public_user_id ?? comment.user_id}` as any)}>
-                        <Text style={styles.commentName} numberOfLines={1} ellipsizeMode="tail">
-                          {comment.nickname}
-                        </Text>
+                        {avatarUri ? (
+                          <Image source={{ uri: avatarUri }} style={styles.avatarCircleImage} contentFit="cover" />
+                        ) : (
+                          <Text style={styles.avatarFallbackText}>?</Text>
+                        )}
                       </Pressable>
-                      <Text style={styles.commentTime}>{formatCommentTime(comment.created_at)}</Text>
-                    </View>
-                    <Text style={styles.commentText}>{comment.text}</Text>
-                    <Pressable onPress={() => setReplyTo(comment)}>
-                      <Text style={styles.replyText}>Reply</Text>
-                    </Pressable>
-                    {(repliesByParent[comment.id] ?? []).map((reply) => (
-                      <View key={reply.id} style={styles.replyCard}>
-                        {(() => {
+                      <View style={styles.commentBody}>
+                        <View style={styles.commentMeta}>
+                          <Pressable
+                            style={styles.commentNamePressable}
+                            onPress={() => router.push(`/user/${comment.public_user_id ?? comment.user_id}` as any)}>
+                            <Text style={styles.commentName} numberOfLines={1} ellipsizeMode="tail">
+                              {comment.nickname}
+                            </Text>
+                          </Pressable>
+                          <Text style={styles.commentTime}>{formatCommentTime(comment.created_at)}</Text>
+                        </View>
+                        <Text style={styles.commentText}>{comment.text}</Text>
+                        <Pressable onPress={() => setReplyTo(comment)}>
+                          <Text style={styles.replyText}>Reply</Text>
+                        </Pressable>
+                        {(repliesByParent[comment.id] ?? []).map((reply) => {
                           const replyAvatarUri = normalizeCommentAvatarUri(reply.avatar_url ?? null);
                           return (
-                        <Pressable
-                          style={styles.avatarMini}
-                          onPress={() => router.push(`/user/${reply.public_user_id ?? reply.user_id}` as any)}
-                        >
-                          {replyAvatarUri ? (
-                            <Image source={{ uri: replyAvatarUri }} style={styles.avatarMiniImage} contentFit="cover" />
-                          ) : (
-                            <Text style={styles.avatarMiniFallbackText}>?</Text>
-                          )}
-                        </Pressable>
+                            <View key={reply.id} style={styles.replyCard}>
+                              <Pressable
+                                style={styles.avatarMini}
+                                onPress={() => router.push(`/user/${reply.public_user_id ?? reply.user_id}` as any)}>
+                                {replyAvatarUri ? (
+                                  <Image source={{ uri: replyAvatarUri }} style={styles.avatarMiniImage} contentFit="cover" />
+                                ) : (
+                                  <Text style={styles.avatarMiniFallbackText}>?</Text>
+                                )}
+                              </Pressable>
+                              <View>
+                                <View style={styles.commentMeta}>
+                                  <Pressable
+                                    style={styles.commentNamePressable}
+                                    onPress={() => router.push(`/user/${reply.public_user_id ?? reply.user_id}` as any)}>
+                                    <Text style={styles.commentName} numberOfLines={1} ellipsizeMode="tail">
+                                      {reply.nickname}
+                                    </Text>
+                                  </Pressable>
+                                  <Text style={styles.commentTime}>{formatCommentTime(reply.created_at)}</Text>
+                                </View>
+                                <Text style={styles.commentText}>{reply.text}</Text>
+                              </View>
+                            </View>
                           );
-                        })()}
-                        <View>
-                          <View style={styles.commentMeta}>
-                            <Pressable
-                              style={styles.commentNamePressable}
-                              onPress={() => router.push(`/user/${reply.public_user_id ?? reply.user_id}` as any)}>
-                              <Text style={styles.commentName} numberOfLines={1} ellipsizeMode="tail">
-                                {reply.nickname}
-                              </Text>
-                            </Pressable>
-                            <Text style={styles.commentTime}>{formatCommentTime(reply.created_at)}</Text>
-                          </View>
-                          <Text style={styles.commentText}>{reply.text}</Text>
-                        </View>
+                        })}
                       </View>
-                    ))}
-                  </View>
+                    </View>
+                  );
+                })}
+              </ScrollView>
+              <View
+                style={[
+                  styles.commentsComposer,
+                  {
+                    paddingBottom: commentsComposerBottom,
+                    transform: [{ translateY: -commentsKeyboardOffset }],
+                  },
+                ]}>
+                <Text style={styles.leaveComment}>leave comment</Text>
+                {replyTo ? (
+                  <Text style={styles.replyingTo}>Replying to @{replyTo.nickname}</Text>
+                ) : null}
+                <View style={styles.commentInputRow}>
+                  <TextInput
+                    value={commentText}
+                    onChangeText={setCommentText}
+                    placeholder="Write a comment..."
+                    placeholderTextColor="rgba(255,255,255,0.6)"
+                    returnKeyType="send"
+                    onSubmitEditing={onSendComment}
+                    blurOnSubmit={false}
+                    style={styles.commentInput}
+                  />
+                  <Pressable onPress={onSendComment} style={styles.sendBtn}>
+                    <Ionicons name="send" size={18} color="#000" />
+                  </Pressable>
                 </View>
-              ))}
-            </ScrollView>
-            <Text style={styles.leaveComment}>leave comment</Text>
-            {replyTo ? (
-              <Text style={styles.replyingTo}>Replying to @{replyTo.nickname}</Text>
-            ) : null}
-            <View style={styles.commentInputRow}>
-              <TextInput
-                value={commentText}
-                onChangeText={setCommentText}
-                placeholder="Write a comment..."
-                placeholderTextColor="rgba(255,255,255,0.6)"
-                style={styles.commentInput}
-              />
-              <Pressable onPress={onSendComment} style={styles.sendBtn}>
-                <Ionicons name="send" size={18} color="#fff" />
-              </Pressable>
-            </View>
-          </Animated.View>
-        </GestureDetector>
+              </View>
+            </Animated.View>
+          </GestureDetector>
+        ) : null}
 
         <Modal
           visible={showWatchProviders}
@@ -976,7 +1081,7 @@ export default function MovieDetailScreen() {
           <Ionicons name="information-circle" size={16} color="#fff" />
           <Text style={styles.watchToastText}>No providers listed yet</Text>
         </Animated.View>
-      </KeyboardAvoidingView>
+      </View>
     </View>
   );
 }
@@ -989,7 +1094,7 @@ const styles = StyleSheet.create({
     flex: 1,
   },
   scroll: {
-    paddingBottom: 120,
+    paddingBottom: 0,
   },
   loader: {
     flex: 1,
@@ -1093,50 +1198,52 @@ const styles = StyleSheet.create({
   actionsRow: {
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.four,
-    gap: Spacing.two,
+  },
+  quickActionsRow: {
+    marginTop: 8,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  quickActionBtn: {
+    flex: 1,
+    height: 42,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 6,
+  },
+  quickActionBtnActive: {
+    backgroundColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.24)',
+  },
+  quickActionText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.2,
   },
   watchBtn: {
-    flex: 1,
-    borderRadius: 22,
-    alignItems: 'center',
-    borderWidth: 1.2,
-    overflow: 'hidden',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    shadowColor: '#000',
-    shadowOpacity: 0.32,
-    shadowRadius: 14,
-    shadowOffset: { width: 0, height: 8 },
-  },
-  watchBgImage: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  watchBgTint: {
-    ...StyleSheet.absoluteFillObject,
-  },
-  watchGlow: {
-    ...StyleSheet.absoluteFillObject,
-    opacity: 0.95,
-  },
-  watchHighlight: {
-    position: 'absolute',
-    left: 8,
-    right: 8,
-    top: 7,
-    height: 20,
-    borderRadius: 14,
-    opacity: 0.9,
-  },
-  watchGlass: {
     width: '100%',
-    paddingVertical: 14,
+    height: 54,
+    borderRadius: 14,
+    flexDirection: 'row',
     alignItems: 'center',
-    backgroundColor: 'rgba(0,0,0,0.16)',
+    justifyContent: 'center',
+    gap: 8,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(14,18,24,0.92)',
   },
   watchText: {
     color: '#fff',
-    fontFamily: Fonts.serif,
-    fontSize: 18,
-    letterSpacing: 1,
+    fontFamily: Fonts.mono,
+    fontSize: 14,
+    letterSpacing: 0.2,
   },
   watchToast: {
     position: 'absolute',
@@ -1156,44 +1263,6 @@ const styles = StyleSheet.create({
     color: '#fff',
     fontFamily: Fonts.mono,
     fontSize: 12,
-  },
-  quickDock: {
-    width: '100%',
-    borderRadius: 18,
-    paddingHorizontal: 8,
-    paddingVertical: 7,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  quickDockRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: 6,
-  },
-  dockBtn: {
-    flex: 1,
-    minWidth: 0,
-    height: 56,
-    borderRadius: 14,
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: 4,
-    paddingHorizontal: 6,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-  },
-  dockBtnActive: {
-    backgroundColor: 'rgba(255,255,255,0.16)',
-    borderColor: 'rgba(255,255,255,0.26)',
-  },
-  dockBtnLabel: {
-    color: 'rgba(255,255,255,0.94)',
-    fontFamily: Fonts.mono,
-    fontSize: 10,
-    letterSpacing: 0.3,
   },
   starsRow: {
     flexDirection: 'row',
@@ -1385,54 +1454,82 @@ const styles = StyleSheet.create({
   commentsTitle: {
     color: '#fff',
     fontFamily: Fonts.serif,
-    fontSize: 22,
-    letterSpacing: 2,
+    fontSize: 20,
+    letterSpacing: 1.2,
+  },
+  commentsScroll: {
+    flex: 1,
   },
   commentsWrap: {
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.three,
-    gap: Spacing.three,
-    paddingBottom: 120,
+    gap: Spacing.two,
+    paddingBottom: 170,
   },
   commentsSheet: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: '100%',
-    backgroundColor: 'rgba(7,8,10,0.96)',
+    top: 20,
+    backgroundColor: '#000',
     borderTopLeftRadius: 28,
     borderTopRightRadius: 28,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    paddingTop: Spacing.three,
+    borderColor: '#161616',
+    paddingTop: Spacing.two,
+    overflow: 'hidden',
   },
   sheetHandle: {
     paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.two,
+    paddingTop: 4,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    borderBottomWidth: 1,
+    borderBottomColor: '#111',
+  },
+  sheetCloseBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 17,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#0E0E10',
+    borderWidth: 1,
+    borderColor: '#232328',
+  },
+  commentsPrompt: {
+    marginTop: 22,
+    marginBottom: 0,
+    minHeight: 58,
+    alignItems: 'center',
+    justifyContent: 'flex-end',
+    paddingBottom: 0,
+  },
+  commentsPromptText: {
+    marginTop: 0,
+    color: 'rgba(255,255,255,0.84)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.5,
   },
   commentCard: {
     flexDirection: 'row',
     gap: Spacing.two,
     paddingVertical: Spacing.two,
     paddingHorizontal: Spacing.two,
-    borderRadius: 18,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderRadius: 14,
+    backgroundColor: '#08090B',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    shadowColor: '#000',
-    shadowOpacity: 0.2,
-    shadowRadius: 10,
-    shadowOffset: { width: 0, height: 4 },
+    borderColor: '#1A1A1F',
   },
   avatarCircle: {
     width: 46,
     height: 46,
     borderRadius: 23,
-    backgroundColor: '#3B82F6',
+    backgroundColor: '#1F2937',
     alignItems: 'center',
     justifyContent: 'center',
     overflow: 'hidden',
@@ -1475,13 +1572,13 @@ const styles = StyleSheet.create({
     textAlign: 'right',
   },
   commentText: {
-    color: 'rgba(255,255,255,0.9)',
+    color: 'rgba(255,255,255,0.92)',
     fontFamily: Fonts.serif,
     fontSize: 12,
     lineHeight: 18,
   },
   replyText: {
-    color: '#CBD5E1',
+    color: '#93C5FD',
     fontFamily: Fonts.mono,
     fontSize: 11,
   },
@@ -1492,13 +1589,13 @@ const styles = StyleSheet.create({
     paddingLeft: Spacing.two,
     paddingTop: Spacing.one,
     borderTopWidth: 1,
-    borderTopColor: 'rgba(255,255,255,0.09)',
+    borderTopColor: '#1A1A1F',
   },
   avatarMini: {
     width: 24,
     height: 24,
     borderRadius: 12,
-    backgroundColor: '#60A5FA',
+    backgroundColor: '#1F2937',
     marginTop: 4,
     alignItems: 'center',
     justifyContent: 'center',
@@ -1515,31 +1612,45 @@ const styles = StyleSheet.create({
     lineHeight: 12,
   },
   leaveComment: {
-    color: 'rgba(255,255,255,0.7)',
-    fontFamily: Fonts.serif,
-    fontSize: 16,
+    color: 'rgba(255,255,255,0.82)',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
   replyingTo: {
-    color: 'rgba(255,255,255,0.6)',
+    color: 'rgba(255,255,255,0.56)',
     fontFamily: Fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
+  },
+  commentsComposer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.two,
+    borderTopWidth: 1,
+    borderTopColor: '#121212',
+    backgroundColor: '#000',
+    gap: 6,
   },
   commentInputRow: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 12,
+    gap: 10,
     paddingVertical: Spacing.one,
-    paddingHorizontal: Spacing.two,
+    paddingHorizontal: 12,
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.1)',
-    marginBottom: Spacing.six,
+    borderColor: '#2A2A30',
+    backgroundColor: '#0E0E11',
   },
   commentInput: {
     flex: 1,
     color: '#fff',
     fontFamily: Fonts.serif,
+    fontSize: 14,
+    paddingVertical: 8,
   },
   sendBtn: {
     width: 38,
@@ -1547,6 +1658,6 @@ const styles = StyleSheet.create({
     borderRadius: 19,
     alignItems: 'center',
     justifyContent: 'center',
-    backgroundColor: 'rgba(193,18,31,0.72)',
+    backgroundColor: '#F4F4F5',
   },
 });

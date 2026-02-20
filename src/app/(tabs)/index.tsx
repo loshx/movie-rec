@@ -1,4 +1,4 @@
-﻿import { Image } from 'expo-image';
+import { Image } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
@@ -6,19 +6,19 @@ import {
   Animated,
   AppState,
   Easing,
+  FlatList,
   Platform,
   Pressable,
   ScrollView,
   StyleSheet,
   Text,
   TextInput,
-  useWindowDimensions,
   View,
 } from 'react-native';
 import { router } from 'expo-router';
 import { LinearGradient } from 'expo-linear-gradient';
 import { Ionicons } from '@expo/vector-icons';
-import { GlassView } from '@/components/glass-view';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { getCinemaEventByStatusNow, type CinemaEvent } from '@/db/cinema';
@@ -40,7 +40,6 @@ import {
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import {
-  getMovieEngagementCounts,
   getUserFavorites,
   getUserRatings,
   getUserWatchlist,
@@ -93,6 +92,34 @@ const GENRES = [
   { id: 99, name: 'Documentary' },
 ];
 
+const HOME_REFRESH_COOLDOWN_MS = 4 * 60 * 1000;
+const CINEMA_POLL_MS = 60 * 1000;
+const CINEMA_CLOCK_MS = 30 * 1000;
+const HOME_DETAIL_FETCH_LIMIT = 10;
+const HOME_DETAIL_FETCH_CONCURRENCY = 4;
+
+async function mapWithConcurrency<T, R>(
+  items: T[],
+  concurrency: number,
+  worker: (item: T, index: number) => Promise<R>
+) {
+  if (items.length === 0) return [] as R[];
+  const results = new Array<R>(items.length);
+  let nextIndex = 0;
+  const slots = Math.max(1, Math.min(concurrency, items.length));
+  await Promise.all(
+    Array.from({ length: slots }).map(async () => {
+      while (true) {
+        const current = nextIndex;
+        if (current >= items.length) return;
+        nextIndex += 1;
+        results[current] = await worker(items[current], current);
+      }
+    })
+  );
+  return results;
+}
+
 function mapMovieToFeatured(movie: Movie): FeaturedDisplay {
   return {
     tmdb_id: movie.id,
@@ -133,6 +160,17 @@ type HeroSlide = {
   subtitle?: string;
   image: string | null;
 };
+
+type SectionRowItem =
+  | {
+      kind: 'media';
+      key: string;
+      item: Movie | TvShow;
+    }
+  | {
+      kind: 'loadMore';
+      key: string;
+    };
 
 function isTvItem(item: SearchResultItem) {
   if ('media_type' in item) return item.media_type === 'tv';
@@ -178,6 +216,7 @@ function rankByTaste(items: SearchResultItem[], signals: SearchTasteSignals): Se
 export default function HomeScreen() {
   const { user } = useAuth();
   const theme = useTheme();
+  const insets = useSafeAreaInsets();
 
   const [featured, setFeatured] = useState<FeaturedDisplay | null>(null);
   const [popular, setPopular] = useState<Movie[]>([]);
@@ -219,15 +258,18 @@ export default function HomeScreen() {
   const [cinemaEvent, setCinemaEvent] = useState<CinemaEvent | null>(null);
   const [cinemaNowIso, setCinemaNowIso] = useState(new Date().toISOString());
   const [cinemaNotifyArmed, setCinemaNotifyArmed] = useState(false);
-  const [heroStats, setHeroStats] = useState({ favorites: 0, watched: 0, rated: 0 });
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroSlideWidth, setHeroSlideWidth] = useState(0);
   const heroScrollRef = useRef<ScrollView | null>(null);
+  const heroScrollX = useRef(new Animated.Value(0)).current;
   const refreshTokenRef = useRef(0);
+  const lastHomeLoadAtRef = useRef(0);
   const firstLoadDoneRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
   const shouldRefreshOnActiveRef = useRef(false);
   const prevCinemaPhaseRef = useRef<'upcoming' | 'live' | 'ended' | 'none'>('none');
+  const watchedIdsRef = useRef<number[]>([]);
+  const searchTasteSignalsRef = useRef<SearchTasteSignals>(searchTasteSignals);
 
   const rememberClickedSearchItem = useCallback(
     (item: SearchResultItem) => {
@@ -262,6 +304,14 @@ export default function HomeScreen() {
     },
     [user?.id]
   );
+
+  useEffect(() => {
+    watchedIdsRef.current = watchedIds;
+  }, [watchedIds]);
+
+  useEffect(() => {
+    searchTasteSignalsRef.current = searchTasteSignals;
+  }, [searchTasteSignals]);
 
   const loadHome = useCallback(
     async ({ randomizePages, silent }: { randomizePages: boolean; silent: boolean }) => {
@@ -350,16 +400,22 @@ export default function HomeScreen() {
                   user.id,
                   followingProfiles.map((p) => p.user_id)
                 );
-                const mlIds = await getMlRecommendations(user.id, { mediaType: 'movie', topN: 24 });
-                if (mlIds.length > 0) {
-                  const details = await Promise.all(
-                    mlIds.map(async (row) => {
+                const mlIds = await getMlRecommendations(user.id, {
+                  mediaType: 'movie',
+                  topN: HOME_DETAIL_FETCH_LIMIT * 2,
+                });
+                const limitedMlIds = mlIds.slice(0, HOME_DETAIL_FETCH_LIMIT);
+                if (limitedMlIds.length > 0) {
+                  const details = await mapWithConcurrency(
+                    limitedMlIds,
+                    HOME_DETAIL_FETCH_CONCURRENCY,
+                    async (row) => {
                       try {
                         return await getMovieById(row.tmdb_id);
                       } catch {
                         return null;
                       }
-                    })
+                    }
                   );
                   const mlMovies = details
                     .filter((item): item is Movie => !!item)
@@ -381,7 +437,7 @@ export default function HomeScreen() {
                       }
                     }
                     if (!nextNewMoviesSubtitle) {
-                      const reason = String(mlIds[0]?.reason ?? '').trim();
+                      const reason = String(limitedMlIds[0]?.reason ?? '').trim();
                       nextNewMoviesSubtitle = reason || null;
                     }
                   }
@@ -418,22 +474,21 @@ export default function HomeScreen() {
               setNewMoviesSubtitle(nextNewMoviesSubtitle);
             }
 
-            await Promise.all(
-              watchedRows
-                .slice(0, 12)
-                .filter((row) => candidateMovieIds.has(row.tmdbId))
-                .map(async (row) => {
-                try {
-                  const detail = await getMovieById(row.tmdbId);
-                  const genres = (detail as any)?.genres as { id: number }[] | undefined;
-                  genres?.forEach((g) => {
-                    if (!g?.id) return;
-                    genreCount[g.id] = (genreCount[g.id] ?? 0) + 1;
-                  });
-                } catch {
-                }
-              })
-            );
+            const watchedCandidates = watchedRows
+              .slice(0, HOME_DETAIL_FETCH_LIMIT)
+              .filter((row) => candidateMovieIds.has(row.tmdbId));
+            await mapWithConcurrency(watchedCandidates, HOME_DETAIL_FETCH_CONCURRENCY, async (row) => {
+              try {
+                const detail = await getMovieById(row.tmdbId);
+                const genres = (detail as any)?.genres as { id: number }[] | undefined;
+                genres?.forEach((g) => {
+                  if (!g?.id) return;
+                  genreCount[g.id] = (genreCount[g.id] ?? 0) + 1;
+                });
+              } catch {
+              }
+              return null;
+            });
 
             const topGenreIds = Object.entries(genreCount)
               .sort((a, b) => b[1] - a[1])
@@ -527,6 +582,7 @@ export default function HomeScreen() {
           newEpisodesPage: newEpisodesStartPage,
           newEpisodesTotalPages: newEpisodeRes.total_pages ?? 1,
         };
+        lastHomeLoadAtRef.current = Date.now();
       } catch (err) {
         if (token === refreshTokenRef.current) setError((err as Error).message);
       } finally {
@@ -535,8 +591,6 @@ export default function HomeScreen() {
     },
     [user]
   );
-
-  const watchedDepsKey = useMemo(() => watchedIds.join(','), [watchedIds]);
 
   useEffect(() => {
     if (homeSnapshot && homeSnapshot.userId === (user?.id ?? null)) {
@@ -558,6 +612,7 @@ export default function HomeScreen() {
       setNewEpisodesTotalPages(homeSnapshot.newEpisodesTotalPages);
       setLoading(false);
       firstLoadDoneRef.current = true;
+      lastHomeLoadAtRef.current = Date.now();
       return;
     }
     void loadHome({ randomizePages: true, silent: false }).finally(() => {
@@ -606,7 +661,10 @@ export default function HomeScreen() {
       }
       if (nextState === 'active' && shouldRefreshOnActiveRef.current && firstLoadDoneRef.current) {
         shouldRefreshOnActiveRef.current = false;
-        void loadHome({ randomizePages: true, silent: true });
+        const now = Date.now();
+        if (now - lastHomeLoadAtRef.current >= HOME_REFRESH_COOLDOWN_MS) {
+          void loadHome({ randomizePages: true, silent: true });
+        }
       }
     });
     return () => sub.remove();
@@ -630,17 +688,20 @@ export default function HomeScreen() {
     void loadCinemaEvent();
     const poll = setInterval(() => {
       void loadCinemaEvent();
-    }, 5000);
+    }, CINEMA_POLL_MS);
     return () => {
       mounted = false;
       clearInterval(poll);
     };
   }, []);
 
+  const cinemaEventId = cinemaEvent?.id ?? null;
+
   useEffect(() => {
-    const t = setInterval(() => setCinemaNowIso(new Date().toISOString()), 1000);
+    if (!cinemaEventId) return;
+    const t = setInterval(() => setCinemaNowIso(new Date().toISOString()), CINEMA_CLOCK_MS);
     return () => clearInterval(t);
-  }, []);
+  }, [cinemaEventId]);
 
   const scrollY = useRef(new Animated.Value(0)).current;
   const categoriesX = useRef(new Animated.Value(-320)).current;
@@ -684,7 +745,7 @@ export default function HomeScreen() {
       try {
         const res = q ? await searchMulti(q, 1) : await getPopularMovies(1);
         if (!cancelled) {
-          const watchedIdSet = new Set(watchedIds);
+          const watchedIdSet = new Set(watchedIdsRef.current);
           const cleaned = q
             ? (res.results ?? []).filter(
                 (item) =>
@@ -693,7 +754,7 @@ export default function HomeScreen() {
               )
             : (res.results ?? []).filter(hasListData);
           const filtered = excludeWatched(cleaned.filter(hasListData), watchedIdSet);
-          setSearchResults(rankByTaste(filtered as SearchResultItem[], searchTasteSignals));
+          setSearchResults(rankByTaste(filtered as SearchResultItem[], searchTasteSignalsRef.current));
         }
       } catch {
         if (!cancelled) setSearchResults([]);
@@ -705,7 +766,7 @@ export default function HomeScreen() {
       cancelled = true;
       clearTimeout(t);
     };
-  }, [searchOpen, searchQuery, watchedIds, searchTasteSignals]);
+  }, [searchOpen, searchQuery]);
 
   useEffect(() => {
     let active = true;
@@ -730,10 +791,10 @@ export default function HomeScreen() {
           getUserWatched(user.id),
           getUserRatings(user.id),
           hasMlApi()
-            ? getMlRecommendations(user.id, { mediaType: 'movie', topN: 120 }).catch(() => [])
+            ? getMlRecommendations(user.id, { mediaType: 'movie', topN: 60 }).catch(() => [])
             : Promise.resolve([]),
           hasMlApi()
-            ? getMlRecommendations(user.id, { mediaType: 'tv', topN: 120 }).catch(() => [])
+            ? getMlRecommendations(user.id, { mediaType: 'tv', topN: 60 }).catch(() => [])
             : Promise.resolve([]),
         ]);
         if (!active) return;
@@ -755,7 +816,7 @@ export default function HomeScreen() {
     return () => {
       active = false;
     };
-  }, [user?.id, watchedDepsKey]);
+  }, [user?.id]);
 
   const searchPopularItems = useMemo(
     () => rankByTaste(popular as SearchResultItem[], searchTasteSignals),
@@ -791,44 +852,59 @@ export default function HomeScreen() {
   }, [cinemaEvent?.title, cinemaNotifyArmed, cinemaPhase]);
 
   const heroSlides = useMemo<HeroSlide[]>(() => {
-    const items = [featured, ...popular.slice(0, 8)]
-      .filter((item): item is FeaturedDisplay | Movie => !!item)
-      .map((item) => {
-        const tmdbId = Number((item as any).tmdb_id ?? (item as any).id ?? 0) || null;
-        const title = String((item as any).title ?? '').trim();
-        const image =
-          backdropUrl((item as any).backdrop_path ?? null, 'w1280') ||
-          posterUrl((item as any).poster_path ?? null, 'w500') ||
-          null;
-        return {
-          id: String(tmdbId ?? title),
-          tmdbId,
-          title: title || 'Movie',
-          subtitle: 'Recommended for you',
-          image,
-        };
-      });
+    const candidates = [
+      ...(featured ? [featured] : []),
+      ...forYouMovies.slice(0, 16),
+      ...newMovies.slice(0, 24),
+      ...todayDramaMovies.slice(0, 16),
+      ...popular.slice(0, 24),
+    ] as Array<FeaturedDisplay | Movie>;
+
+    const mapped = candidates.map((item) => {
+      const tmdbId = Number((item as any).tmdb_id ?? (item as any).id ?? 0) || null;
+      const title = String((item as any).title ?? '').trim();
+      const image =
+        posterUrl((item as any).poster_path ?? null, 'w500') ||
+        backdropUrl((item as any).backdrop_path ?? null, 'w780') ||
+        null;
+      return {
+        id: String(tmdbId ?? title),
+        tmdbId,
+        title: title || 'Movie',
+        subtitle: 'Recommended for you',
+        image,
+      };
+    });
 
     const dedup = new Map<string, HeroSlide>();
-    for (const it of items) {
+    for (const it of mapped) {
       if (!it.image) continue;
       if (!dedup.has(it.id)) dedup.set(it.id, it);
     }
-    return Array.from(dedup.values()).slice(0, 8);
-  }, [featured, popular]);
+
+    const shuffled = Array.from(dedup.values());
+    for (let i = shuffled.length - 1; i > 0; i -= 1) {
+      const j = Math.floor(Math.random() * (i + 1));
+      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
+    }
+    return shuffled.slice(0, 8);
+  }, [featured, forYouMovies, newMovies, todayDramaMovies, popular]);
+
+  const heroSlidesKey = useMemo(() => heroSlides.map((slide) => slide.id).join('|'), [heroSlides]);
 
   useEffect(() => {
     setHeroIndex(0);
+    heroScrollX.setValue(0);
     requestAnimationFrame(() => {
       heroScrollRef.current?.scrollTo({ x: 0, y: 0, animated: false });
     });
-  }, [heroSlides.length, cinemaPhase]);
+  }, [cinemaPhase, heroScrollX, heroSlidesKey]);
 
   const heroPrimarySlide = heroSlides[heroIndex] ?? heroSlides[0] ?? null;
   const heroTopImage =
     cinemaPhase === 'none'
       ? heroPrimarySlide?.image || null
-      : cinemaEvent?.poster_url?.trim() || backdropUrl(featured?.backdrop_path, 'w1280');
+      : cinemaEvent?.poster_url?.trim() || backdropUrl(featured?.backdrop_path, 'w780');
   const heroTopTitle = cinemaPhase === 'none' ? '' : cinemaEvent?.title || featured?.title || '';
   const heroSubtitle =
     cinemaPhase === 'none'
@@ -841,43 +917,13 @@ export default function HomeScreen() {
             ? 'Ended'
             : '';
 
-  useEffect(() => {
-    let active = true;
-    (async () => {
-      if (cinemaPhase !== 'none') {
-        if (active) setHeroStats({ favorites: 0, watched: 0, rated: 0 });
-        return;
-      }
-      const tmdbId = Number(heroPrimarySlide?.tmdbId ?? 0);
-      if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
-        if (active) setHeroStats({ favorites: 0, watched: 0, rated: 0 });
-        return;
-      }
-      try {
-        const counts = await getMovieEngagementCounts(tmdbId, 'movie');
-        if (!active) return;
-        setHeroStats(counts);
-      } catch {
-        if (active) setHeroStats({ favorites: 0, watched: 0, rated: 0 });
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [cinemaPhase, heroPrimarySlide?.tmdbId]);
-
-  const formatHeroCount = useCallback((n: number) => {
-    if (!Number.isFinite(n) || n <= 0) return '0';
-    if (n < 1000) return String(Math.trunc(n));
-    const value = n / 1000;
-    const fixed = value >= 10 ? value.toFixed(0) : value.toFixed(1);
-    return `${fixed}k`;
-  }, []);
   const isWeb = Platform.OS === 'web';
-  const heroCardGap = 12;
-  const heroInnerPadding = 14;
-  const heroItemWidth = heroSlideWidth > 0 ? Math.max(240, heroSlideWidth - 56) : 300;
-  const heroSnapInterval = heroItemWidth + heroCardGap;
+  const heroCardGap = 0;
+  const heroItemWidth = heroSlideWidth > 0 ? Math.max(1, heroSlideWidth) : 320;
+  const heroHorizontalInset = 0;
+  const heroPosterHeight = isWeb ? 336 : Math.round(heroItemWidth * 1.48);
+  const heroCarouselHeight = heroPosterHeight + 22;
+  const heroStep = Math.max(1, heroSlideWidth || heroItemWidth || 1);
 
   const dailyForYouMovies = useMemo(() => {
     if (forYouMovies.length > 0) return forYouMovies.slice(0, 5);
@@ -962,118 +1008,165 @@ export default function HomeScreen() {
         onScroll={Animated.event([{ nativeEvent: { contentOffset: { y: scrollY } } }], {
           useNativeDriver: true,
         })}>
-        <View style={styles.header}>
+        <View style={[styles.header, { paddingTop: Math.max(8, insets.top + 8) }]}>
           <View style={styles.headerLeft}>
-            <Pressable onPress={() => setCategoriesOpen(true)} style={styles.headerIconBtn}>
-              <Ionicons name="menu" size={18} color="#fff" />
+            <Pressable onPress={() => setCategoriesOpen(true)} style={styles.headerIconBtnPlain}>
+              <Ionicons name="menu" size={22} color="#FFFFFF" />
             </Pressable>
           </View>
-          <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtn}>
-            <Ionicons name="search" size={18} color="#fff" />
+          <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtnPlain}>
+            <Ionicons name="search" size={22} color="#FFFFFF" />
           </Pressable>
         </View>
 
         <View style={styles.heroWrap}>
-          <View style={styles.heroGlow} pointerEvents="none">
-            {heroTopImage ? (
-              <Image source={{ uri: heroTopImage }} style={styles.heroGlowImage} blurRadius={64} />
-            ) : (
-              <View style={[styles.heroGlowImage, { backgroundColor: theme.backgroundSelected }]} />
-            )}
-            <LinearGradient
-              colors={['rgba(0,0,0,0)', theme.background]}
-              start={{ x: 0.5, y: 0 }}
-              end={{ x: 0.5, y: 1 }}
-              style={styles.heroGlowFade}
-            />
-          </View>
+          {heroTopImage ? (
+            <View style={styles.heroGlow} pointerEvents="none">
+              <Image
+                source={{ uri: heroTopImage }}
+                style={styles.heroGlowImage}
+                contentFit="cover"
+                transition={120}
+                cachePolicy="memory-disk"
+                blurRadius={Platform.OS === 'android' ? 24 : 36}
+              />
+              <LinearGradient
+                colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.35)', theme.background, theme.background]}
+                locations={[0, 0.42, 0.82, 1]}
+                start={{ x: 0.5, y: 0 }}
+                end={{ x: 0.5, y: 1 }}
+                style={styles.heroGlowFade}
+              />
+            </View>
+          ) : null}
           <View
-            style={[styles.heroCard, cinemaPhase === 'none' && styles.heroCardCarousel]}
+            style={[
+              styles.heroCard,
+              cinemaPhase === 'none' ? styles.heroCardCarousel : styles.heroCardFrame,
+              cinemaPhase === 'none' ? { minHeight: heroCarouselHeight } : null,
+            ]}
             onLayout={(e) => {
               const next = Math.round(e.nativeEvent.layout.width);
               if (next > 0 && next !== heroSlideWidth) setHeroSlideWidth(next);
             }}>
             {cinemaPhase === 'none' ? (
-              <ScrollView
+              <Animated.ScrollView
                 ref={heroScrollRef}
                 horizontal
-                pagingEnabled={isWeb}
-                snapToInterval={isWeb ? undefined : heroSnapInterval}
-                decelerationRate={isWeb ? 'normal' : 'fast'}
-                disableIntervalMomentum={!isWeb}
+                pagingEnabled
+                decelerationRate="fast"
+                disableIntervalMomentum
                 showsHorizontalScrollIndicator={false}
                 nestedScrollEnabled
+                scrollEventThrottle={16}
+                onScroll={Animated.event(
+                  [{ nativeEvent: { contentOffset: { x: heroScrollX } } }],
+                  { useNativeDriver: true }
+                )}
                 onMomentumScrollEnd={(e) => {
-                  const step = isWeb
-                    ? Math.max(1, heroSlideWidth || e.nativeEvent.layoutMeasurement.width || 1)
-                    : heroSnapInterval;
+                  const fallbackStep = Math.max(1, heroSlideWidth || e.nativeEvent.layoutMeasurement.width || 1);
+                  const step = heroStep > 0 ? heroStep : fallbackStep;
                   const next = Math.round(e.nativeEvent.contentOffset.x / step);
                   setHeroIndex(Math.max(0, Math.min(heroSlides.length - 1, next)));
                 }}
                 contentContainerStyle={[
                   styles.heroSlideTrackContent,
-                  isWeb
-                    ? styles.heroSlideTrackContentWeb
-                    : { paddingHorizontal: heroInnerPadding, gap: heroCardGap },
+                  { paddingHorizontal: heroHorizontalInset, gap: heroCardGap },
                 ]}
-                style={styles.heroSlideTrack}>
+                style={[
+                  styles.heroSlideTrack,
+                  { height: heroCarouselHeight },
+                ]}>
                 {heroSlides.length > 0 ? (
-                  heroSlides.map((slide) => (
-                    <Pressable
-                      key={slide.id}
-                      style={[
-                        styles.heroSlidePage,
-                        isWeb && styles.heroSlidePageWeb,
-                        { width: isWeb ? Math.max(1, heroSlideWidth || 1) : heroItemWidth },
-                      ]}
-                      onPress={() => {
-                        const id = Number(slide.tmdbId ?? 0);
-                        if (!Number.isFinite(id) || id <= 0) return;
-                        router.push({ pathname: '/movie/[id]', params: { id: String(id), type: 'movie' } });
-                      }}>
-                      {slide.image ? (
-                        <Image
-                          source={{ uri: slide.image }}
-                          style={styles.heroSlideImage}
-                          contentFit="cover"
-                          contentPosition="center"
-                        />
-                      ) : (
-                        <View style={[styles.heroSlideImage, { backgroundColor: theme.backgroundSelected }]} />
-                      )}
-                    </Pressable>
-                  ))
+                  heroSlides.map((slide, idx) => {
+                    const inputRange = [
+                      (idx - 1) * heroStep,
+                      idx * heroStep,
+                      (idx + 1) * heroStep,
+                    ];
+                    const animatedScale = heroScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.95, 1, 0.95],
+                      extrapolate: 'clamp',
+                    });
+                    const animatedOpacity = heroScrollX.interpolate({
+                      inputRange,
+                      outputRange: [0.78, 1, 0.78],
+                      extrapolate: 'clamp',
+                    });
+                    const animatedTranslateY = heroScrollX.interpolate({
+                      inputRange,
+                      outputRange: [6, 0, 6],
+                      extrapolate: 'clamp',
+                    });
+                    return (
+                      <Animated.View
+                        key={slide.id}
+                        style={[
+                          styles.heroSlideMotion,
+                          {
+                            opacity: animatedOpacity,
+                            transform: [{ translateY: animatedTranslateY }, { scale: animatedScale }],
+                          },
+                        ]}>
+                        <Pressable
+                          style={[
+                            styles.heroSlidePage,
+                            isWeb && styles.heroSlidePageWeb,
+                            {
+                              width: heroItemWidth,
+                              height: heroPosterHeight,
+                            },
+                          ]}
+                          onPress={() => {
+                            const id = Number(slide.tmdbId ?? 0);
+                            if (!Number.isFinite(id) || id <= 0) return;
+                            router.push({ pathname: '/movie/[id]', params: { id: String(id), type: 'movie' } });
+                          }}>
+                          {slide.image ? (
+                            <Image
+                              source={{ uri: slide.image }}
+                              style={styles.heroSlideImage}
+                              contentFit="cover"
+                              transition={140}
+                              cachePolicy="memory-disk"
+                            />
+                          ) : (
+                            <View style={[styles.heroSlideImage, { backgroundColor: theme.backgroundSelected }]} />
+                          )}
+                        </Pressable>
+                      </Animated.View>
+                    );
+                  })
                 ) : (
                   <View
                     style={[
                       styles.heroSlidePage,
                       isWeb && styles.heroSlidePageWeb,
-                      { width: isWeb ? Math.max(1, heroSlideWidth || 1) : heroItemWidth },
+                      {
+                        width: heroItemWidth,
+                        height: heroPosterHeight,
+                      },
                     ]}>
                     <View style={[styles.heroSlideImage, { backgroundColor: theme.backgroundSelected }]} />
                   </View>
                 )}
-              </ScrollView>
+              </Animated.ScrollView>
             ) : heroTopImage ? (
               <Image
                 source={{ uri: heroTopImage }}
                 style={styles.heroImage}
                 contentFit="cover"
                 contentPosition="center"
+                transition={140}
+                cachePolicy="memory-disk"
               />
             ) : (
               <View style={[styles.heroImage, { backgroundColor: theme.backgroundSelected }]} />
             )}
-            {(heroTopTitle || cinemaPhase !== 'none' || (cinemaPhase === 'none' && !!heroPrimarySlide)) && (
+            {cinemaPhase !== 'none' && (
               <View style={styles.heroOverlay}>
-                <GlassView
-                  intensity={38}
-                  tint="dark"
-                  style={
-                    cinemaPhase === 'none'
-                      ? styles.heroOverlayGlassCentered
-                      : styles.heroOverlayGlass
-                  }>
+                <View style={styles.heroOverlayGlass}>
                   {heroTopTitle ? (
                     <Text style={styles.heroTitle} numberOfLines={1}>
                       {heroTopTitle}
@@ -1083,24 +1176,6 @@ export default function HomeScreen() {
                     <Text style={styles.heroOverview} numberOfLines={1}>
                       {heroSubtitle}
                     </Text>
-                  ) : null}
-                  {cinemaPhase === 'none' && heroPrimarySlide ? (
-                    <View style={styles.heroStatsGlass}>
-                    <View style={styles.heroStatsRow}>
-                      <View style={styles.heroStat}>
-                        <Ionicons name="heart-outline" size={18} color="#fff" />
-                        <Text style={styles.heroStatText}>{formatHeroCount(heroStats.favorites)}</Text>
-                      </View>
-                      <View style={styles.heroStat}>
-                        <Ionicons name="eye-outline" size={18} color="#fff" />
-                        <Text style={styles.heroStatText}>{formatHeroCount(heroStats.watched)}</Text>
-                      </View>
-                      <View style={styles.heroStat}>
-                        <Ionicons name="star-outline" size={18} color="#fff" />
-                        <Text style={styles.heroStatText}>{formatHeroCount(heroStats.rated)}</Text>
-                      </View>
-                    </View>
-                    </View>
                   ) : null}
                   {cinemaPhase === 'upcoming' ? (
                     <Pressable
@@ -1118,7 +1193,7 @@ export default function HomeScreen() {
                     </Pressable>
                   ) : null}
                   {cinemaPhase === 'ended' ? <Text style={styles.cinemaEndedText}>Ended</Text> : null}
-                </GlassView>
+                </View>
               </View>
             )}
             {cinemaPhase === 'none' && heroSlides.length > 1 ? (
@@ -1186,18 +1261,19 @@ export default function HomeScreen() {
         style={[
           styles.topFloatingBar,
           {
+            top: Math.max(8, insets.top + 8),
             opacity: scrollY.interpolate({
-              inputRange: [0, 80, 140],
-              outputRange: [0, 0.6, 1],
+              inputRange: [0, 60, 120],
+              outputRange: [0, 0.55, 1],
               extrapolate: 'clamp',
             }),
           },
         ]}>
         <Pressable onPress={() => setCategoriesOpen(true)} style={styles.headerIconBtn}>
-          <Ionicons name="menu" size={18} color="#fff" />
+          <Ionicons name="menu" size={18} color="#0D1117" />
         </Pressable>
         <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtn}>
-          <Ionicons name="search" size={18} color="#fff" />
+          <Ionicons name="search" size={18} color="#0D1117" />
         </Pressable>
       </Animated.View>
 
@@ -1207,7 +1283,11 @@ export default function HomeScreen() {
         </Animated.View>
       )}
 
-      <Animated.View style={[styles.categoryPanel, { transform: [{ translateX: categoriesX }] }]}>
+      <Animated.View
+        style={[
+          styles.categoryPanel,
+          { top: Math.max(64, insets.top + 64), transform: [{ translateX: categoriesX }] },
+        ]}>
         <Text style={styles.panelTitle}>Categories</Text>
         {GENRES.map((g) => (
           <Pressable
@@ -1222,11 +1302,15 @@ export default function HomeScreen() {
         ))}
       </Animated.View>
 
-      <Animated.View style={[styles.searchPanel, { transform: [{ translateX: searchX }] }]}>
+      <Animated.View
+        style={[
+          styles.searchPanel,
+          { paddingTop: Math.max(48, insets.top + 48), transform: [{ translateX: searchX }] },
+        ]}>
         <View style={styles.searchHeader}>
           <Text style={styles.panelTitle}>Search</Text>
           <Pressable onPress={closePanels} style={styles.headerIconBtn}>
-            <Ionicons name="close" size={18} color="#fff" />
+            <Ionicons name="close" size={18} color="#0D1117" />
           </Pressable>
         </View>
         <TextInput
@@ -1300,11 +1384,19 @@ function Section({
   loadingMore?: boolean;
 }) {
   const theme = useTheme();
-  const { width: screenWidth } = useWindowDimensions();
-  const [forYouIndex, setForYouIndex] = useState(0);
-  const safeItems = items.filter((item) => hasListData(item));
-  const isForYou = false;
-  const forYouCardWidth = Math.max(260, screenWidth - Spacing.four * 2);
+  const safeItems = useMemo(() => items.filter((item) => hasListData(item)), [items]);
+  const renderItems = safeItems.slice(0, 20);
+  const listData = useMemo<SectionRowItem[]>(() => {
+    const base: SectionRowItem[] = renderItems.map((item, idx) => ({
+      kind: 'media',
+      key: `${item.id}-${idx}`,
+      item,
+    }));
+    if (hasMore) {
+      base.push({ kind: 'loadMore', key: 'load-more' });
+    }
+    return base;
+  }, [hasMore, renderItems]);
 
   return (
     <View style={styles.section}>
@@ -1316,64 +1408,51 @@ function Section({
           </Text>
         ) : null}
       </View>
-      <ScrollView
+      <FlatList
         horizontal
-        pagingEnabled={isForYou}
+        data={listData}
+        keyExtractor={(entry) => entry.key}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={isForYou ? styles.forYouRowScroll : styles.rowScroll}
-        scrollEventThrottle={16}
+        contentContainerStyle={styles.rowScroll}
         decelerationRate="fast"
         nestedScrollEnabled
-        onMomentumScrollEnd={
-          isForYou
-            ? (e) => {
-                const w = e.nativeEvent.layoutMeasurement.width || 1;
-                const next = Math.round(e.nativeEvent.contentOffset.x / w);
-                setForYouIndex(Math.max(0, Math.min(safeItems.length - 1, next)));
-              }
-            : undefined
-        }>
-        {safeItems.map((item, idx) => (
-          <Pressable
-            key={`${item.id}-${idx}`}
-            style={[styles.card, isForYou && { width: forYouCardWidth }, isForYou && styles.forYouCard]}
-            onPress={() =>
-              router.push({
-                pathname: '/movie/[id]',
-                params: { id: String(item.id), type: isTv ? 'tv' : 'movie' },
-              })
-            }>
-            <Image
-              source={{ uri: posterUrl(item.poster_path, 'w500') ?? undefined }}
-              style={[styles.cardImage, isForYou && styles.forYouCardImage]}
-            />
-            <GlassView intensity={28} tint="dark" style={isForYou ? [styles.cardGlass, styles.forYouCardGlass] : styles.cardGlass}>
-              <Text style={[styles.cardTitle, isForYou && styles.forYouCardTitle]} numberOfLines={1}>
-                {'title' in item ? item.title : item.name}
-              </Text>
-              <Text style={[styles.cardMeta, isForYou && styles.forYouCardMeta]} numberOfLines={1}>
-                {isTv ? 'TV' : 'Movie'} • {item.vote_average.toFixed(1)}
-              </Text>
-            </GlassView>
-          </Pressable>
-        ))}
-        {!isForYou && hasMore ? (
-          <Pressable onPress={onLoadMore} style={styles.loadMoreCard}>
-            {loadingMore ? (
-              <ActivityIndicator color="#fff" />
-            ) : (
-              <Text style={styles.loadMoreText}>Load more</Text>
-            )}
-          </Pressable>
-        ) : null}
-      </ScrollView>
-      {isForYou && safeItems.length > 1 ? (
-        <View style={styles.forYouDotsRow}>
-          {safeItems.map((item, idx) => (
-            <View key={`${item.id}-dot`} style={[styles.forYouDot, idx === forYouIndex && styles.forYouDotActive]} />
-          ))}
-        </View>
-      ) : null}
+        initialNumToRender={6}
+        maxToRenderPerBatch={6}
+        windowSize={5}
+        removeClippedSubviews
+        ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
+        renderItem={({ item: entry }) => {
+          if (entry.kind === 'loadMore') {
+            return (
+              <Pressable onPress={onLoadMore} style={styles.loadMoreCard}>
+                {loadingMore ? (
+                  <ActivityIndicator color="#fff" />
+                ) : (
+                  <Text style={styles.loadMoreText}>Load more</Text>
+                )}
+              </Pressable>
+            );
+          }
+          return (
+            <Pressable
+              style={styles.card}
+              onPress={() =>
+                router.push({
+                  pathname: '/movie/[id]',
+                  params: { id: String(entry.item.id), type: isTv ? 'tv' : 'movie' },
+                })
+              }>
+              <Image
+                source={{ uri: posterUrl(entry.item.poster_path, 'w342') ?? undefined }}
+                style={styles.cardImage}
+                contentFit="cover"
+                transition={120}
+                cachePolicy="memory-disk"
+              />
+            </Pressable>
+          );
+        }}
+      />
     </View>
   );
 }
@@ -1387,32 +1466,42 @@ function SearchSection({
   items: SearchResultItem[];
   onItemPress?: (item: SearchResultItem) => void;
 }) {
-  const safeItems = items.filter((item) => !!item.poster_path);
+  const safeItems = useMemo(() => items.filter((item) => !!item.poster_path).slice(0, 24), [items]);
   if (safeItems.length === 0) return null;
   return (
     <View style={styles.searchSection}>
       {title ? <Text style={styles.searchSectionTitle}>{title}</Text> : null}
-      <ScrollView
+      <FlatList
         horizontal
+        data={safeItems}
+        keyExtractor={(item, idx) => `${item.id}-${idx}`}
         showsHorizontalScrollIndicator={false}
-        contentContainerStyle={styles.searchRow}>
-        {safeItems.map((item, idx) => (
+        contentContainerStyle={styles.searchRow}
+        initialNumToRender={8}
+        maxToRenderPerBatch={8}
+        windowSize={4}
+        removeClippedSubviews
+        ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
+        renderItem={({ item }) => (
           <Pressable
-            key={`${item.id}-${idx}`}
             style={styles.searchCard}
-            onPress={() =>
-              {
-                onItemPress?.(item);
-                router.push({
-                  pathname: '/movie/[id]',
-                  params: { id: String(item.id), type: isTvItem(item) ? 'tv' : 'movie' },
-                });
-              }
-            }>
-            <Image source={{ uri: posterUrl(item.poster_path, 'w342') ?? undefined }} style={styles.searchCardImage} />
+            onPress={() => {
+              onItemPress?.(item);
+              router.push({
+                pathname: '/movie/[id]',
+                params: { id: String(item.id), type: isTvItem(item) ? 'tv' : 'movie' },
+              });
+            }}>
+            <Image
+              source={{ uri: posterUrl(item.poster_path, 'w185') ?? undefined }}
+              style={styles.searchCardImage}
+              contentFit="cover"
+              transition={100}
+              cachePolicy="memory-disk"
+            />
           </Pressable>
-        ))}
-      </ScrollView>
+        )}
+      />
     </View>
   );
 }
@@ -1439,38 +1528,52 @@ const styles = StyleSheet.create({
     gap: Spacing.two,
   },
   headerIconBtn: {
-    width: 34,
-    height: 34,
+    width: 40,
+    height: 40,
     borderRadius: 14,
     alignItems: 'center',
     justifyContent: 'center',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(0,0,0,0.35)',
+    borderWidth: 1.2,
+    borderColor: 'rgba(14,20,28,0.82)',
+    backgroundColor: 'rgba(244,247,252,0.95)',
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 8,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 6,
+  },
+  headerIconBtnPlain: {
+    width: 40,
+    height: 40,
+    borderRadius: 14,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
   },
   heroWrap: {
     paddingHorizontal: Spacing.four,
     paddingBottom: Spacing.four,
     position: 'relative',
-    marginTop: -Spacing.two,
+    marginTop: -Spacing.one,
   },
   heroGlow: {
     position: 'absolute',
-    left: Spacing.four - 24,
-    right: Spacing.four - 24,
-    top: -64,
-    height: 380,
-    borderRadius: Spacing.three,
+    left: -Spacing.four,
+    right: -Spacing.four,
+    top: -300,
+    bottom: -120,
+    borderRadius: 0,
     overflow: 'hidden',
-    opacity: 0.9,
-    transform: [{ scale: 1.12 }],
+    opacity: 0.98,
+    transform: [{ scale: 1.2 }],
   },
   heroGlowFade: {
     position: 'absolute',
     left: 0,
     right: 0,
     bottom: 0,
-    height: 140,
+    height: 440,
   },
   heroGlowImage: {
     width: '100%',
@@ -1478,14 +1581,22 @@ const styles = StyleSheet.create({
   },
   heroCard: {
     borderRadius: Spacing.three,
-    overflow: 'hidden',
+    overflow: 'visible',
     minHeight: 250,
+    backgroundColor: 'transparent',
+  },
+  heroCardFrame: {
+    overflow: 'hidden',
     backgroundColor: '#000000',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.28)',
   },
   heroCardCarousel: {
-    minHeight: 336,
+    minHeight: 340,
+    overflow: 'hidden',
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
   },
   heroImage: {
     width: '100%',
@@ -1493,10 +1604,10 @@ const styles = StyleSheet.create({
   },
   heroSlideTrack: {
     width: '100%',
-    height: 336,
+    height: 420,
   },
   heroSlideTrackContent: {
-    alignItems: 'center',
+    alignItems: 'flex-start',
   },
   heroSlideTrackContentWeb: {
     alignItems: 'stretch',
@@ -1504,13 +1615,15 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   heroSlidePage: {
-    height: 312,
     borderRadius: 20,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.2)',
     backgroundColor: '#0c0c0c',
-    marginTop: 12,
+    marginTop: 0,
+  },
+  heroSlideMotion: {
+    transform: [{ translateY: 0 }, { scale: 1 }],
   },
   heroSlidePageWeb: {
     height: 336,
@@ -1594,13 +1707,13 @@ const styles = StyleSheet.create({
     gap: 6,
   },
   heroDot: {
-    width: 7,
-    height: 7,
+    width: 6,
+    height: 6,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    backgroundColor: 'rgba(255,255,255,0.42)',
   },
   heroDotActive: {
-    width: 18,
+    width: 20,
     backgroundColor: '#fff',
   },
   topFloatingBar: {
@@ -1610,13 +1723,13 @@ const styles = StyleSheet.create({
     top: 8,
     height: 44,
     borderRadius: 18,
-    backgroundColor: 'rgba(8,8,8,0.55)',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 14,
+    paddingHorizontal: 0,
   },
   scrim: {
     ...StyleSheet.absoluteFillObject,
@@ -1693,7 +1806,10 @@ const styles = StyleSheet.create({
     marginBottom: 8,
   },
   searchRow: {
-    gap: Spacing.two,
+    paddingRight: Spacing.one,
+  },
+  rowSeparator: {
+    width: Spacing.two,
   },
   searchCard: {
     width: 120,
@@ -1743,9 +1859,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     justifyContent: 'center',
-    backgroundColor: 'rgba(6,8,12,0.42)',
+    backgroundColor: 'rgba(7,10,14,0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.18)',
   },
   heroOverlayGlassCentered: {
     borderRadius: 18,
@@ -1754,9 +1870,9 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     justifyContent: 'center',
-    backgroundColor: 'rgba(6,8,12,0.42)',
+    backgroundColor: 'rgba(7,10,14,0.9)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.18)',
     alignItems: 'center',
   },
   heroTitle: {
@@ -1838,7 +1954,6 @@ const styles = StyleSheet.create({
   },
   rowScroll: {
     paddingHorizontal: Spacing.four,
-    gap: Spacing.two,
   },
   forYouRowScroll: {
     paddingHorizontal: Spacing.four,
@@ -1871,6 +1986,11 @@ const styles = StyleSheet.create({
     borderRadius: 12,
     overflow: 'hidden',
     backgroundColor: 'rgba(0,0,0,0.25)',
+  },
+  cardGlassAndroid: {
+    backgroundColor: 'rgba(0,0,0,0.5)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   forYouCardGlass: {
     left: 10,

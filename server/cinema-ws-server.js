@@ -6,7 +6,7 @@ const crypto = require('crypto');
 const WsLib = require('ws');
 const WsServerCtor = WsLib.WebSocketServer || WsLib.Server;
 
-const port = Number(process.env.CINEMA_API_PORT || process.env.CINEMA_WS_PORT || 8787);
+const port = Number(process.env.PORT || process.env.CINEMA_API_PORT || process.env.CINEMA_WS_PORT || 8787);
 const adminApiKey = String(process.env.ADMIN_API_KEY || '').trim();
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
@@ -15,10 +15,28 @@ const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim
 const dataDir = path.join(__dirname, 'data');
 const dataFile = path.join(dataDir, 'cinema-events.json');
 
+function createEmptyStoreState() {
+  return {
+    idSeq: 1,
+    items: [],
+    commentIdSeq: 1,
+    comments: [],
+    users: {},
+    follows: {},
+    movieStates: {},
+    galleryIdSeq: 1,
+    galleryCommentIdSeq: 1,
+    galleryItems: [],
+    galleryLikes: [],
+    galleryFavorites: [],
+    galleryComments: [],
+  };
+}
+
 function ensureStore() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
   if (!fs.existsSync(dataFile)) {
-    fs.writeFileSync(dataFile, JSON.stringify({ idSeq: 1, items: [] }, null, 2), 'utf8');
+    fs.writeFileSync(dataFile, JSON.stringify(createEmptyStoreState(), null, 2), 'utf8');
   }
 }
 
@@ -26,6 +44,9 @@ function loadStore() {
   ensureStore();
   try {
     const parsed = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
+    const fallback = createEmptyStoreState();
+    const galleryItems = Array.isArray(parsed?.galleryItems) ? parsed.galleryItems : [];
+    const galleryComments = Array.isArray(parsed?.galleryComments) ? parsed.galleryComments : [];
     return {
       idSeq: Number(parsed?.idSeq || 1),
       items: Array.isArray(parsed?.items) ? parsed.items : [],
@@ -33,9 +54,24 @@ function loadStore() {
       comments: Array.isArray(parsed?.comments) ? parsed.comments : [],
       users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
       follows: parsed?.follows && typeof parsed.follows === 'object' ? parsed.follows : {},
+      movieStates: parsed?.movieStates && typeof parsed.movieStates === 'object' ? parsed.movieStates : {},
+      galleryIdSeq: Number(
+        parsed?.galleryIdSeq ||
+          (galleryItems.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
+          fallback.galleryIdSeq
+      ),
+      galleryCommentIdSeq: Number(
+        parsed?.galleryCommentIdSeq ||
+          (galleryComments.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
+          fallback.galleryCommentIdSeq
+      ),
+      galleryItems,
+      galleryLikes: Array.isArray(parsed?.galleryLikes) ? parsed.galleryLikes : [],
+      galleryFavorites: Array.isArray(parsed?.galleryFavorites) ? parsed.galleryFavorites : [],
+      galleryComments,
     };
   } catch {
-    return { idSeq: 1, items: [], commentIdSeq: 1, comments: [], users: {}, follows: {} };
+    return createEmptyStoreState();
   }
 }
 
@@ -146,6 +182,26 @@ function normalizeProfileSync(body) {
 function publicProfileView(userId) {
   const profile = store.users[String(userId)];
   if (!profile) return null;
+  const movieState = store.movieStates[String(userId)] ? ensureUserMovieState(userId) : null;
+  const privacy = movieState
+    ? normalizeMoviePrivacy(movieState.privacy, profile.privacy)
+    : normalizeMoviePrivacy(profile.privacy, DEFAULT_MOVIE_PRIVACY);
+  const watchlistData =
+    Array.isArray(profile.watchlist) && profile.watchlist.length > 0
+      ? profile.watchlist
+      : movieState?.watchlist ?? [];
+  const favoritesData =
+    Array.isArray(profile.favorites) && profile.favorites.length > 0
+      ? profile.favorites
+      : movieState?.favorites ?? [];
+  const watchedData =
+    Array.isArray(profile.watched) && profile.watched.length > 0
+      ? profile.watched
+      : movieState?.watched ?? [];
+  const ratedData =
+    Array.isArray(profile.rated) && profile.rated.length > 0
+      ? profile.rated
+      : movieState?.ratings ?? [];
   const followers = Object.values(store.follows).filter((setLike) => Array.isArray(setLike) && setLike.includes(userId)).length;
   const following = Array.isArray(store.follows[String(userId)]) ? store.follows[String(userId)].length : 0;
   return {
@@ -157,10 +213,10 @@ function publicProfileView(userId) {
     updated_at: profile.updated_at,
     followers,
     following,
-    watchlist: profile.privacy.watchlist ? profile.watchlist : [],
-    favorites: profile.privacy.favorites ? profile.favorites : [],
-    watched: profile.privacy.watched ? profile.watched : [],
-    rated: profile.privacy.rated ? profile.rated : [],
+    watchlist: privacy.watchlist ? watchlistData : [],
+    favorites: privacy.favorites ? favoritesData : [],
+    watched: privacy.watched ? watchedData : [],
+    rated: privacy.rated ? ratedData : [],
     favorite_actors: profile.privacy.favorite_actors ? profile.favorite_actors : [],
     favorite_directors: profile.privacy.favorite_directors ? profile.favorite_directors : [],
   };
@@ -243,6 +299,385 @@ function resolvePublicUserIdForNickname(nickname, fallbackUserId) {
   return fallbackUserId;
 }
 
+const DEFAULT_MOVIE_PRIVACY = Object.freeze({
+  watchlist: false,
+  favorites: false,
+  watched: false,
+  rated: false,
+});
+
+function parsePositiveNumber(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed) || parsed <= 0) return null;
+  return Math.floor(parsed);
+}
+
+function parseOptionalNumber(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return null;
+  return parsed;
+}
+
+function normalizeIso(value, fallback = nowIso()) {
+  const clean = String(value || '').trim();
+  if (!clean) return fallback;
+  const parsed = Date.parse(clean);
+  return Number.isFinite(parsed) ? new Date(parsed).toISOString() : fallback;
+}
+
+function normalizeMediaType(value) {
+  return String(value || '').toLowerCase() === 'tv' ? 'tv' : 'movie';
+}
+
+function normalizeText(value, max = 400) {
+  return String(value || '').trim().slice(0, max);
+}
+
+function normalizeImageUrl(input) {
+  const value = input ? String(input).trim() : '';
+  if (!value) return null;
+  if (/^data:image\/[a-zA-Z0-9.+-]+;base64,/i.test(value)) {
+    return value.length <= 2_000_000 ? value : null;
+  }
+  if (/^https?:\/\//i.test(value)) return value.slice(0, 2000);
+  return null;
+}
+
+function normalizeMoviePrivacy(input, fallback = DEFAULT_MOVIE_PRIVACY) {
+  return {
+    watchlist: typeof input?.watchlist === 'boolean' ? input.watchlist : !!fallback.watchlist,
+    favorites: typeof input?.favorites === 'boolean' ? input.favorites : !!fallback.favorites,
+    watched: typeof input?.watched === 'boolean' ? input.watched : !!fallback.watched,
+    rated: typeof input?.rated === 'boolean' ? input.rated : !!fallback.rated,
+  };
+}
+
+function normalizeMovieList(list, maxLen = 800) {
+  const entries = Array.isArray(list) ? list : [];
+  const unique = new Map();
+  for (const row of entries) {
+    const tmdbId = parsePositiveNumber(row?.tmdb_id ?? row?.tmdbId);
+    if (!tmdbId) continue;
+    const createdAt = normalizeIso(row?.created_at ?? row?.createdAt);
+    unique.set(tmdbId, {
+      tmdb_id: tmdbId,
+      media_type: normalizeMediaType(row?.media_type ?? row?.mediaType),
+      created_at: createdAt,
+    });
+  }
+  return Array.from(unique.values())
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .slice(0, maxLen);
+}
+
+function normalizeMovieRatings(list, maxLen = 800) {
+  const entries = Array.isArray(list) ? list : [];
+  const unique = new Map();
+  for (const row of entries) {
+    const tmdbId = parsePositiveNumber(row?.tmdb_id ?? row?.tmdbId);
+    if (!tmdbId) continue;
+    const ratingRaw = parseOptionalNumber(row?.rating);
+    if (!Number.isFinite(ratingRaw)) continue;
+    const rating = Math.max(0, Math.min(10, ratingRaw));
+    const createdAt = normalizeIso(row?.created_at ?? row?.createdAt);
+    const updatedAt = normalizeIso(row?.updated_at ?? row?.updatedAt ?? createdAt, createdAt);
+    unique.set(tmdbId, {
+      tmdb_id: tmdbId,
+      media_type: normalizeMediaType(row?.media_type ?? row?.mediaType),
+      rating,
+      created_at: createdAt,
+      updated_at: updatedAt,
+    });
+  }
+  return Array.from(unique.values())
+    .sort((a, b) => Date.parse(b.updated_at) - Date.parse(a.updated_at))
+    .slice(0, maxLen);
+}
+
+function ensureUserMovieState(userId) {
+  const key = String(userId);
+  const existing = store.movieStates[key];
+  if (existing && typeof existing === 'object') {
+    const normalized = {
+      user_id: Number(existing.user_id) || userId,
+      privacy: normalizeMoviePrivacy(existing.privacy, DEFAULT_MOVIE_PRIVACY),
+      watchlist: normalizeMovieList(existing.watchlist, 1200),
+      favorites: normalizeMovieList(existing.favorites, 1200),
+      watched: normalizeMovieList(existing.watched, 1200),
+      ratings: normalizeMovieRatings(existing.ratings, 1200),
+      updated_at: normalizeIso(existing.updated_at, nowIso()),
+    };
+    store.movieStates[key] = normalized;
+    return normalized;
+  }
+  const created = {
+    user_id: userId,
+    privacy: { ...DEFAULT_MOVIE_PRIVACY },
+    watchlist: [],
+    favorites: [],
+    watched: [],
+    ratings: [],
+    updated_at: nowIso(),
+  };
+  store.movieStates[key] = created;
+  return created;
+}
+
+function serializeUserMovieState(state) {
+  return {
+    user_id: Number(state.user_id),
+    privacy: normalizeMoviePrivacy(state.privacy, DEFAULT_MOVIE_PRIVACY),
+    watchlist: normalizeMovieList(state.watchlist, 1200),
+    favorites: normalizeMovieList(state.favorites, 1200),
+    watched: normalizeMovieList(state.watched, 1200),
+    ratings: normalizeMovieRatings(state.ratings, 1200),
+    updated_at: normalizeIso(state.updated_at, nowIso()),
+  };
+}
+
+function findMovieListEntry(list, tmdbId) {
+  return list.findIndex((entry) => Number(entry.tmdb_id) === tmdbId);
+}
+
+function toggleMovieListEntry(userId, listKey, tmdbId, mediaType) {
+  const state = ensureUserMovieState(userId);
+  const list = Array.isArray(state[listKey]) ? state[listKey] : [];
+  const index = findMovieListEntry(list, tmdbId);
+  if (index >= 0) {
+    list.splice(index, 1);
+    state[listKey] = list;
+    state.updated_at = nowIso();
+    return false;
+  }
+  list.unshift({
+    tmdb_id: tmdbId,
+    media_type: normalizeMediaType(mediaType),
+    created_at: nowIso(),
+  });
+  state[listKey] = normalizeMovieList(list, 1200);
+  state.updated_at = nowIso();
+  return true;
+}
+
+function setMovieWatchedState(userId, tmdbId, mediaType, watched) {
+  const state = ensureUserMovieState(userId);
+  const list = Array.isArray(state.watched) ? state.watched : [];
+  const index = findMovieListEntry(list, tmdbId);
+  if (!watched) {
+    if (index >= 0) list.splice(index, 1);
+    state.watched = list;
+    state.updated_at = nowIso();
+    return false;
+  }
+  if (index >= 0) {
+    list[index] = {
+      ...list[index],
+      media_type: normalizeMediaType(mediaType),
+      created_at: list[index].created_at || nowIso(),
+    };
+  } else {
+    list.unshift({
+      tmdb_id: tmdbId,
+      media_type: normalizeMediaType(mediaType),
+      created_at: nowIso(),
+    });
+  }
+  state.watched = normalizeMovieList(list, 1200);
+  state.updated_at = nowIso();
+  return true;
+}
+
+function setMovieRatingState(userId, tmdbId, mediaType, ratingInput) {
+  const state = ensureUserMovieState(userId);
+  const list = Array.isArray(state.ratings) ? state.ratings : [];
+  const index = findMovieListEntry(list, tmdbId);
+  const ratingParsed = parseOptionalNumber(ratingInput);
+  if (!Number.isFinite(ratingParsed) || ratingParsed <= 0) {
+    if (index >= 0) list.splice(index, 1);
+    state.ratings = list;
+    state.updated_at = nowIso();
+    return null;
+  }
+  const rating = Math.max(0, Math.min(10, ratingParsed));
+  const now = nowIso();
+  if (index >= 0) {
+    const prev = list[index];
+    list[index] = {
+      ...prev,
+      tmdb_id: tmdbId,
+      media_type: normalizeMediaType(mediaType),
+      rating,
+      created_at: prev.created_at || now,
+      updated_at: now,
+    };
+  } else {
+    list.unshift({
+      tmdb_id: tmdbId,
+      media_type: normalizeMediaType(mediaType),
+      rating,
+      created_at: now,
+      updated_at: now,
+    });
+  }
+  state.ratings = normalizeMovieRatings(list, 1200);
+  state.updated_at = now;
+  return rating;
+}
+
+function getMovieItemState(userId, tmdbId) {
+  const state = ensureUserMovieState(userId);
+  const watch = findMovieListEntry(state.watchlist, tmdbId) >= 0;
+  const fav = findMovieListEntry(state.favorites, tmdbId) >= 0;
+  const watched = findMovieListEntry(state.watched, tmdbId) >= 0;
+  const ratingEntry = state.ratings.find((entry) => Number(entry.tmdb_id) === tmdbId) || null;
+  return {
+    in_watchlist: watch,
+    in_favorites: fav,
+    watched,
+    rating: ratingEntry ? Number(ratingEntry.rating) : null,
+  };
+}
+
+function getMovieEngagementCounts(tmdbId, mediaType) {
+  const type = normalizeMediaType(mediaType);
+  let favorites = 0;
+  let watched = 0;
+  let rated = 0;
+  for (const [rawUserId, value] of Object.entries(store.movieStates || {})) {
+    const userId = parsePositiveNumber(rawUserId) || parsePositiveNumber(value?.user_id);
+    if (!userId) continue;
+    const state = ensureUserMovieState(userId);
+    if (state.favorites.some((entry) => Number(entry.tmdb_id) === tmdbId && normalizeMediaType(entry.media_type) === type)) {
+      favorites += 1;
+    }
+    if (state.watched.some((entry) => Number(entry.tmdb_id) === tmdbId && normalizeMediaType(entry.media_type) === type)) {
+      watched += 1;
+    }
+    if (state.ratings.some((entry) => Number(entry.tmdb_id) === tmdbId && normalizeMediaType(entry.media_type) === type)) {
+      rated += 1;
+    }
+  }
+  return { favorites, watched, rated };
+}
+
+function normalizeGalleryPalette(input) {
+  if (!Array.isArray(input)) return [];
+  return input
+    .map((value) => String(value || '').trim())
+    .filter((value) => /^#[0-9a-fA-F]{6}$/.test(value))
+    .slice(0, 16);
+}
+
+function normalizeGalleryDetails(input) {
+  if (!input || typeof input !== 'object') return {};
+  const out = {};
+  for (const [key, value] of Object.entries(input)) {
+    const cleanKey = normalizeText(key, 80);
+    const cleanValue = normalizeText(value, 500);
+    if (!cleanKey || !cleanValue) continue;
+    out[cleanKey] = cleanValue;
+  }
+  return out;
+}
+
+function normalizeGalleryTag(value) {
+  const tag = normalizeText(value, 50).toLowerCase();
+  return tag || 'gallery';
+}
+
+function normalizeGalleryHeight(value) {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return 260;
+  return Math.max(160, Math.min(560, Math.round(parsed)));
+}
+
+function normalizeGalleryItemPayload(input) {
+  const title = normalizeText(input?.title, 120);
+  const image = normalizeImageUrl(input?.image || input?.image_url || input?.imageUrl);
+  if (!title) throw new Error('title is required.');
+  if (!image) throw new Error('image is required.');
+  return {
+    title,
+    image,
+    tag: normalizeGalleryTag(input?.tag),
+    height: normalizeGalleryHeight(input?.height),
+    shot_id: normalizeText(input?.shot_id ?? input?.shotId, 120) || null,
+    title_header: normalizeText(input?.title_header ?? input?.titleHeader, 120) || null,
+    image_id: normalizeText(input?.image_id ?? input?.imageId, 120) || null,
+    image_url: normalizeImageUrl(input?.image_url ?? input?.imageUrl ?? image) || image,
+    palette_hex: normalizeGalleryPalette(input?.palette_hex ?? input?.paletteHex ?? []),
+    details: normalizeGalleryDetails(input?.details ?? {}),
+    created_at: nowIso(),
+  };
+}
+
+function getGalleryItemById(galleryId) {
+  return store.galleryItems.find((item) => Number(item.id) === Number(galleryId)) || null;
+}
+
+function serializeGalleryItemForFeed(item, userId) {
+  const galleryId = Number(item.id);
+  const likesCount = store.galleryLikes.filter((row) => Number(row.gallery_id) === galleryId).length;
+  const commentsCount = store.galleryComments.filter((row) => Number(row.gallery_id) === galleryId).length;
+  const likedByMe = store.galleryLikes.some(
+    (row) => Number(row.gallery_id) === galleryId && Number(row.user_id) === Number(userId)
+  );
+  const favoritedByMe = store.galleryFavorites.some(
+    (row) => Number(row.gallery_id) === galleryId && Number(row.user_id) === Number(userId)
+  );
+  return {
+    ...item,
+    likes_count: likesCount,
+    comments_count: commentsCount,
+    liked_by_me: likedByMe,
+    favorited_by_me: favoritedByMe,
+  };
+}
+
+function resolveNicknameForUser(userId, fallback = 'user') {
+  const profile = store.users[String(userId)];
+  if (!profile) return fallback;
+  const nickname = normalizeText(profile.nickname, 40);
+  return nickname || fallback;
+}
+
+function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
+  const userId = parsePositiveNumber(input?.user_id);
+  const galleryId = parsePositiveNumber(input?.gallery_id ?? galleryIdFromPath);
+  const text = normalizeText(input?.text, 1000);
+  if (!userId) throw new Error('user_id is required.');
+  if (!galleryId) throw new Error('gallery_id is required.');
+  if (!text) throw new Error('Comment text is required.');
+  const parentId = parsePositiveNumber(input?.parent_id);
+  const fallbackNickname = `user_${userId}`;
+  const nickname = normalizeText(input?.nickname, 40) || resolveNicknameForUser(userId, fallbackNickname);
+  const avatarUrl = normalizeAvatarUrl(input?.avatar_url) || normalizeAvatarUrl(store.users[String(userId)]?.avatar_url);
+  return {
+    user_id: userId,
+    gallery_id: galleryId,
+    nickname,
+    avatar_url: avatarUrl,
+    text,
+    parent_id: parentId || null,
+  };
+}
+
+function toggleGalleryReaction(list, userId, galleryId) {
+  const idx = list.findIndex(
+    (row) => Number(row.user_id) === Number(userId) && Number(row.gallery_id) === Number(galleryId)
+  );
+  if (idx >= 0) {
+    list.splice(idx, 1);
+    return false;
+  }
+  list.push({
+    user_id: Number(userId),
+    gallery_id: Number(galleryId),
+    created_at: nowIso(),
+  });
+  return true;
+}
+
 function isAuthorizedAdmin(req) {
   if (!adminApiKey) return true; // Dev fallback: if key missing, allow publish.
   const key = String(req.headers['x-admin-key'] || '').trim();
@@ -289,7 +724,15 @@ function extractCloudinaryPublicId(imageUrl) {
 }
 
 function signCloudinaryDestroy(publicId, timestamp) {
-  const payload = `public_id=${publicId}&timestamp=${timestamp}${cloudinaryApiSecret}`;
+  return signCloudinaryParams({ public_id: publicId, timestamp });
+}
+
+function signCloudinaryParams(params) {
+  const entries = Object.entries(params || {})
+    .filter(([, value]) => value !== null && value !== undefined && String(value).trim() !== '')
+    .map(([key, value]) => [String(key), String(value)])
+    .sort(([a], [b]) => a.localeCompare(b));
+  const payload = `${entries.map(([key, value]) => `${key}=${value}`).join('&')}${cloudinaryApiSecret}`;
   return crypto.createHash('sha1').update(payload).digest('hex');
 }
 
@@ -332,6 +775,48 @@ async function destroyCloudinaryImageByUrl(imageUrl) {
 
 async function destroyCloudinaryVideoByUrl(videoUrl) {
   return destroyCloudinaryAssetByUrl(videoUrl, 'video');
+}
+
+function normalizeCloudinaryResourceType(input) {
+  return String(input || '').toLowerCase() === 'video' ? 'video' : 'image';
+}
+
+function sanitizeCloudinaryPathSegment(value, fallback) {
+  const clean = String(value || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9-_]/g, '-')
+    .replace(/-+/g, '-')
+    .replace(/^-|-$/g, '')
+    .slice(0, 40);
+  return clean || fallback;
+}
+
+function createCloudinaryUploadSignaturePayload(input) {
+  if (!cloudinaryCloudName || !cloudinaryApiKey || !cloudinaryApiSecret) {
+    throw new Error('Cloudinary server credentials are missing.');
+  }
+  const resourceType = normalizeCloudinaryResourceType(input?.resource_type ?? input?.resourceType);
+  const userId = parsePositiveNumber(input?.user_id ?? input?.userId) || null;
+  const folderRoot = sanitizeCloudinaryPathSegment(input?.folder, 'movie-rec');
+  const folder = userId ? `${folderRoot}/u-${userId}` : folderRoot;
+  const timestamp = Math.floor(Date.now() / 1000);
+  const randomSuffix = crypto.randomBytes(4).toString('hex');
+  const publicId = `${folder}/${resourceType}-${Date.now()}-${randomSuffix}`;
+  const signature = signCloudinaryParams({
+    public_id: publicId,
+    timestamp,
+  });
+  return {
+    resource_type: resourceType,
+    upload_url: `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/${resourceType}/upload`,
+    cloud_name: cloudinaryCloudName,
+    api_key: cloudinaryApiKey,
+    timestamp,
+    signature,
+    public_id: publicId,
+    folder,
+  };
 }
 
 const EXPIRED_CLEANUP_INTERVAL_MS = 60_000;
@@ -405,6 +890,13 @@ function resetAllStoreData() {
   store.comments = [];
   store.users = {};
   store.follows = {};
+  store.movieStates = {};
+  store.galleryIdSeq = 1;
+  store.galleryCommentIdSeq = 1;
+  store.galleryItems = [];
+  store.galleryLikes = [];
+  store.galleryFavorites = [];
+  store.galleryComments = [];
   saveStore(store);
 }
 
@@ -431,6 +923,12 @@ const server = http.createServer(async (req, res) => {
     if (method === 'GET' && pathname === '/api/cinema/current') {
       const now = url.searchParams.get('now') || nowIso();
       return json(res, 200, { event: getCurrentEvent(now) });
+    }
+
+    if (method === 'POST' && pathname === '/api/media/cloudinary/sign-upload') {
+      const body = await readBody(req);
+      const payload = createCloudinaryUploadSignaturePayload(body);
+      return json(res, 200, payload);
     }
 
     if (method === 'POST' && pathname === '/api/cinema/events') {
@@ -497,6 +995,231 @@ const server = http.createServer(async (req, res) => {
       const ids = Array.isArray(store.follows[String(userId)]) ? store.follows[String(userId)] : [];
       const profiles = ids.map((id) => publicProfileView(id)).filter(Boolean);
       return json(res, 200, { users: profiles });
+    }
+
+    if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const state = ensureUserMovieState(userId);
+      const tmdbId = parsePositiveNumber(url.searchParams.get('tmdb_id'));
+      if (tmdbId) {
+        return json(res, 200, {
+          state: serializeUserMovieState(state),
+          item_state: getMovieItemState(userId, tmdbId),
+        });
+      }
+      return json(res, 200, { state: serializeUserMovieState(state) });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const state = ensureUserMovieState(userId);
+      if ('privacy' in body) {
+        state.privacy = normalizeMoviePrivacy(body.privacy, state.privacy);
+      }
+      if ('watchlist' in body) state.watchlist = normalizeMovieList(body.watchlist, 1200);
+      if ('favorites' in body) state.favorites = normalizeMovieList(body.favorites, 1200);
+      if ('watched' in body) state.watched = normalizeMovieList(body.watched, 1200);
+      if ('ratings' in body) state.ratings = normalizeMovieRatings(body.ratings, 1200);
+      state.updated_at = nowIso();
+      saveStore(store);
+      return json(res, 200, { state: serializeUserMovieState(state) });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/toggle')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const tmdbId = parsePositiveNumber(body?.tmdb_id);
+      if (!tmdbId) return json(res, 400, { error: 'tmdb_id is required.' });
+      const list = String(body?.list || '').trim().toLowerCase();
+      if (!['watchlist', 'favorites', 'watched'].includes(list)) {
+        return json(res, 400, { error: 'list must be watchlist, favorites or watched.' });
+      }
+      const active = toggleMovieListEntry(userId, list, tmdbId, body?.media_type);
+      saveStore(store);
+      return json(res, 200, { ok: true, active, item_state: getMovieItemState(userId, tmdbId) });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/watched')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const tmdbId = parsePositiveNumber(body?.tmdb_id);
+      if (!tmdbId) return json(res, 400, { error: 'tmdb_id is required.' });
+      const watched = !!body?.watched;
+      const active = setMovieWatchedState(userId, tmdbId, body?.media_type, watched);
+      saveStore(store);
+      return json(res, 200, { ok: true, watched: active, item_state: getMovieItemState(userId, tmdbId) });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/rating')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const tmdbId = parsePositiveNumber(body?.tmdb_id);
+      if (!tmdbId) return json(res, 400, { error: 'tmdb_id is required.' });
+      const rating = setMovieRatingState(userId, tmdbId, body?.media_type, body?.rating);
+      saveStore(store);
+      return json(res, 200, { ok: true, rating, item_state: getMovieItemState(userId, tmdbId) });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/privacy')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const state = ensureUserMovieState(userId);
+      state.privacy = normalizeMoviePrivacy(body?.privacy, state.privacy);
+      state.updated_at = nowIso();
+      saveStore(store);
+      return json(res, 200, { ok: true, privacy: state.privacy });
+    }
+
+    if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/gallery-favorites')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const favorites = store.galleryFavorites
+        .filter((row) => Number(row.user_id) === userId)
+        .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')));
+      const used = new Set();
+      const items = [];
+      for (const fav of favorites) {
+        const galleryId = Number(fav.gallery_id);
+        if (used.has(galleryId)) continue;
+        const item = getGalleryItemById(galleryId);
+        if (!item) continue;
+        used.add(galleryId);
+        items.push(item);
+      }
+      return json(res, 200, { items });
+    }
+
+    if (method === 'GET' && pathname === '/api/gallery') {
+      const userId = parsePositiveNumber(url.searchParams.get('user_id')) || 0;
+      const query = normalizeText(url.searchParams.get('query') || url.searchParams.get('q') || '', 120).toLowerCase();
+      const items = store.galleryItems
+        .filter((item) => {
+          if (!query) return true;
+          const detailsText = Object.entries(item?.details || {})
+            .map(([key, value]) => `${key} ${value}`)
+            .join(' ')
+            .toLowerCase();
+          return (
+            String(item?.title || '').toLowerCase().includes(query) ||
+            String(item?.tag || '').toLowerCase().includes(query) ||
+            String(item?.title_header || '').toLowerCase().includes(query) ||
+            detailsText.includes(query)
+          );
+        })
+        .sort((a, b) => Date.parse(String(b?.created_at || '')) - Date.parse(String(a?.created_at || '')))
+        .map((item) => serializeGalleryItemForFeed(item, userId));
+      return json(res, 200, { items });
+    }
+
+    if (method === 'POST' && pathname === '/api/gallery') {
+      const body = await readBody(req);
+      const clean = normalizeGalleryItemPayload(body);
+      const item = {
+        id: store.galleryIdSeq++,
+        ...clean,
+      };
+      store.galleryItems.push(item);
+      saveStore(store);
+      const userId = parsePositiveNumber(body?.user_id) || 0;
+      return json(res, 201, { item: serializeGalleryItemForFeed(item, userId) });
+    }
+
+    if (method === 'DELETE' && /^\/api\/gallery\/\d+$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const galleryId = parsePositiveNumber(parts[2]);
+      if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
+      const prevLen = store.galleryItems.length;
+      store.galleryItems = store.galleryItems.filter((item) => Number(item.id) !== galleryId);
+      if (store.galleryItems.length === prevLen) {
+        return json(res, 404, { error: 'Gallery item not found.' });
+      }
+      store.galleryLikes = store.galleryLikes.filter((row) => Number(row.gallery_id) !== galleryId);
+      store.galleryFavorites = store.galleryFavorites.filter((row) => Number(row.gallery_id) !== galleryId);
+      store.galleryComments = store.galleryComments.filter((row) => Number(row.gallery_id) !== galleryId);
+      saveStore(store);
+      return json(res, 200, { ok: true });
+    }
+
+    if (method === 'POST' && /^\/api\/gallery\/\d+\/toggle-like$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const galleryId = parsePositiveNumber(parts[2]);
+      if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
+      if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
+      const body = await readBody(req);
+      const userId = parsePositiveNumber(body?.user_id);
+      if (!userId) return json(res, 400, { error: 'user_id is required.' });
+      const active = toggleGalleryReaction(store.galleryLikes, userId, galleryId);
+      saveStore(store);
+      return json(res, 200, { ok: true, active });
+    }
+
+    if (method === 'POST' && /^\/api\/gallery\/\d+\/toggle-favorite$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const galleryId = parsePositiveNumber(parts[2]);
+      if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
+      if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
+      const body = await readBody(req);
+      const userId = parsePositiveNumber(body?.user_id);
+      if (!userId) return json(res, 400, { error: 'user_id is required.' });
+      const active = toggleGalleryReaction(store.galleryFavorites, userId, galleryId);
+      saveStore(store);
+      return json(res, 200, { ok: true, active });
+    }
+
+    if (method === 'GET' && /^\/api\/gallery\/\d+\/comments$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const galleryId = parsePositiveNumber(parts[2]);
+      if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
+      const comments = store.galleryComments
+        .filter((row) => Number(row.gallery_id) === galleryId)
+        .map((row) => ({
+          ...row,
+          nickname: normalizeText(row.nickname, 40) || resolveNicknameForUser(Number(row.user_id), `user_${row.user_id}`),
+          avatar_url: normalizeAvatarUrl(row.avatar_url),
+          parent_id: parsePositiveNumber(row.parent_id) || null,
+        }))
+        .sort((a, b) => Date.parse(String(a.created_at || '')) - Date.parse(String(b.created_at || '')));
+      return json(res, 200, { comments });
+    }
+
+    if (method === 'POST' && /^\/api\/gallery\/\d+\/comments$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const galleryId = parsePositiveNumber(parts[2]);
+      if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
+      if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
+      const body = await readBody(req);
+      const clean = normalizeGalleryCommentPayload(body, galleryId);
+      const comment = {
+        id: store.galleryCommentIdSeq++,
+        ...clean,
+        created_at: nowIso(),
+      };
+      store.galleryComments.push(comment);
+      saveStore(store);
+      return json(res, 201, { comment });
+    }
+
+    if (method === 'GET' && /^\/api\/movies\/\d+\/engagement$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const tmdbId = parsePositiveNumber(parts[2]);
+      if (!tmdbId) return json(res, 400, { error: 'Invalid tmdb id.' });
+      const mediaType = normalizeMediaType(url.searchParams.get('media_type'));
+      const counts = getMovieEngagementCounts(tmdbId, mediaType);
+      return json(res, 200, { counts });
     }
 
     if (method === 'POST' && pathname === '/api/comments') {

@@ -412,7 +412,7 @@ export default function AdminScreen() {
       const uploadedSelectedImageUrls: string[] = [];
       if (selectedImages.length) {
         if (!cloudinaryReady) {
-          setGalleryMessage('Cloudinary missing. Add cloud name and upload preset in app.json extra.');
+          setGalleryMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
         for (let i = 0; i < selectedImages.length; i += 1) {
@@ -520,7 +520,7 @@ export default function AdminScreen() {
 
       if (!/^https?:\/\//i.test(finalVideoUrl)) {
         if (!cloudinaryReady) {
-          setCinemaMessage('Cloudinary missing. Add cloud name and upload preset in app.json extra.');
+          setCinemaMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
         const uploaded = await uploadVideoToCloudinary(finalVideoUrl);
@@ -533,7 +533,7 @@ export default function AdminScreen() {
       }
       if (!/^https?:\/\//i.test(finalPosterUrl)) {
         if (!cloudinaryReady) {
-          setCinemaMessage('Cloudinary missing. Add cloud name and upload preset in app.json extra.');
+          setCinemaMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
         const uploadedPoster = await uploadImageToCloudinary(finalPosterUrl);
@@ -652,7 +652,7 @@ export default function AdminScreen() {
         <Text style={styles.title}>Cinema Scheduler</Text>
         <Text style={styles.subtitle}>Publish one live cinema event with MP4 + chat room.</Text>
         <Text style={styles.mini}>Latest event: {latestCinemaInfo || 'none'}</Text>
-        <Text style={styles.mini}>Cloudinary: {cloudinaryReady ? 'configured' : 'missing config'}</Text>
+        <Text style={styles.mini}>Upload service: {cloudinaryReady ? 'configured' : 'missing config'}</Text>
 
         <Text style={styles.label}>TMDB ID (required)</Text>
         <TextInput

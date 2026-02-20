@@ -1,8 +1,10 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import { Image as ExpoImage } from 'expo-image';
 import {
   Alert,
   Animated,
-  Image,
+  Image as RNImage,
+  Keyboard,
   Modal,
   Platform,
   Pressable,
@@ -15,6 +17,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router, useLocalSearchParams } from 'expo-router';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fonts, Spacing } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
@@ -80,6 +83,7 @@ function formatCommentTime(value: string) {
 export default function GalleryScreen() {
   const theme = useTheme();
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
   const params = useLocalSearchParams<{ open?: string }>();
   const userId = user?.id ?? 0;
   const isAdmin = user?.role === 'admin';
@@ -94,6 +98,7 @@ export default function GalleryScreen() {
   const [comments, setComments] = useState<GalleryComment[]>([]);
   const [commentInput, setCommentInput] = useState('');
   const [replyTo, setReplyTo] = useState<GalleryComment | null>(null);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
   const [selectedAspectRatio, setSelectedAspectRatio] = useState<number>(4 / 3);
   const modalOpacity = useState(() => new Animated.Value(0))[0];
   const modalTranslateY = useState(() => new Animated.Value(16))[0];
@@ -119,14 +124,16 @@ export default function GalleryScreen() {
   }, [items, params.open]);
 
   useEffect(() => {
+    setReady(false);
     void refresh('');
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [userId]);
 
   useEffect(() => {
+    if (!ready) return;
     const timer = setTimeout(() => {
       void refresh(query);
-    }, 180);
+    }, 320);
     return () => clearTimeout(timer);
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [query, userId]);
@@ -156,7 +163,7 @@ export default function GalleryScreen() {
     const fallback = getItemAspectFallback(selectedItem);
     setSelectedAspectRatio(fallback);
     let active = true;
-    Image.getSize(
+    RNImage.getSize(
       selectedItem.image,
       (w, h) => {
         if (!active || !w || !h) return;
@@ -182,6 +189,22 @@ export default function GalleryScreen() {
     void getGalleryComments(id).then(setComments).catch(() => setComments([]));
   }, [selectedId]);
 
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, []);
+
   const columnWidth = Math.max(130, (width - Spacing.four * 2 - Spacing.two) / 2);
   const columns = useMemo(() => {
     const left: GalleryFeedItem[] = [];
@@ -202,7 +225,7 @@ export default function GalleryScreen() {
   }, [items]);
 
   const detailData = useMemo(() => {
-    if (!selectedItem) return { tags: '', groups: [[], []] as Array<Array<[string, string]>> };
+    if (!selectedItem) return { tags: '', groups: [[], []] as [string, string][][] };
     const pairs = detailsPairs(selectedItem.details);
     const tags = pairs.find(([k]) => k.toUpperCase() === 'TAGS')?.[1] ?? '';
     const rest = pairs.filter(([k]) => k.toUpperCase() !== 'TAGS');
@@ -247,7 +270,7 @@ export default function GalleryScreen() {
         }
         await deleteGalleryItem(id);
         if (selectedId === id) setSelectedId(null);
-        await refresh(query);
+        setItems((prev) => prev.filter((item) => item.id !== id));
       } catch {
         setError('Delete failed.');
       }
@@ -283,8 +306,17 @@ export default function GalleryScreen() {
   const onToggleLike = async () => {
     if (!selectedItem || !userId) return;
     try {
-      await toggleGalleryLike(userId, Number(selectedItem.id));
-      await refresh(query);
+      const nextLiked = await toggleGalleryLike(userId, Number(selectedItem.id));
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== selectedItem.id) return item;
+          return {
+            ...item,
+            likedByMe: nextLiked,
+            likesCount: Math.max(0, item.likesCount + (nextLiked ? 1 : -1)),
+          };
+        })
+      );
     } catch {
       setError('Like failed.');
     }
@@ -293,8 +325,16 @@ export default function GalleryScreen() {
   const onToggleFavorite = async () => {
     if (!selectedItem || !userId) return;
     try {
-      await toggleGalleryFavorite(userId, Number(selectedItem.id));
-      await refresh(query);
+      const nextFavorited = await toggleGalleryFavorite(userId, Number(selectedItem.id));
+      setItems((prev) =>
+        prev.map((item) => {
+          if (item.id !== selectedItem.id) return item;
+          return {
+            ...item,
+            favoritedByMe: nextFavorited,
+          };
+        })
+      );
     } catch {
       setError('Save failed.');
     }
@@ -310,18 +350,37 @@ export default function GalleryScreen() {
       setReplyTo(null);
       const nextComments = await getGalleryComments(Number(selectedItem.id));
       setComments(nextComments);
-      await refresh(query);
+      setItems((prev) =>
+        prev.map((item) =>
+          item.id === selectedItem.id
+            ? {
+                ...item,
+                commentsCount: item.commentsCount + 1,
+              }
+            : item
+        )
+      );
     } catch {
       setError('Comment failed.');
     }
   };
 
   const openUserProfileFromModal = (targetUserId: number) => {
+    Keyboard.dismiss();
     setSelectedId(null);
     setTimeout(() => {
       router.push(`/user/${targetUserId}` as any);
     }, 0);
   };
+
+  const estimatedKeyboardHeight = Platform.OS === 'ios' ? 320 : 280;
+  const primeKeyboardOffset = useCallback(() => {
+    // Android does not emit keyboardWillShow, so we pre-shift on focus.
+    setKeyboardHeight((prev) => (prev > 0 ? prev : estimatedKeyboardHeight));
+  }, [estimatedKeyboardHeight]);
+
+  const commentsKeyboardOffset = Math.max(0, keyboardHeight - insets.bottom);
+  const commentsComposerBottom = Math.max(insets.bottom + 10, 14);
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -363,7 +422,13 @@ export default function GalleryScreen() {
         </View>
       </ScrollView>
 
-      <Modal visible={!!selectedItem} animationType="slide" onRequestClose={() => setSelectedId(null)}>
+      <Modal
+        visible={!!selectedItem}
+        animationType="slide"
+        onRequestClose={() => {
+          Keyboard.dismiss();
+          setSelectedId(null);
+        }}>
         <Animated.View
           style={[
             styles.modalRoot,
@@ -376,17 +441,28 @@ export default function GalleryScreen() {
             <Text style={styles.modalTitle} numberOfLines={2} ellipsizeMode="tail">
               {selectedItem?.titleHeader || selectedItem?.title || 'Frame'}
             </Text>
-            <Pressable onPress={() => setSelectedId(null)} style={styles.closeBtn}>
+            <Pressable
+              onPress={() => {
+                Keyboard.dismiss();
+                setSelectedId(null);
+              }}
+              style={styles.closeBtn}>
               <Text style={styles.closeText}>X</Text>
             </Pressable>
           </View>
 
-          <ScrollView contentContainerStyle={styles.modalContent} showsVerticalScrollIndicator={false}>
+          <ScrollView
+            contentContainerStyle={styles.modalContent}
+            showsVerticalScrollIndicator={false}
+            keyboardDismissMode="interactive"
+            keyboardShouldPersistTaps="handled">
             {selectedItem ? (
-              <Image
+              <ExpoImage
                 source={{ uri: selectedItem.image }}
                 style={[styles.heroImage, { aspectRatio: selectedAspectRatio }]}
-                resizeMode="contain"
+                contentFit="contain"
+                transition={120}
+                cachePolicy="memory-disk"
               />
             ) : null}
 
@@ -444,33 +520,18 @@ export default function GalleryScreen() {
             </View>
 
             <Text style={styles.commentsHeader}>COMMENTS</Text>
-            {replyTo ? (
-              <View style={styles.replyingRow}>
-                <Text style={styles.replyingText}>Replying to @{replyTo.nickname}</Text>
-                <Pressable onPress={() => setReplyTo(null)}>
-                  <Text style={styles.replyCancel}>Cancel</Text>
-                </Pressable>
-              </View>
-            ) : null}
-            <View style={styles.commentRow}>
-              <TextInput
-                value={commentInput}
-                onChangeText={setCommentInput}
-                placeholder="Write a comment..."
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                style={styles.commentInput}
-              />
-              <Pressable onPress={onSendComment} style={styles.sendBtn}>
-                <Text style={styles.sendText}>Send</Text>
-              </Pressable>
-            </View>
-
             <View style={styles.commentsList}>
               {rootComments.map((comment) => (
                 <View key={comment.id} style={styles.commentCard}>
                   <Pressable onPress={() => openUserProfileFromModal(comment.userId)}>
                     {comment.avatarUrl ? (
-                      <Image source={{ uri: comment.avatarUrl }} style={styles.commentAvatar} />
+                      <ExpoImage
+                        source={{ uri: comment.avatarUrl }}
+                        style={styles.commentAvatar}
+                        contentFit="cover"
+                        transition={80}
+                        cachePolicy="memory-disk"
+                      />
                     ) : (
                       <View style={styles.commentAvatarFallback}>
                         <Text style={styles.commentAvatarText}>?</Text>
@@ -492,7 +553,13 @@ export default function GalleryScreen() {
                       <View key={reply.id} style={styles.replyCard}>
                         <Pressable onPress={() => openUserProfileFromModal(reply.userId)}>
                           {reply.avatarUrl ? (
-                            <Image source={{ uri: reply.avatarUrl }} style={styles.replyAvatar} />
+                            <ExpoImage
+                              source={{ uri: reply.avatarUrl }}
+                              style={styles.replyAvatar}
+                              contentFit="cover"
+                              transition={80}
+                              cachePolicy="memory-disk"
+                            />
                           ) : (
                             <View style={styles.replyAvatarFallback}>
                               <Text style={styles.replyAvatarFallbackText}>?</Text>
@@ -515,6 +582,39 @@ export default function GalleryScreen() {
               ))}
             </View>
           </ScrollView>
+          <View
+            style={[
+              styles.commentComposer,
+              {
+                paddingBottom: commentsComposerBottom,
+                transform: [{ translateY: -commentsKeyboardOffset }],
+              },
+            ]}>
+            {replyTo ? (
+              <View style={styles.replyingRow}>
+                <Text style={styles.replyingText}>Replying to @{replyTo.nickname}</Text>
+                <Pressable onPress={() => setReplyTo(null)}>
+                  <Text style={styles.replyCancel}>Cancel</Text>
+                </Pressable>
+              </View>
+            ) : null}
+            <View style={styles.commentRow}>
+              <TextInput
+                value={commentInput}
+                onChangeText={setCommentInput}
+                placeholder="Write a comment..."
+                placeholderTextColor="rgba(255,255,255,0.55)"
+                onFocus={primeKeyboardOffset}
+                returnKeyType="send"
+                onSubmitEditing={onSendComment}
+                blurOnSubmit={false}
+                style={styles.commentInput}
+              />
+              <Pressable onPress={onSendComment} style={styles.sendBtn}>
+                <Text style={styles.sendText}>Send</Text>
+              </Pressable>
+            </View>
+          </View>
         </Animated.View>
       </Modal>
     </View>
@@ -530,27 +630,20 @@ function GalleryCard({
   columnWidth: number;
   onPress: () => void;
 }) {
+  const backupImage = useMemo(() => {
+    const label = encodeURIComponent(String(item.title || 'Movie').slice(0, 30));
+    return `https://placehold.co/600x900/101010/E8E8E8/png?text=${label}`;
+  }, [item.title]);
+  const [imageUri, setImageUri] = useState(item.image);
   const [failed, setFailed] = useState(false);
-  const [aspectRatio, setAspectRatio] = useState<number>(getItemAspectFallback(item));
-
-  useEffect(() => {
-    let active = true;
-    const fallback = getItemAspectFallback(item);
-    setAspectRatio(fallback);
-    Image.getSize(
-      item.image,
-      (w, h) => {
-        if (!active || !w || !h) return;
-        setAspectRatio(w / h);
-      },
-      () => setAspectRatio(fallback)
-    );
-    return () => {
-      active = false;
-    };
-  }, [item]);
+  const aspectRatio = getItemAspectFallback(item);
 
   const dynamicHeight = Math.max(60, Math.round(columnWidth / aspectRatio));
+
+  useEffect(() => {
+    setImageUri(item.image);
+    setFailed(false);
+  }, [item.id, item.image]);
 
   return (
     <Pressable
@@ -562,7 +655,20 @@ function GalleryCard({
       onPress={onPress}>
       {!failed ? (
         <>
-          <Image source={{ uri: item.image }} style={styles.cardImage} resizeMode="contain" onError={() => setFailed(true)} />
+          <ExpoImage
+            source={{ uri: imageUri }}
+            style={styles.cardImage}
+            contentFit="contain"
+            transition={120}
+            cachePolicy="memory-disk"
+            onError={() => {
+              if (imageUri !== backupImage) {
+                setImageUri(backupImage);
+                return;
+              }
+              setFailed(true);
+            }}
+          />
         </>
       ) : (
         <View style={styles.cardFallback}>
@@ -679,7 +785,7 @@ const styles = StyleSheet.create({
   },
   modalContent: {
     paddingHorizontal: 14,
-    paddingBottom: 120,
+    paddingBottom: 184,
     gap: 12,
   },
   heroImage: {
@@ -809,6 +915,18 @@ const styles = StyleSheet.create({
   commentRow: {
     flexDirection: 'row',
     gap: 8,
+  },
+  commentComposer: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    bottom: 0,
+    paddingHorizontal: 14,
+    paddingTop: 8,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: '#000',
+    gap: 6,
   },
   commentInput: {
     flex: 1,

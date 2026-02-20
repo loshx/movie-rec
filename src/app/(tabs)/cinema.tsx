@@ -92,7 +92,7 @@ export default function CinemaScreen() {
 
     const poll = setInterval(() => {
       loadEvent();
-    }, 5000);
+    }, 15000);
 
     return () => {
       mounted = false;
@@ -101,9 +101,10 @@ export default function CinemaScreen() {
   }, []);
 
   useEffect(() => {
-    const t = setInterval(() => setNowIso(new Date().toISOString()), 1000);
+    if (!event) return;
+    const t = setInterval(() => setNowIso(new Date().toISOString()), 15000);
     return () => clearInterval(t);
-  }, []);
+  }, [event?.id]);
 
   useEffect(() => {
     let mounted = true;
