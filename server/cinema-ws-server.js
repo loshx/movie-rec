@@ -732,7 +732,7 @@ function isCloudinaryImageOwnedByUser(imageUrl, userIdInput) {
 }
 
 function signCloudinaryDestroy(publicId, timestamp) {
-  return signCloudinaryParams({ public_id: publicId, timestamp });
+  return signCloudinaryParams({ public_id: publicId, timestamp, invalidate: 'true' });
 }
 
 function signCloudinaryParams(params) {
