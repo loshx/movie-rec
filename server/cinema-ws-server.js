@@ -653,6 +653,58 @@ function resolveNicknameForUser(userId, fallback = 'user') {
   return nickname || fallback;
 }
 
+function resolveAvatarForUser(userId, fallback = null) {
+  const profile = store.users[String(userId)];
+  const avatarFromProfile = normalizeAvatarUrl(profile?.avatar_url);
+  if (avatarFromProfile) return avatarFromProfile;
+  return normalizeAvatarUrl(fallback);
+}
+
+function resolveCommentIdentity(row) {
+  const fallbackUserId = parsePositiveNumber(row?.user_id) || null;
+  const publicUserId =
+    parsePositiveNumber(row?.public_user_id) || resolvePublicUserIdForNickname(row?.nickname, fallbackUserId) || fallbackUserId;
+  const fallbackNickname =
+    normalizeText(row?.nickname, 40) || (publicUserId ? `user_${publicUserId}` : fallbackUserId ? `user_${fallbackUserId}` : 'user');
+  const nickname = publicUserId ? resolveNicknameForUser(publicUserId, fallbackNickname) : fallbackNickname;
+  const avatarUrl = publicUserId ? resolveAvatarForUser(publicUserId, row?.avatar_url) : normalizeAvatarUrl(row?.avatar_url);
+  return {
+    public_user_id: publicUserId,
+    nickname,
+    avatar_url: avatarUrl,
+  };
+}
+
+function syncStoredCommentIdentityForUser(userId, prevNickname, nextNickname, nextAvatarUrl) {
+  const prevLower = String(prevNickname || '').trim().toLowerCase();
+  const nextLower = String(nextNickname || '').trim().toLowerCase();
+  const normalizedAvatar = normalizeAvatarUrl(nextAvatarUrl);
+  const matchesUser = (row) => {
+    const publicUserId = parsePositiveNumber(row?.public_user_id);
+    const rowUserId = parsePositiveNumber(row?.user_id);
+    const rowNickname = String(row?.nickname || '').trim().toLowerCase();
+    if (publicUserId === userId) return true;
+    if (rowUserId === userId) return true;
+    if (prevLower && rowNickname === prevLower) return true;
+    if (nextLower && rowNickname === nextLower) return true;
+    return false;
+  };
+
+  for (const row of store.comments) {
+    if (!matchesUser(row)) continue;
+    row.public_user_id = userId;
+    row.nickname = nextNickname;
+    row.avatar_url = normalizedAvatar;
+  }
+
+  for (const row of store.galleryComments) {
+    if (!matchesUser(row)) continue;
+    row.public_user_id = userId;
+    row.nickname = nextNickname;
+    row.avatar_url = normalizedAvatar;
+  }
+}
+
 function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
   const userId = parsePositiveNumber(input?.user_id);
   const galleryId = parsePositiveNumber(input?.gallery_id ?? galleryIdFromPath);
@@ -662,10 +714,13 @@ function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
   if (!text) throw new Error('Comment text is required.');
   const parentId = parsePositiveNumber(input?.parent_id);
   const fallbackNickname = `user_${userId}`;
-  const nickname = normalizeText(input?.nickname, 40) || resolveNicknameForUser(userId, fallbackNickname);
-  const avatarUrl = normalizeAvatarUrl(input?.avatar_url) || normalizeAvatarUrl(store.users[String(userId)]?.avatar_url);
+  const rawNickname = normalizeText(input?.nickname, 40) || resolveNicknameForUser(userId, fallbackNickname);
+  const publicUserId = resolvePublicUserIdForNickname(rawNickname, userId);
+  const nickname = resolveNicknameForUser(publicUserId, rawNickname);
+  const avatarUrl = resolveAvatarForUser(publicUserId, input?.avatar_url);
   return {
     user_id: userId,
+    public_user_id: publicUserId,
     gallery_id: galleryId,
     nickname,
     avatar_url: avatarUrl,
@@ -1091,6 +1146,7 @@ const server = http.createServer(async (req, res) => {
       const clean = normalizeProfileSync(body);
       let activeSession = getUserSession(clean.user_id);
       const existingProfile = store.users[String(clean.user_id)];
+      const prevNickname = normalizeText(existingProfile?.nickname, 40) || '';
       if (activeSession) {
         const token = getUserTokenFromRequest(req);
         if (!token || token !== activeSession.token) {
@@ -1112,6 +1168,7 @@ const server = http.createServer(async (req, res) => {
         activeSession = upsertUserSession(clean.user_id, null);
       }
       store.users[String(clean.user_id)] = clean;
+      syncStoredCommentIdentityForUser(clean.user_id, prevNickname, clean.nickname, clean.avatar_url);
       saveStore(store);
       return json(res, 200, {
         ok: true,
@@ -1349,12 +1406,17 @@ const server = http.createServer(async (req, res) => {
       if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
       const comments = store.galleryComments
         .filter((row) => Number(row.gallery_id) === galleryId)
-        .map((row) => ({
-          ...row,
-          nickname: normalizeText(row.nickname, 40) || resolveNicknameForUser(Number(row.user_id), `user_${row.user_id}`),
-          avatar_url: normalizeAvatarUrl(row.avatar_url),
-          parent_id: parsePositiveNumber(row.parent_id) || null,
-        }))
+        .map((row) => {
+          const identity = resolveCommentIdentity(row);
+          return {
+            ...row,
+            user_id: identity.public_user_id || parsePositiveNumber(row.user_id) || 0,
+            public_user_id: identity.public_user_id,
+            nickname: identity.nickname,
+            avatar_url: identity.avatar_url,
+            parent_id: parsePositiveNumber(row.parent_id) || null,
+          };
+        })
         .sort((a, b) => Date.parse(String(a.created_at || '')) - Date.parse(String(b.created_at || '')));
       return json(res, 200, { comments });
     }
@@ -1366,9 +1428,14 @@ const server = http.createServer(async (req, res) => {
       if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
       const body = await readBody(req);
       const clean = normalizeGalleryCommentPayload(body, galleryId);
+      const identity = resolveCommentIdentity(clean);
       const comment = {
         id: store.galleryCommentIdSeq++,
         ...clean,
+        user_id: identity.public_user_id || clean.user_id,
+        public_user_id: identity.public_user_id,
+        nickname: identity.nickname,
+        avatar_url: identity.avatar_url,
         created_at: nowIso(),
       };
       store.galleryComments.push(comment);
@@ -1388,10 +1455,17 @@ const server = http.createServer(async (req, res) => {
     if (method === 'POST' && pathname === '/api/comments') {
       const body = await readBody(req);
       const clean = normalizeCommentInput(body);
+      const identity = resolveCommentIdentity({
+        ...clean,
+        public_user_id: resolvePublicUserIdForNickname(clean.nickname, clean.user_id),
+      });
       const comment = {
         id: store.commentIdSeq++,
         ...clean,
-        public_user_id: resolvePublicUserIdForNickname(clean.nickname, clean.user_id),
+        user_id: identity.public_user_id || clean.user_id,
+        public_user_id: identity.public_user_id,
+        nickname: identity.nickname,
+        avatar_url: identity.avatar_url,
         created_at: nowIso(),
       };
       store.comments.push(comment);
@@ -1406,7 +1480,16 @@ const server = http.createServer(async (req, res) => {
       }
       const comments = store.comments
         .filter((c) => c.tmdb_id === tmdbId)
-        .map((c) => ({ ...c, avatar_url: normalizeAvatarUrl(c.avatar_url) }))
+        .map((c) => {
+          const identity = resolveCommentIdentity(c);
+          return {
+            ...c,
+            user_id: identity.public_user_id || parsePositiveNumber(c.user_id) || 0,
+            public_user_id: identity.public_user_id,
+            nickname: identity.nickname,
+            avatar_url: identity.avatar_url,
+          };
+        })
         .sort((a, b) => Date.parse(a.created_at) - Date.parse(b.created_at));
       return json(res, 200, { comments });
     }
