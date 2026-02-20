@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { getBackendUserTokenForUser, setBackendUserSession } from './backend-session';
 
 export type BackendCinemaEvent = {
   id: number;
@@ -34,11 +35,11 @@ export type BackendCloudinarySignature = {
   signature: string;
   public_id: string;
   folder: string;
+  session_token?: string | null;
 };
 
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_BACKEND_URL?: string;
-  EXPO_PUBLIC_ADMIN_API_KEY?: string;
 };
 
 function backendBaseUrl() {
@@ -71,6 +72,16 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   return (await res.json()) as T;
 }
 
+function normalizeAdminKey(adminKey?: string | null) {
+  return String(adminKey ?? '').trim();
+}
+
+function withUserTokenHeader(headers: Record<string, string>, userId?: number | null) {
+  const token = getBackendUserTokenForUser(userId);
+  if (token) headers['x-user-token'] = token;
+  return headers;
+}
+
 export async function backendGetCurrentCinemaEvent(nowIsoValue = new Date().toISOString()) {
   const url = getBackendApiUrl(`/api/cinema/current?now=${encodeURIComponent(nowIsoValue)}`);
   if (!url) return null;
@@ -85,15 +96,19 @@ export async function backendGetLatestCinemaEvent() {
   return payload.event;
 }
 
-export async function backendCreateCinemaEvent(input: BackendCinemaInput) {
+export async function backendCreateCinemaEvent(
+  input: BackendCinemaInput,
+  options?: { adminKey?: string | null }
+) {
   const url = getBackendApiUrl('/api/cinema/events');
   if (!url) throw new Error('Backend URL missing.');
 
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  const adminKey = (extra.EXPO_PUBLIC_ADMIN_API_KEY ?? '').trim();
-  if (adminKey) headers['x-admin-key'] = adminKey;
+  const adminKey = normalizeAdminKey(options?.adminKey);
+  if (!adminKey) throw new Error('Admin API key is required.');
+  headers['x-admin-key'] = adminKey;
 
   const payload = await requestJson<{ event: BackendCinemaEvent }>(url, {
     method: 'POST',
@@ -112,14 +127,15 @@ export async function backendCreateCinemaEvent(input: BackendCinemaInput) {
   return payload.event;
 }
 
-export async function backendResetAllData() {
+export async function backendResetAllData(options?: { adminKey?: string | null }) {
   const url = getBackendApiUrl('/api/admin/reset-all');
   if (!url) return;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  const adminKey = (extra.EXPO_PUBLIC_ADMIN_API_KEY ?? '').trim();
-  if (adminKey) headers['x-admin-key'] = adminKey;
+  const adminKey = normalizeAdminKey(options?.adminKey);
+  if (!adminKey) throw new Error('Admin API key is required.');
+  headers['x-admin-key'] = adminKey;
   await requestJson<{ ok: boolean }>(url, {
     method: 'POST',
     headers,
@@ -127,14 +143,18 @@ export async function backendResetAllData() {
   });
 }
 
-export async function backendDeleteCloudinaryImage(imageUrl: string) {
+export async function backendDeleteCloudinaryImage(
+  imageUrl: string,
+  options?: { adminKey?: string | null }
+) {
   const url = getBackendApiUrl('/api/admin/cloudinary/delete-image');
   if (!url) return;
   const headers: Record<string, string> = {
     'Content-Type': 'application/json',
   };
-  const adminKey = (extra.EXPO_PUBLIC_ADMIN_API_KEY ?? '').trim();
-  if (adminKey) headers['x-admin-key'] = adminKey;
+  const adminKey = normalizeAdminKey(options?.adminKey);
+  if (!adminKey) throw new Error('Admin API key is required.');
+  headers['x-admin-key'] = adminKey;
   await requestJson<{ ok: boolean }>(url, {
     method: 'POST',
     headers,
@@ -147,9 +167,10 @@ export async function backendDeleteCloudinaryImage(imageUrl: string) {
 export async function backendDeleteOwnCloudinaryImage(imageUrl: string, userId: number) {
   const url = getBackendApiUrl('/api/media/cloudinary/delete-image');
   if (!url) return;
+  const headers = withUserTokenHeader({ 'Content-Type': 'application/json' }, userId);
   await requestJson<{ ok: boolean }>(url, {
     method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
+    headers,
     body: JSON.stringify({
       image_url: imageUrl,
       user_id: userId,
@@ -159,20 +180,28 @@ export async function backendDeleteOwnCloudinaryImage(imageUrl: string, userId: 
 
 export async function backendGetCloudinaryUploadSignature(
   resourceType: 'image' | 'video',
-  options?: { userId?: number | null; folder?: string | null }
+  options?: { userId?: number | null; folder?: string | null; adminKey?: string | null }
 ) {
   const url = getBackendApiUrl('/api/media/cloudinary/sign-upload');
   if (!url) return null;
   try {
-    return await requestJson<BackendCloudinarySignature>(url, {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    withUserTokenHeader(headers, options?.userId ?? null);
+    const adminKey = normalizeAdminKey(options?.adminKey);
+    if (adminKey) headers['x-admin-key'] = adminKey;
+    const res = await requestJson<BackendCloudinarySignature>(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify({
         resource_type: resourceType,
         user_id: options?.userId ?? null,
         folder: options?.folder ?? null,
       }),
     });
+    if (res?.session_token && Number.isFinite(Number(options?.userId)) && Number(options?.userId) > 0) {
+      setBackendUserSession({ userId: Number(options?.userId), token: String(res.session_token) });
+    }
+    return res;
   } catch {
     return null;
   }

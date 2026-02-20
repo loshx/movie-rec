@@ -64,10 +64,10 @@ function nowIso() {
   return new Date().toISOString();
 }
 
-export async function createCinemaEvent(input: CinemaEventInput) {
+export async function createCinemaEvent(input: CinemaEventInput, options?: { adminKey?: string | null }) {
   if (hasBackendApi()) {
     try {
-      await backendCreateCinemaEvent(input);
+      await backendCreateCinemaEvent(input, { adminKey: options?.adminKey ?? null });
       return;
     } catch {
       // Fallback to local storage if backend is down.

@@ -34,6 +34,7 @@ import {
 } from '@/db/gallery';
 import { useTheme } from '@/hooks/use-theme';
 import { backendDeleteCloudinaryImage, hasBackendApi } from '@/lib/cinema-backend';
+import { getRuntimeAdminKey } from '@/lib/admin-session';
 
 function normalizeCardHeight(value: unknown) {
   const parsed = Number(value);
@@ -257,16 +258,16 @@ export default function GalleryScreen() {
     const doDelete = async () => {
       try {
         if (hasBackendApi() && /^https?:\/\/res\.cloudinary\.com\//i.test(id === selectedId ? (selectedItem?.image ?? '') : (items.find((x) => x.id === id)?.image ?? ''))) {
-          const imageUrl = id === selectedId
-            ? selectedItem?.image
-            : items.find((x) => x.id === id)?.image;
-          if (imageUrl) {
-            try {
-              await backendDeleteCloudinaryImage(imageUrl);
-            } catch {
-              // Keep local delete flow even if Cloudinary delete fails.
-            }
-          }
+              const imageUrl = id === selectedId
+                ? selectedItem?.image
+                : items.find((x) => x.id === id)?.image;
+              if (imageUrl) {
+                try {
+                  await backendDeleteCloudinaryImage(imageUrl, { adminKey: getRuntimeAdminKey() || null });
+                } catch {
+                  // Keep local delete flow even if Cloudinary delete fails.
+                }
+              }
         }
         await deleteGalleryItem(id);
         if (selectedId === id) setSelectedId(null);

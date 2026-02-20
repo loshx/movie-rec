@@ -4,18 +4,12 @@ import { backendGetCloudinaryUploadSignature, hasBackendApi } from '@/lib/cinema
 
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?: string;
-  EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?: string;
 };
 
 const CLOUD_NAME = extra.EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME?.trim() ?? '';
-const UPLOAD_PRESET = extra.EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET?.trim() ?? '';
-
-function hasUnsignedCloudinaryConfig() {
-  return !!CLOUD_NAME && !!UPLOAD_PRESET;
-}
 
 export function hasCloudinaryConfig() {
-  return hasBackendApi() || hasUnsignedCloudinaryConfig();
+  return hasBackendApi();
 }
 
 export type CloudinaryVideoUploadResult = {
@@ -31,6 +25,7 @@ export type CloudinaryImageUploadResult = {
 export type CloudinarySignedUploadOptions = {
   userId?: number | null;
   folder?: string | null;
+  adminKey?: string | null;
 };
 
 function isRemoteHttpUrl(value: string) {
@@ -109,40 +104,14 @@ export async function uploadVideoToCloudinary(
   options?: CloudinarySignedUploadOptions
 ) {
   const signedData = await uploadSignedAsset(fileUri, 'video', options);
-  if (signedData?.secure_url) {
-    const secureUrl = String(signedData.secure_url);
-    const durationSec = Number.isFinite(Number(signedData.duration)) ? Number(signedData.duration) : null;
-    const publicId = typeof signedData.public_id === 'string' ? signedData.public_id : '';
-    const cloudName = String(signedData.cloud_name ?? CLOUD_NAME ?? '').trim();
-    const posterUrl = cloudName && publicId ? `https://res.cloudinary.com/${cloudName}/video/upload/so_1/${publicId}.jpg` : null;
-    return {
-      secureUrl,
-      durationSec,
-      posterUrl,
-    } as CloudinaryVideoUploadResult;
+  if (!signedData?.secure_url) {
+    throw new Error('Cloudinary signed upload is unavailable. Check backend URL and credentials.');
   }
-
-  if (!hasUnsignedCloudinaryConfig()) {
-    throw new Error('Cloudinary upload is not configured. Set backend Cloudinary credentials or upload preset.');
-  }
-  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/video/upload`;
-  const filename = `cinema-${Date.now()}.mp4`;
-  const form = new FormData();
-  form.append('upload_preset', UPLOAD_PRESET);
-  await appendCloudinaryFile(form, fileUri, filename, 'video/mp4');
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    body: form,
-  });
-  const data = await res.json();
-  if (!res.ok || !data?.secure_url) {
-    throw new Error(data?.error?.message || 'Cloudinary upload failed.');
-  }
-  const secureUrl = String(data.secure_url);
-  const durationSec = Number.isFinite(Number(data.duration)) ? Number(data.duration) : null;
-  const publicId = typeof data.public_id === 'string' ? data.public_id : '';
-  const posterUrl = publicId ? `https://res.cloudinary.com/${CLOUD_NAME}/video/upload/so_1/${publicId}.jpg` : null;
+  const secureUrl = String(signedData.secure_url);
+  const durationSec = Number.isFinite(Number(signedData.duration)) ? Number(signedData.duration) : null;
+  const publicId = typeof signedData.public_id === 'string' ? signedData.public_id : '';
+  const cloudName = String(signedData.cloud_name ?? CLOUD_NAME ?? '').trim();
+  const posterUrl = cloudName && publicId ? `https://res.cloudinary.com/${cloudName}/video/upload/so_1/${publicId}.jpg` : null;
 
   return {
     secureUrl,
@@ -156,31 +125,11 @@ export async function uploadImageToCloudinary(
   options?: CloudinarySignedUploadOptions
 ) {
   const signedData = await uploadSignedAsset(fileUri, 'image', options);
-  if (signedData?.secure_url) {
-    return {
-      secureUrl: String(signedData.secure_url),
-    } as CloudinaryImageUploadResult;
-  }
-
-  if (!hasUnsignedCloudinaryConfig()) {
-    throw new Error('Cloudinary upload is not configured. Set backend Cloudinary credentials or upload preset.');
-  }
-  const endpoint = `https://api.cloudinary.com/v1_1/${CLOUD_NAME}/image/upload`;
-  const filename = `cinema-poster-${Date.now()}.jpg`;
-  const form = new FormData();
-  form.append('upload_preset', UPLOAD_PRESET);
-  await appendCloudinaryFile(form, fileUri, filename, 'image/jpeg');
-
-  const res = await fetch(endpoint, {
-    method: 'POST',
-    body: form,
-  });
-  const data = await res.json();
-  if (!res.ok || !data?.secure_url) {
-    throw new Error(data?.error?.message || 'Cloudinary image upload failed.');
+  if (!signedData?.secure_url) {
+    throw new Error('Cloudinary signed upload is unavailable. Check backend URL and credentials.');
   }
 
   return {
-    secureUrl: String(data.secure_url),
+    secureUrl: String(signedData.secure_url),
   } as CloudinaryImageUploadResult;
 }

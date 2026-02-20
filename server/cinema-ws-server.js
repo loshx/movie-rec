@@ -11,9 +11,19 @@ const adminApiKey = String(process.env.ADMIN_API_KEY || '').trim();
 const cloudinaryCloudName = String(process.env.CLOUDINARY_CLOUD_NAME || '').trim();
 const cloudinaryApiKey = String(process.env.CLOUDINARY_API_KEY || '').trim();
 const cloudinaryApiSecret = String(process.env.CLOUDINARY_API_SECRET || '').trim();
+const runtimeEnv = String(process.env.NODE_ENV || '').trim().toLowerCase();
+const isProduction = runtimeEnv === 'production';
 
-const dataDir = path.join(__dirname, 'data');
-const dataFile = path.join(dataDir, 'cinema-events.json');
+if (isProduction && !adminApiKey) {
+  console.error('ADMIN_API_KEY is required in production.');
+  process.exit(1);
+}
+
+const configuredDataPath = String(process.env.CINEMA_DATA_FILE || '').trim();
+const dataFile = configuredDataPath
+  ? path.resolve(configuredDataPath)
+  : path.join(__dirname, 'data', 'cinema-events.json');
+const dataDir = path.dirname(dataFile);
 
 function createEmptyStoreState() {
   return {
@@ -22,6 +32,7 @@ function createEmptyStoreState() {
     commentIdSeq: 1,
     comments: [],
     users: {},
+    userSessions: {},
     follows: {},
     movieStates: {},
     galleryIdSeq: 1,
@@ -53,6 +64,7 @@ function loadStore() {
       commentIdSeq: Number(parsed?.commentIdSeq || 1),
       comments: Array.isArray(parsed?.comments) ? parsed.comments : [],
       users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
+      userSessions: parsed?.userSessions && typeof parsed.userSessions === 'object' ? parsed.userSessions : {},
       follows: parsed?.follows && typeof parsed.follows === 'object' ? parsed.follows : {},
       movieStates: parsed?.movieStates && typeof parsed.movieStates === 'object' ? parsed.movieStates : {},
       galleryIdSeq: Number(
@@ -104,7 +116,7 @@ function json(res, code, payload) {
     'content-type': 'application/json; charset=utf-8',
     'access-control-allow-origin': '*',
     'access-control-allow-methods': 'GET,POST,DELETE,OPTIONS',
-    'access-control-allow-headers': 'content-type,x-admin-key',
+    'access-control-allow-headers': 'content-type,x-admin-key,x-user-token',
   });
   res.end(body);
 }
@@ -679,9 +691,57 @@ function toggleGalleryReaction(list, userId, galleryId) {
 }
 
 function isAuthorizedAdmin(req) {
-  if (!adminApiKey) return true; // Dev fallback: if key missing, allow publish.
+  if (!adminApiKey) return false;
   const key = String(req.headers['x-admin-key'] || '').trim();
   return key && key === adminApiKey;
+}
+
+function getUserTokenFromRequest(req) {
+  return String(req.headers['x-user-token'] || '').trim();
+}
+
+function getUserSession(userIdInput) {
+  const userId = parsePositiveNumber(userIdInput);
+  if (!userId) return null;
+  const entry = store.userSessions ? store.userSessions[String(userId)] : null;
+  if (!entry || typeof entry !== 'object') return null;
+  const token = String(entry.token || '').trim();
+  if (!token) return null;
+  return {
+    user_id: userId,
+    token,
+    created_at: String(entry.created_at || nowIso()),
+    updated_at: String(entry.updated_at || nowIso()),
+  };
+}
+
+function upsertUserSession(userIdInput, tokenInput) {
+  const userId = parsePositiveNumber(userIdInput);
+  if (!userId) throw new Error('Invalid user id for session.');
+  const token = String(tokenInput || '').trim() || crypto.randomBytes(24).toString('hex');
+  const now = nowIso();
+  const existing = getUserSession(userId);
+  if (!store.userSessions || typeof store.userSessions !== 'object') {
+    store.userSessions = {};
+  }
+  store.userSessions[String(userId)] = {
+    user_id: userId,
+    token,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  };
+  return store.userSessions[String(userId)];
+}
+
+function requireUserSession(req, userIdInput) {
+  const userId = parsePositiveNumber(userIdInput);
+  if (!userId) return { ok: false, status: 400, error: 'user_id is required.' };
+  const session = getUserSession(userId);
+  if (!session) return { ok: false, status: 401, error: 'Session missing. Sync profile first.' };
+  const token = getUserTokenFromRequest(req);
+  if (!token) return { ok: false, status: 401, error: 'Missing x-user-token header.' };
+  if (token !== session.token) return { ok: false, status: 403, error: 'Invalid user session token.' };
+  return { ok: true, userId };
 }
 
 function extractCloudinaryPublicId(imageUrl) {
@@ -897,6 +957,7 @@ function resetAllStoreData() {
   store.commentIdSeq = 1;
   store.comments = [];
   store.users = {};
+  store.userSessions = {};
   store.follows = {};
   store.movieStates = {};
   store.galleryIdSeq = 1;
@@ -935,7 +996,32 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname === '/api/media/cloudinary/sign-upload') {
       const body = await readBody(req);
-      const payload = createCloudinaryUploadSignaturePayload(body);
+      const adminAuthorized = isAuthorizedAdmin(req);
+      const requestedUserId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      let activeSession = null;
+      if (!adminAuthorized) {
+        const sessionCheck = requireUserSession(req, requestedUserId);
+        if (!sessionCheck.ok) {
+          return json(res, sessionCheck.status, { error: sessionCheck.error });
+        }
+        activeSession = getUserSession(requestedUserId);
+        const requestedResourceType = normalizeCloudinaryResourceType(body?.resource_type ?? body?.resourceType);
+        if (requestedResourceType !== 'image') {
+          return json(res, 403, { error: 'Only image uploads are allowed for user sessions.' });
+        }
+      }
+      const payload = createCloudinaryUploadSignaturePayload(
+        adminAuthorized
+          ? body
+          : {
+              resource_type: 'image',
+              user_id: requestedUserId,
+              folder: 'movie-rec-avatars',
+            }
+      );
+      if (activeSession?.token) {
+        return json(res, 200, { ...payload, session_token: activeSession.token });
+      }
       return json(res, 200, payload);
     }
 
@@ -948,6 +1034,10 @@ const server = http.createServer(async (req, res) => {
       }
       if (!userId) {
         return json(res, 400, { error: 'user_id is required.' });
+      }
+      const sessionCheck = requireUserSession(req, userId);
+      if (!sessionCheck.ok) {
+        return json(res, sessionCheck.status, { error: sessionCheck.error });
       }
       if (!isCloudinaryImageOwnedByUser(imageUrl, userId)) {
         return json(res, 403, { error: 'You can delete only your own Cloudinary avatar image.' });
@@ -974,12 +1064,60 @@ const server = http.createServer(async (req, res) => {
       return json(res, 201, { event });
     }
 
+    if (method === 'POST' && pathname === '/api/users/session/bootstrap') {
+      const body = await readBody(req);
+      const userId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      const nickname = String(body?.nickname || '').trim();
+      if (!userId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      if (!nickname) {
+        return json(res, 400, { error: 'nickname is required.' });
+      }
+      const existingProfile = store.users[String(userId)];
+      if (existingProfile) {
+        const existingNickname = String(existingProfile.nickname || '').trim().toLowerCase();
+        if (!existingNickname || existingNickname !== nickname.toLowerCase()) {
+          return json(res, 403, { error: 'Nickname mismatch for session bootstrap.' });
+        }
+      }
+      const session = upsertUserSession(userId, null);
+      saveStore(store);
+      return json(res, 200, { ok: true, session_token: session.token });
+    }
+
     if (method === 'POST' && pathname === '/api/users/profile-sync') {
       const body = await readBody(req);
       const clean = normalizeProfileSync(body);
+      let activeSession = getUserSession(clean.user_id);
+      const existingProfile = store.users[String(clean.user_id)];
+      if (activeSession) {
+        const token = getUserTokenFromRequest(req);
+        if (!token || token !== activeSession.token) {
+          const existingNickname = String(existingProfile?.nickname || '').trim().toLowerCase();
+          const requestedNickname = String(clean.nickname || '').trim().toLowerCase();
+          if (!existingNickname || existingNickname !== requestedNickname) {
+            return json(res, 403, { error: 'Invalid user session token.' });
+          }
+          activeSession = upsertUserSession(clean.user_id, null);
+        }
+      } else {
+        if (existingProfile) {
+          const existingNickname = String(existingProfile.nickname || '').trim().toLowerCase();
+          const requestedNickname = String(clean.nickname || '').trim().toLowerCase();
+          if (!existingNickname || existingNickname !== requestedNickname) {
+            return json(res, 403, { error: 'Profile sync requires matching nickname for first session bootstrap.' });
+          }
+        }
+        activeSession = upsertUserSession(clean.user_id, null);
+      }
       store.users[String(clean.user_id)] = clean;
       saveStore(store);
-      return json(res, 200, { ok: true, profile: publicProfileView(clean.user_id) });
+      return json(res, 200, {
+        ok: true,
+        profile: publicProfileView(clean.user_id),
+        session_token: activeSession.token,
+      });
     }
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/public')) {

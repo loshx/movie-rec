@@ -14,6 +14,8 @@ import {
   resetDatabaseKeepAdminOnly,
 } from '@/db/auth';
 import { syncUserHistoryToMl } from '@/lib/ml-sync';
+import { clearBackendUserSession } from '@/lib/backend-session';
+import { bootstrapBackendUserSession } from '@/lib/social-backend';
 
 type AuthContextValue = {
   user: User | null;
@@ -65,6 +67,9 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await initDb();
         await ensureDefaultAdmin();
         const current = await getCurrentUser();
+        if (current?.id && current?.nickname) {
+          void bootstrapBackendUserSession(current.id, current.nickname).catch(() => {});
+        }
         if (mounted) setUser(current ?? null);
       } catch (err) {
         if (mounted) setError((err as Error).message);
@@ -85,20 +90,26 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       clearError: () => setError(null),
       login: async (nickname, password) => {
         setError(null);
+        clearBackendUserSession();
         const u = await loginUser(nickname, password);
         setUser(u);
+        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
         void syncUserHistoryToMl(u.id).catch(() => {});
       },
       register: async (input) => {
         setError(null);
+        clearBackendUserSession();
         const u = await registerUser(input);
         setUser(u);
+        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
         void syncUserHistoryToMl(u.id).catch(() => {});
       },
       loginWithAuth0: async (profile) => {
         setError(null);
+        clearBackendUserSession();
         const u = await upsertAuth0User(profile);
         setUser(u);
+        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
         void syncUserHistoryToMl(u.id).catch(() => {});
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
@@ -114,12 +125,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       logout: async () => {
         setError(null);
         await logoutUser();
+        clearBackendUserSession();
         setUser(null);
       },
       resetToAdminOnly: async () => {
         setError(null);
         await resetDatabaseKeepAdminOnly();
         const current = await getCurrentUser();
+        clearBackendUserSession();
         setUser(current ?? null);
       },
     }),

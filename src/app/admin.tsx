@@ -11,6 +11,7 @@ import { createCinemaEvent, getLatestCinemaEvent } from '@/db/cinema';
 import { getFeaturedMovie, setFeaturedMovie } from '@/db/featured';
 import { hasCloudinaryConfig, uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/cloudinary';
 import { backendResetAllData, hasBackendApi } from '@/lib/cinema-backend';
+import { setRuntimeAdminKey } from '@/lib/admin-session';
 import { getMovieById, getMovieCredits } from '@/lib/tmdb';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -221,6 +222,7 @@ export default function AdminScreen() {
   const theme = useTheme();
 
   const [tmdbId, setTmdbId] = useState('');
+  const [adminApiKey, setAdminApiKey] = useState('');
   const [title, setTitle] = useState('');
   const [overview, setOverview] = useState('');
   const [backdropPath, setBackdropPath] = useState('');
@@ -248,6 +250,14 @@ export default function AdminScreen() {
   const [galleryPalettePreview, setGalleryPalettePreview] = useState<string[]>([]);
 
   const cloudinaryReady = hasCloudinaryConfig();
+  const cleanAdminKey = adminApiKey.trim();
+
+  useEffect(() => {
+    setRuntimeAdminKey(cleanAdminKey);
+    return () => {
+      setRuntimeAdminKey('');
+    };
+  }, [cleanAdminKey]);
 
   useEffect(() => {
     if (!galleryJsonInput.trim()) {
@@ -415,13 +425,17 @@ export default function AdminScreen() {
           setGalleryMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
+        if (hasBackendApi() && !cleanAdminKey) {
+          setGalleryMessage('Admin API key is required for backend Cloudinary upload.');
+          return;
+        }
         for (let i = 0; i < selectedImages.length; i += 1) {
           const uri = selectedImages[i];
           setGalleryMessage(`Uploading image ${i + 1}/${selectedImages.length} to Cloudinary...`);
           if (isRemoteHttpUrl(uri)) {
             uploadedSelectedImageUrls.push(uri);
           } else {
-            const uploaded = await uploadImageToCloudinary(uri);
+            const uploaded = await uploadImageToCloudinary(uri, { adminKey: cleanAdminKey || null });
             uploadedSelectedImageUrls.push(uploaded.secureUrl);
           }
         }
@@ -504,6 +518,10 @@ export default function AdminScreen() {
       setCinemaMessage('Video URL or local video is required.');
       return;
     }
+    if (hasBackendApi() && !cleanAdminKey) {
+      setCinemaMessage('Admin API key is required for backend publish.');
+      return;
+    }
 
     const now = Date.now();
     const startMs = Date.parse(startIso);
@@ -523,7 +541,7 @@ export default function AdminScreen() {
           setCinemaMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
-        const uploaded = await uploadVideoToCloudinary(finalVideoUrl);
+        const uploaded = await uploadVideoToCloudinary(finalVideoUrl, { adminKey: cleanAdminKey || null });
         finalVideoUrl = uploaded.secureUrl;
         durationSec = uploaded.durationSec ?? durationSec;
       }
@@ -536,23 +554,26 @@ export default function AdminScreen() {
           setCinemaMessage('Upload service missing. Configure backend Cloudinary credentials or client upload preset.');
           return;
         }
-        const uploadedPoster = await uploadImageToCloudinary(finalPosterUrl);
+        const uploadedPoster = await uploadImageToCloudinary(finalPosterUrl, { adminKey: cleanAdminKey || null });
         finalPosterUrl = uploadedPoster.secureUrl;
       }
 
       const finalDuration = durationSec ?? 2 * 3600;
       const endIso = new Date(startMs + finalDuration * 1000).toISOString();
 
-      await createCinemaEvent({
-        title: cleanTitle,
-        description: cinemaDesc.trim() || null,
-        videoUrl: finalVideoUrl,
-        posterUrl: finalPosterUrl,
-        tmdbId: movieId,
-        startAt: startIso,
-        endAt: endIso,
-        createdBy: user?.id ?? null,
-      });
+      await createCinemaEvent(
+        {
+          title: cleanTitle,
+          description: cinemaDesc.trim() || null,
+          videoUrl: finalVideoUrl,
+          posterUrl: finalPosterUrl,
+          tmdbId: movieId,
+          startAt: startIso,
+          endAt: endIso,
+          createdBy: user?.id ?? null,
+        },
+        { adminKey: cleanAdminKey || null }
+      );
       const latest = await getLatestCinemaEvent();
       if (latest) setLatestCinemaInfo(`${latest.title} (${fmtShortIso(latest.start_at)})`);
       setCinemaMessage(`Cinema event published. End auto: ${fmtShortIso(endIso)}`);
@@ -587,10 +608,14 @@ export default function AdminScreen() {
       setCinemaMessage('Type RESET to confirm full reset.');
       return;
     }
+    if (hasBackendApi() && !cleanAdminKey) {
+      setCinemaMessage('Admin API key is required for backend reset.');
+      return;
+    }
     try {
       await resetToAdminOnly();
       if (hasBackendApi()) {
-        await backendResetAllData();
+        await backendResetAllData({ adminKey: cleanAdminKey || null });
       }
       setResetConfirm('');
       setCinemaMessage('Full reset done. Only admin is kept. Cinema/comments/social data cleared.');
@@ -614,6 +639,17 @@ export default function AdminScreen() {
       <View style={styles.card}>
         <Text style={styles.title}>Admin Panel</Text>
         <Text style={styles.subtitle}>Featured movie editor.</Text>
+        <Text style={styles.label}>Admin API key (runtime only)</Text>
+        <TextInput
+          style={styles.input}
+          value={adminApiKey}
+          onChangeText={setAdminApiKey}
+          secureTextEntry
+          autoCapitalize="none"
+          autoCorrect={false}
+          placeholder="Paste Render ADMIN_API_KEY"
+          placeholderTextColor="rgba(255,255,255,0.55)"
+        />
 
         <Text style={styles.label}>TMDB ID</Text>
         <TextInput

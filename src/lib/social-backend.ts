@@ -1,4 +1,5 @@
 import { getBackendApiUrl } from './cinema-backend';
+import { getBackendUserTokenForUser, setBackendUserSession } from './backend-session';
 
 export type PublicProfile = {
   user_id: number;
@@ -39,6 +40,17 @@ type ProfileSyncPayload = {
   favorite_directors?: any[];
 };
 
+type ProfileSyncResponse = {
+  ok: true;
+  profile: PublicProfile | null;
+  session_token?: string | null;
+};
+
+type SessionBootstrapResponse = {
+  ok: true;
+  session_token?: string | null;
+};
+
 async function request<T>(url: string, init?: RequestInit) {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -51,11 +63,18 @@ export async function syncPublicProfile(payload: ProfileSyncPayload) {
   const url = getBackendApiUrl('/api/users/profile-sync');
   if (!url) return null;
   try {
-    return await request<{ ok: true; profile: PublicProfile | null }>(url, {
+    const headers: Record<string, string> = { 'Content-Type': 'application/json' };
+    const token = getBackendUserTokenForUser(payload.user_id);
+    if (token) headers['x-user-token'] = token;
+    const res = await request<ProfileSyncResponse>(url, {
       method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
+      headers,
       body: JSON.stringify(payload),
     });
+    if (res?.session_token) {
+      setBackendUserSession({ userId: payload.user_id, token: String(res.session_token) });
+    }
+    return res;
   } catch {
     return null;
   }
@@ -67,6 +86,30 @@ export async function getPublicProfile(userId: number) {
   try {
     const payload = await request<{ profile: PublicProfile | null }>(url);
     return payload.profile;
+  } catch {
+    return null;
+  }
+}
+
+export async function bootstrapBackendUserSession(userId: number, nickname: string) {
+  if (!Number.isFinite(Number(userId)) || Number(userId) <= 0) return null;
+  const cleanNickname = String(nickname || '').trim();
+  if (!cleanNickname) return null;
+  const url = getBackendApiUrl('/api/users/session/bootstrap');
+  if (!url) return null;
+  try {
+    const res = await request<SessionBootstrapResponse>(url, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: Number(userId),
+        nickname: cleanNickname,
+      }),
+    });
+    if (res?.session_token) {
+      setBackendUserSession({ userId: Number(userId), token: String(res.session_token) });
+    }
+    return res;
   } catch {
     return null;
   }
