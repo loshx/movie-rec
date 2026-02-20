@@ -19,6 +19,8 @@ import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import { syncCommentAvatarsForUser } from '@/db/user-movies';
 import { syncGalleryCommentAvatarsForUser } from '@/db/gallery';
+import { hasCloudinaryConfig, uploadImageToCloudinary } from '@/lib/cloudinary';
+import { backendDeleteOwnCloudinaryImage } from '@/lib/cinema-backend';
 
 const NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
 
@@ -26,6 +28,21 @@ function isValidAvatarUrl(value: string) {
   const trimmed = value.trim();
   if (!trimmed) return true;
   return /^(https?:\/\/|file:\/\/|content:\/\/|ph:\/\/|data:image\/|blob:)/i.test(trimmed);
+}
+
+function isRemoteHttpUrl(value: string) {
+  return /^https?:\/\//i.test(String(value ?? '').trim());
+}
+
+function isCloudinaryUrl(value: string) {
+  return /^https?:\/\/res\.cloudinary\.com\//i.test(String(value ?? '').trim());
+}
+
+function shouldUploadAvatarToCloudinary(value: string) {
+  const trimmed = String(value ?? '').trim();
+  if (!trimmed) return false;
+  if (isRemoteHttpUrl(trimmed)) return false;
+  return /^(file:\/\/|content:\/\/|ph:\/\/|data:image\/|blob:)/i.test(trimmed);
 }
 
 export default function ProfileEditScreen() {
@@ -59,17 +76,11 @@ export default function ProfileEditScreen() {
         allowsEditing: true,
         aspect: [1, 1],
         quality: 0.8,
-        base64: true,
       });
 
       if (!result.canceled) {
         const asset = result.assets?.[0];
         if (!asset) return;
-        if (asset.base64) {
-          const mime = asset.mimeType || 'image/jpeg';
-          setAvatarUrl(`data:${mime};base64,${asset.base64}`);
-          return;
-        }
         if (asset.uri) setAvatarUrl(asset.uri);
       }
     } catch {
@@ -79,8 +90,13 @@ export default function ProfileEditScreen() {
 
   const onSave = async () => {
     setMessage(null);
+    if (!user?.id) {
+      setMessage('You need to login first.');
+      return;
+    }
     const cleanNickname = nickname.trim();
     const cleanAvatarUrl = avatarUrl.trim();
+    const previousAvatarUrl = String((user as any)?.avatar_url ?? '').trim();
     if (!cleanNickname) {
       setMessage('Nickname is required.');
       return;
@@ -98,16 +114,34 @@ export default function ProfileEditScreen() {
       return;
     }
     try {
+      let nextAvatarUrl = cleanAvatarUrl;
+      if (shouldUploadAvatarToCloudinary(nextAvatarUrl) && nextAvatarUrl !== previousAvatarUrl) {
+        if (!hasCloudinaryConfig()) {
+          setMessage('Cloudinary upload is not configured on this build.');
+          return;
+        }
+        setMessage('Uploading profile image...');
+        const uploaded = await uploadImageToCloudinary(nextAvatarUrl, {
+          userId: user.id,
+          folder: 'movie-rec-avatars',
+        });
+        nextAvatarUrl = uploaded.secureUrl;
+      }
+
       await updateProfile({
         name,
         nickname: cleanNickname,
         bio,
-        avatarUrl: cleanAvatarUrl,
+        avatarUrl: nextAvatarUrl,
       });
-      if (user?.id) {
-        await syncCommentAvatarsForUser(user.id, cleanAvatarUrl || null);
-        await syncGalleryCommentAvatarsForUser(user.id, cleanAvatarUrl || null);
+
+      await syncCommentAvatarsForUser(user.id, nextAvatarUrl || null);
+      await syncGalleryCommentAvatarsForUser(user.id, nextAvatarUrl || null);
+
+      if (previousAvatarUrl && previousAvatarUrl !== nextAvatarUrl && isCloudinaryUrl(previousAvatarUrl)) {
+        await backendDeleteOwnCloudinaryImage(previousAvatarUrl, user.id).catch(() => {});
       }
+
       setMessage('Profile updated.');
       router.back();
     } catch (err) {

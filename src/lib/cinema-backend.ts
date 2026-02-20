@@ -144,6 +144,19 @@ export async function backendDeleteCloudinaryImage(imageUrl: string) {
   });
 }
 
+export async function backendDeleteOwnCloudinaryImage(imageUrl: string, userId: number) {
+  const url = getBackendApiUrl('/api/media/cloudinary/delete-image');
+  if (!url) return;
+  await requestJson<{ ok: boolean }>(url, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({
+      image_url: imageUrl,
+      user_id: userId,
+    }),
+  });
+}
+
 export async function backendGetCloudinaryUploadSignature(
   resourceType: 'image' | 'video',
   options?: { userId?: number | null; folder?: string | null }

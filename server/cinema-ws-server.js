@@ -723,6 +723,14 @@ function extractCloudinaryPublicId(imageUrl) {
   return publicId || null;
 }
 
+function isCloudinaryImageOwnedByUser(imageUrl, userIdInput) {
+  const userId = parsePositiveNumber(userIdInput);
+  if (!userId) return false;
+  const publicId = extractCloudinaryPublicId(imageUrl);
+  if (!publicId) return false;
+  return new RegExp(`(^|/)u-${userId}(/|$)`).test(publicId);
+}
+
 function signCloudinaryDestroy(publicId, timestamp) {
   return signCloudinaryParams({ public_id: publicId, timestamp });
 }
@@ -929,6 +937,23 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const payload = createCloudinaryUploadSignaturePayload(body);
       return json(res, 200, payload);
+    }
+
+    if (method === 'POST' && pathname === '/api/media/cloudinary/delete-image') {
+      const body = await readBody(req);
+      const imageUrl = String(body?.image_url || '').trim();
+      const userId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      if (!imageUrl) {
+        return json(res, 400, { error: 'image_url is required.' });
+      }
+      if (!userId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      if (!isCloudinaryImageOwnedByUser(imageUrl, userId)) {
+        return json(res, 403, { error: 'You can delete only your own Cloudinary avatar image.' });
+      }
+      await destroyCloudinaryImageByUrl(imageUrl);
+      return json(res, 200, { ok: true });
     }
 
     if (method === 'POST' && pathname === '/api/cinema/events') {

@@ -28,6 +28,11 @@ export type CloudinaryImageUploadResult = {
   secureUrl: string;
 };
 
+export type CloudinarySignedUploadOptions = {
+  userId?: number | null;
+  folder?: string | null;
+};
+
 function isRemoteHttpUrl(value: string) {
   return /^https?:\/\//i.test(String(value ?? '').trim());
 }
@@ -55,9 +60,13 @@ async function appendCloudinaryFile(
   } as any);
 }
 
-async function uploadSignedAsset(fileUri: string, resourceType: 'image' | 'video') {
+async function uploadSignedAsset(
+  fileUri: string,
+  resourceType: 'image' | 'video',
+  options?: CloudinarySignedUploadOptions
+) {
   if (!hasBackendApi()) return null;
-  const signature = await backendGetCloudinaryUploadSignature(resourceType);
+  const signature = await backendGetCloudinaryUploadSignature(resourceType, options);
   if (!signature) return null;
 
   const form = new FormData();
@@ -95,8 +104,11 @@ async function uploadSignedAsset(fileUri: string, resourceType: 'image' | 'video
   };
 }
 
-export async function uploadVideoToCloudinary(fileUri: string) {
-  const signedData = await uploadSignedAsset(fileUri, 'video');
+export async function uploadVideoToCloudinary(
+  fileUri: string,
+  options?: CloudinarySignedUploadOptions
+) {
+  const signedData = await uploadSignedAsset(fileUri, 'video', options);
   if (signedData?.secure_url) {
     const secureUrl = String(signedData.secure_url);
     const durationSec = Number.isFinite(Number(signedData.duration)) ? Number(signedData.duration) : null;
@@ -139,8 +151,11 @@ export async function uploadVideoToCloudinary(fileUri: string) {
   } as CloudinaryVideoUploadResult;
 }
 
-export async function uploadImageToCloudinary(fileUri: string) {
-  const signedData = await uploadSignedAsset(fileUri, 'image');
+export async function uploadImageToCloudinary(
+  fileUri: string,
+  options?: CloudinarySignedUploadOptions
+) {
+  const signedData = await uploadSignedAsset(fileUri, 'image', options);
   if (signedData?.secure_url) {
     return {
       secureUrl: String(signedData.secure_url),
