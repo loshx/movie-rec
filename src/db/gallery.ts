@@ -750,6 +750,22 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
 }
 
 export async function clearGalleryAll() {
+  if (hasBackendApi()) {
+    const remoteList = await requestBackendJson<{ items?: RemoteGalleryItem[] }>('/api/gallery');
+    if (!Array.isArray(remoteList?.items)) {
+      throw new Error('Remote gallery list failed.');
+    }
+    for (const item of remoteList.items) {
+      const remoteDelete = await requestBackendJson<{ ok?: boolean }>(
+        `/api/gallery/${encodeURIComponent(String(Number(item.id)))}`,
+        { method: 'DELETE' }
+      );
+      if (!remoteDelete?.ok) {
+        throw new Error(`Remote gallery delete failed for id ${item.id}.`);
+      }
+    }
+  }
+
   const db = await getDb();
   await db.execAsync(`
     DELETE FROM gallery_comments;

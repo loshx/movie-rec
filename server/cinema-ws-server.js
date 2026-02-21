@@ -900,6 +900,81 @@ async function destroyCloudinaryVideoByUrl(videoUrl) {
   return destroyCloudinaryAssetByUrl(videoUrl, 'video');
 }
 
+function collectCloudinaryImageUrlsFromGalleryItem(item) {
+  const urls = new Set();
+  const directImage = String(item?.image || '').trim();
+  const imageUrl = String(item?.image_url || '').trim();
+  if (directImage && extractCloudinaryPublicId(directImage)) urls.add(directImage);
+  if (imageUrl && extractCloudinaryPublicId(imageUrl)) urls.add(imageUrl);
+  return urls;
+}
+
+async function cleanupGalleryItemCloudinaryMedia(item) {
+  const imageUrls = collectCloudinaryImageUrlsFromGalleryItem(item);
+  for (const imageUrl of imageUrls) {
+    await destroyCloudinaryImageByUrl(imageUrl);
+  }
+  return { deleted_images: imageUrls.size };
+}
+
+async function cleanupAllStoreCloudinaryMedia() {
+  const imageUrls = new Set();
+  const videoUrls = new Set();
+
+  for (const item of store.items) {
+    const videoUrl = String(item?.video_url || '').trim();
+    const posterUrl = String(item?.poster_url || '').trim();
+    if (videoUrl && extractCloudinaryPublicId(videoUrl)) videoUrls.add(videoUrl);
+    if (posterUrl && extractCloudinaryPublicId(posterUrl)) imageUrls.add(posterUrl);
+  }
+
+  for (const item of store.galleryItems) {
+    const galleryUrls = collectCloudinaryImageUrlsFromGalleryItem(item);
+    for (const imageUrl of galleryUrls) imageUrls.add(imageUrl);
+  }
+
+  for (const profile of Object.values(store.users || {})) {
+    const avatarUrl = String(profile?.avatar_url || '').trim();
+    if (avatarUrl && extractCloudinaryPublicId(avatarUrl)) imageUrls.add(avatarUrl);
+  }
+
+  let deletedImages = 0;
+  let deletedVideos = 0;
+  const failures = [];
+
+  for (const imageUrl of imageUrls) {
+    try {
+      await destroyCloudinaryImageByUrl(imageUrl);
+      deletedImages += 1;
+    } catch (err) {
+      failures.push({
+        resource_type: 'image',
+        url: imageUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  for (const videoUrl of videoUrls) {
+    try {
+      await destroyCloudinaryVideoByUrl(videoUrl);
+      deletedVideos += 1;
+    } catch (err) {
+      failures.push({
+        resource_type: 'video',
+        url: videoUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
+  return {
+    deleted_images: deletedImages,
+    deleted_videos: deletedVideos,
+    failed: failures,
+  };
+}
+
 function normalizeCloudinaryResourceType(input) {
   return String(input || '').toLowerCase() === 'video' ? 'video' : 'image';
 }
@@ -1362,16 +1437,17 @@ const server = http.createServer(async (req, res) => {
       const parts = pathname.split('/').filter(Boolean);
       const galleryId = parsePositiveNumber(parts[2]);
       if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
-      const prevLen = store.galleryItems.length;
-      store.galleryItems = store.galleryItems.filter((item) => Number(item.id) !== galleryId);
-      if (store.galleryItems.length === prevLen) {
+      const targetItem = getGalleryItemById(galleryId);
+      if (!targetItem) {
         return json(res, 404, { error: 'Gallery item not found.' });
       }
+      const cleanup = await cleanupGalleryItemCloudinaryMedia(targetItem);
+      store.galleryItems = store.galleryItems.filter((item) => Number(item.id) !== galleryId);
       store.galleryLikes = store.galleryLikes.filter((row) => Number(row.gallery_id) !== galleryId);
       store.galleryFavorites = store.galleryFavorites.filter((row) => Number(row.gallery_id) !== galleryId);
       store.galleryComments = store.galleryComments.filter((row) => Number(row.gallery_id) !== galleryId);
       saveStore(store);
-      return json(res, 200, { ok: true });
+      return json(res, 200, { ok: true, cleanup });
     }
 
     if (method === 'POST' && /^\/api\/gallery\/\d+\/toggle-like$/.test(pathname)) {
@@ -1498,8 +1574,15 @@ const server = http.createServer(async (req, res) => {
       if (!isAuthorizedAdmin(req)) {
         return json(res, 403, { error: 'Forbidden.' });
       }
+      const cleanup = await cleanupAllStoreCloudinaryMedia();
+      if (cleanup.failed.length) {
+        return json(res, 502, {
+          error: 'Cloudinary cleanup failed. Reset aborted.',
+          cleanup,
+        });
+      }
       resetAllStoreData();
-      return json(res, 200, { ok: true });
+      return json(res, 200, { ok: true, cleanup });
     }
 
     if (method === 'POST' && pathname === '/api/admin/cloudinary/delete-image') {
