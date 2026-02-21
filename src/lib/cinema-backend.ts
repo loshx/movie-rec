@@ -180,13 +180,13 @@ export async function backendDeleteOwnCloudinaryImage(imageUrl: string, userId: 
 
 export async function backendGetCloudinaryUploadSignature(
   resourceType: 'image' | 'video',
-  options?: { userId?: number | null; folder?: string | null; adminKey?: string | null }
+  options?: { userId?: number | null; folder?: string | null; adminKey?: string | null; nicknames?: string[] | null }
 ) {
   const url = getBackendApiUrl('/api/media/cloudinary/sign-upload');
   if (!url) {
     throw new Error('Backend URL missing. Set EXPO_PUBLIC_BACKEND_URL.');
   }
-  try {
+  const requestSignature = async () => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
     withUserTokenHeader(headers, options?.userId ?? null);
     const adminKey = normalizeAdminKey(options?.adminKey);
@@ -204,8 +204,44 @@ export async function backendGetCloudinaryUploadSignature(
       setBackendUserSession({ userId: Number(options?.userId), token: String(res.session_token) });
     }
     return res;
+  };
+  const bootstrapSessionIfPossible = async () => {
+    const userId = Number(options?.userId ?? 0);
+    if (!Number.isFinite(userId) || userId <= 0) return false;
+    const bootstrapUrl = getBackendApiUrl('/api/users/session/bootstrap');
+    if (!bootstrapUrl) return false;
+    const nicknames = Array.isArray(options?.nicknames)
+      ? options.nicknames
+          .map((x) => String(x ?? '').trim())
+          .filter((x, idx, arr) => x.length > 0 && arr.indexOf(x) === idx)
+      : [];
+    for (const nickname of nicknames) {
+      try {
+        const payload = await requestJson<{ session_token?: string | null }>(bootstrapUrl, {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({
+            user_id: userId,
+            nickname,
+          }),
+        });
+        if (payload?.session_token) {
+          setBackendUserSession({ userId, token: String(payload.session_token) });
+          return true;
+        }
+      } catch {
+      }
+    }
+    return false;
+  };
+  try {
+    return await requestSignature();
   } catch (err) {
     const message = err instanceof Error ? err.message : 'Unknown backend error.';
+    const missingOrInvalidSession = /session missing|invalid user session token/i.test(message);
+    if (missingOrInvalidSession && (await bootstrapSessionIfPossible())) {
+      return await requestSignature();
+    }
     throw new Error(`Cloudinary signature request failed: ${message}`);
   }
 }

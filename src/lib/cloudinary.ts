@@ -26,6 +26,7 @@ export type CloudinarySignedUploadOptions = {
   userId?: number | null;
   folder?: string | null;
   adminKey?: string | null;
+  nicknames?: string[] | null;
 };
 
 function isRemoteHttpUrl(value: string) {

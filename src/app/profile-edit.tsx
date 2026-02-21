@@ -135,6 +135,7 @@ export default function ProfileEditScreen() {
         const uploaded = await uploadImageToCloudinary(nextAvatarUrl, {
           userId: user.id,
           folder: 'movie-rec-avatars',
+          nicknames: [String(user.nickname ?? '').trim(), cleanNickname],
         });
         nextAvatarUrl = uploaded.secureUrl;
       }
