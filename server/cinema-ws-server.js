@@ -480,12 +480,12 @@ function normalizeProfileSync(body) {
       favorite_actors: !!body?.privacy?.favorite_actors,
       favorite_directors: !!body?.privacy?.favorite_directors,
     },
-    watchlist: Array.isArray(body?.watchlist) ? body.watchlist.slice(0, 100) : [],
-    favorites: Array.isArray(body?.favorites) ? body.favorites.slice(0, 100) : [],
-    watched: Array.isArray(body?.watched) ? body.watched.slice(0, 120) : [],
-    rated: Array.isArray(body?.rated) ? body.rated.slice(0, 120) : [],
-    favorite_actors: Array.isArray(body?.favorite_actors) ? body.favorite_actors.slice(0, 80) : [],
-    favorite_directors: Array.isArray(body?.favorite_directors) ? body.favorite_directors.slice(0, 80) : [],
+    watchlist: normalizeMovieList(body?.watchlist, 1200),
+    favorites: normalizeMovieList(body?.favorites, 1200),
+    watched: normalizeMovieList(body?.watched, 1200),
+    rated: normalizeMovieRatings(body?.rated, 1200),
+    favorite_actors: normalizePersonFavorites(body?.favorite_actors, 300),
+    favorite_directors: normalizePersonFavorites(body?.favorite_directors, 300),
     updated_at: nowIso(),
   };
   return profile;
@@ -516,6 +516,8 @@ function publicProfileView(userId) {
     Array.isArray(profile.rated) && profile.rated.length > 0
       ? profile.rated
       : movieState?.ratings ?? [];
+  const favoriteActorsData = normalizePersonFavorites(profile.favorite_actors, 300);
+  const favoriteDirectorsData = normalizePersonFavorites(profile.favorite_directors, 300);
   const followers = Object.values(store.follows).filter(
     (setLike) => Array.isArray(setLike) && setLike.includes(canonicalUserId)
   ).length;
@@ -535,8 +537,8 @@ function publicProfileView(userId) {
     favorites: privacy.favorites ? favoritesData : [],
     watched: privacy.watched ? watchedData : [],
     rated: privacy.rated ? ratedData : [],
-    favorite_actors: profile.privacy.favorite_actors ? profile.favorite_actors : [],
-    favorite_directors: profile.privacy.favorite_directors ? profile.favorite_directors : [],
+    favorite_actors: profile.privacy.favorite_actors ? favoriteActorsData : [],
+    favorite_directors: profile.privacy.favorite_directors ? favoriteDirectorsData : [],
   };
 }
 
@@ -914,6 +916,36 @@ function dedupeByKey(rows, keySelector) {
 function mergeUserProfiles(primaryProfile, secondaryProfile, canonicalUserId) {
   const primary = primaryProfile && typeof primaryProfile === 'object' ? primaryProfile : {};
   const secondary = secondaryProfile && typeof secondaryProfile === 'object' ? secondaryProfile : {};
+  const watchlistSource = Array.isArray(primary.watchlist)
+    ? primary.watchlist
+    : Array.isArray(secondary.watchlist)
+      ? secondary.watchlist
+      : [];
+  const favoritesSource = Array.isArray(primary.favorites)
+    ? primary.favorites
+    : Array.isArray(secondary.favorites)
+      ? secondary.favorites
+      : [];
+  const watchedSource = Array.isArray(primary.watched)
+    ? primary.watched
+    : Array.isArray(secondary.watched)
+      ? secondary.watched
+      : [];
+  const ratedSource = Array.isArray(primary.rated)
+    ? primary.rated
+    : Array.isArray(secondary.rated)
+      ? secondary.rated
+      : [];
+  const favoriteActorsSource = Array.isArray(primary.favorite_actors)
+    ? primary.favorite_actors
+    : Array.isArray(secondary.favorite_actors)
+      ? secondary.favorite_actors
+      : [];
+  const favoriteDirectorsSource = Array.isArray(primary.favorite_directors)
+    ? primary.favorite_directors
+    : Array.isArray(secondary.favorite_directors)
+      ? secondary.favorite_directors
+      : [];
   const merged = {
     ...secondary,
     ...primary,
@@ -930,20 +962,12 @@ function mergeUserProfiles(primaryProfile, secondaryProfile, canonicalUserId) {
       favorite_actors: !!(primary.privacy?.favorite_actors ?? secondary.privacy?.favorite_actors),
       favorite_directors: !!(primary.privacy?.favorite_directors ?? secondary.privacy?.favorite_directors),
     },
-    watchlist: Array.isArray(primary.watchlist) ? primary.watchlist : Array.isArray(secondary.watchlist) ? secondary.watchlist : [],
-    favorites: Array.isArray(primary.favorites) ? primary.favorites : Array.isArray(secondary.favorites) ? secondary.favorites : [],
-    watched: Array.isArray(primary.watched) ? primary.watched : Array.isArray(secondary.watched) ? secondary.watched : [],
-    rated: Array.isArray(primary.rated) ? primary.rated : Array.isArray(secondary.rated) ? secondary.rated : [],
-    favorite_actors: Array.isArray(primary.favorite_actors)
-      ? primary.favorite_actors
-      : Array.isArray(secondary.favorite_actors)
-        ? secondary.favorite_actors
-        : [],
-    favorite_directors: Array.isArray(primary.favorite_directors)
-      ? primary.favorite_directors
-      : Array.isArray(secondary.favorite_directors)
-        ? secondary.favorite_directors
-        : [],
+    watchlist: normalizeMovieList(watchlistSource, 1200),
+    favorites: normalizeMovieList(favoritesSource, 1200),
+    watched: normalizeMovieList(watchedSource, 1200),
+    rated: normalizeMovieRatings(ratedSource, 1200),
+    favorite_actors: normalizePersonFavorites(favoriteActorsSource, 300),
+    favorite_directors: normalizePersonFavorites(favoriteDirectorsSource, 300),
     updated_at: normalizeIso(primary.updated_at ?? secondary.updated_at, nowIso()),
   };
   return merged;
@@ -1346,6 +1370,23 @@ function normalizeMovieRatings(list, maxLen = 800) {
     .slice(0, maxLen);
 }
 
+function normalizePersonFavorites(list, maxLen = 200) {
+  const entries = Array.isArray(list) ? list : [];
+  const unique = new Map();
+  for (const row of entries) {
+    const personId = parsePositiveNumber(row?.person_id ?? row?.personId ?? row?.id);
+    if (!personId) continue;
+    const createdAt = normalizeIso(row?.created_at ?? row?.createdAt, nowIso());
+    unique.set(personId, {
+      person_id: personId,
+      created_at: createdAt,
+    });
+  }
+  return Array.from(unique.values())
+    .sort((a, b) => Date.parse(b.created_at) - Date.parse(a.created_at))
+    .slice(0, maxLen);
+}
+
 function ensureUserMovieState(userId) {
   const canonicalUserId = resolveCanonicalUserId(userId);
   if (!canonicalUserId) throw new Error('Invalid user id for movie state.');
@@ -1476,6 +1517,32 @@ function setMovieRatingState(userId, tmdbId, mediaType, ratingInput) {
   state.ratings = normalizeMovieRatings(list, 1200);
   state.updated_at = now;
   return rating;
+}
+
+function togglePersonFavoriteEntry(userIdInput, fieldName, personIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput);
+  if (!canonicalUserId) throw new Error('Invalid user id.');
+  if (!['favorite_actors', 'favorite_directors'].includes(String(fieldName))) {
+    throw new Error('Invalid favorite list.');
+  }
+  const personId = parsePositiveNumber(personIdInput);
+  if (!personId) throw new Error('person_id is required.');
+  const profile = ensureUserProfile(canonicalUserId, null);
+  const list = normalizePersonFavorites(profile?.[fieldName], 300);
+  const index = list.findIndex((entry) => Number(entry.person_id) === personId);
+  if (index >= 0) {
+    list.splice(index, 1);
+    profile[fieldName] = list;
+    profile.updated_at = nowIso();
+    return false;
+  }
+  list.unshift({
+    person_id: personId,
+    created_at: nowIso(),
+  });
+  profile[fieldName] = normalizePersonFavorites(list, 300);
+  profile.updated_at = nowIso();
+  return true;
 }
 
 function getMovieItemState(userId, tmdbId) {
@@ -3175,6 +3242,48 @@ const server = http.createServer(async (req, res) => {
       const ids = Array.isArray(store.follows[String(userId)]) ? store.follows[String(userId)] : [];
       const profiles = ids.map((id) => publicProfileView(id)).filter(Boolean);
       return json(res, 200, { users: profiles });
+    }
+
+    if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/favorite-actors')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const profile = ensureUserProfile(userId, null);
+      profile.favorite_actors = normalizePersonFavorites(profile.favorite_actors, 300);
+      return json(res, 200, { items: profile.favorite_actors });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/favorite-actors/toggle')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const personId = parsePositiveNumber(body?.person_id ?? body?.personId);
+      if (!personId) return json(res, 400, { error: 'person_id is required.' });
+      const active = togglePersonFavoriteEntry(userId, 'favorite_actors', personId);
+      saveStore(store);
+      return json(res, 200, { ok: true, active });
+    }
+
+    if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/favorite-directors')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const profile = ensureUserProfile(userId, null);
+      profile.favorite_directors = normalizePersonFavorites(profile.favorite_directors, 300);
+      return json(res, 200, { items: profile.favorite_directors });
+    }
+
+    if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/favorite-directors/toggle')) {
+      const parts = pathname.split('/').filter(Boolean);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
+      if (!userId) return json(res, 400, { error: 'Invalid user id.' });
+      const body = await readBody(req);
+      const personId = parsePositiveNumber(body?.person_id ?? body?.personId);
+      if (!personId) return json(res, 400, { error: 'person_id is required.' });
+      const active = togglePersonFavoriteEntry(userId, 'favorite_directors', personId);
+      saveStore(store);
+      return json(res, 200, { ok: true, active });
     }
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state')) {

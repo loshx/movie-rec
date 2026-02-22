@@ -67,6 +67,13 @@ type RemoteMovieRatingEntry = RemoteMovieListEntry & {
   updated_at?: string;
 };
 
+type RemotePersonFavoriteEntry = {
+  person_id?: number;
+  personId?: number;
+  created_at?: string;
+  createdAt?: string;
+};
+
 type RemoteMovieStatePayload = {
   state?: {
     privacy?: UserListPrivacy;
@@ -111,6 +118,20 @@ function mapRemoteRatings(rows: RemoteMovieRatingEntry[] | undefined): UserListI
     createdAt: String(row.updated_at ?? row.created_at ?? nowIso()),
     mediaType: normalizeMediaType(row.media_type),
   }));
+}
+
+function mapRemotePersonFavorites(rows: RemotePersonFavoriteEntry[] | undefined): UserActorListItem[] {
+  const entries = Array.isArray(rows) ? rows : [];
+  const unique = new Map<number, UserActorListItem>();
+  for (const row of entries) {
+    const personId = Number(row?.person_id ?? row?.personId);
+    if (!Number.isFinite(personId) || personId <= 0) continue;
+    unique.set(personId, {
+      personId,
+      createdAt: String(row?.created_at ?? row?.createdAt ?? nowIso()),
+    });
+  }
+  return Array.from(unique.values());
 }
 
 async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
@@ -349,6 +370,11 @@ export async function getMovieEngagementCounts(
 }
 
 export async function getUserFavoriteActors(userId: number): Promise<UserActorListItem[]> {
+  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(`/api/users/${userId}/favorite-actors`);
+  if (Array.isArray(remote?.items)) {
+    return mapRemotePersonFavorites(remote.items);
+  }
+
   const db = await getDb();
   const rows = await db.getAllAsync<{ person_id: number; created_at: string }>(
     `SELECT person_id, created_at FROM user_favorite_actors WHERE user_id = ? ORDER BY created_at DESC`,
@@ -361,6 +387,13 @@ export async function getUserFavoriteActors(userId: number): Promise<UserActorLi
 }
 
 export async function getUserFavoriteDirectors(userId: number): Promise<UserActorListItem[]> {
+  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    `/api/users/${userId}/favorite-directors`
+  );
+  if (Array.isArray(remote?.items)) {
+    return mapRemotePersonFavorites(remote.items);
+  }
+
   const db = await getDb();
   const rows = await db.getAllAsync<{ person_id: number; created_at: string }>(
     `SELECT person_id, created_at FROM user_favorite_directors WHERE user_id = ? ORDER BY created_at DESC`,
@@ -373,6 +406,11 @@ export async function getUserFavoriteDirectors(userId: number): Promise<UserActo
 }
 
 export async function isFavoriteActor(userId: number, personId: number): Promise<boolean> {
+  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(`/api/users/${userId}/favorite-actors`);
+  if (Array.isArray(remote?.items)) {
+    return mapRemotePersonFavorites(remote.items).some((entry) => entry.personId === personId);
+  }
+
   const db = await getDb();
   const row = await db.getFirstAsync<{ ok: number }>(
     `SELECT 1 as ok FROM user_favorite_actors WHERE user_id = ? AND person_id = ?`,
@@ -383,6 +421,14 @@ export async function isFavoriteActor(userId: number, personId: number): Promise
 }
 
 export async function toggleFavoriteActor(userId: number, personId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/favorite-actors/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ person_id: personId }),
+  });
+  if (typeof remote?.active === 'boolean') {
+    return remote.active;
+  }
+
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
     'SELECT 1 as ok FROM user_favorite_actors WHERE user_id = ? AND person_id = ?',
@@ -403,6 +449,13 @@ export async function toggleFavoriteActor(userId: number, personId: number) {
 }
 
 export async function isFavoriteDirector(userId: number, personId: number): Promise<boolean> {
+  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    `/api/users/${userId}/favorite-directors`
+  );
+  if (Array.isArray(remote?.items)) {
+    return mapRemotePersonFavorites(remote.items).some((entry) => entry.personId === personId);
+  }
+
   const db = await getDb();
   const row = await db.getFirstAsync<{ ok: number }>(
     `SELECT 1 as ok FROM user_favorite_directors WHERE user_id = ? AND person_id = ?`,
@@ -413,6 +466,14 @@ export async function isFavoriteDirector(userId: number, personId: number): Prom
 }
 
 export async function toggleFavoriteDirector(userId: number, personId: number) {
+  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/favorite-directors/toggle`, {
+    method: 'POST',
+    body: JSON.stringify({ person_id: personId }),
+  });
+  if (typeof remote?.active === 'boolean') {
+    return remote.active;
+  }
+
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
     'SELECT 1 as ok FROM user_favorite_directors WHERE user_id = ? AND person_id = ?',
