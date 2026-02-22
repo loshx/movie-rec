@@ -3707,6 +3707,37 @@ function viewerKeyFor(ws) {
   return `g:${ws.sessionId}`;
 }
 
+function connectionKeyFor(ws) {
+  if (!ws) return '';
+  if (ws?.user?.clientId) {
+    return `c:${ws.user.clientId}`;
+  }
+  if (Number.isFinite(ws?.user?.userId) && ws.user.userId > 0) {
+    return `u:${ws.user.userId}`;
+  }
+  return `g:${ws.sessionId || ''}`;
+}
+
+function removeDuplicateRoomClients(room, currentWs) {
+  if (!room || !currentWs) return;
+  const currentKey = connectionKeyFor(currentWs);
+  if (!currentKey || currentKey.startsWith('g:')) return;
+
+  room.clients.forEach((client) => {
+    if (client === currentWs) return;
+    if (connectionKeyFor(client) !== currentKey) return;
+    room.clients.delete(client);
+    try {
+      client.close(4001, 'Duplicate cinema connection replaced.');
+    } catch {
+      try {
+        client.terminate();
+      } catch {
+      }
+    }
+  });
+}
+
 function roomViewerCount(room) {
   const viewers = new Set();
   room.clients.forEach((client) => viewers.add(viewerKeyFor(client)));
@@ -3747,14 +3778,18 @@ wss.on('connection', (ws) => {
         ws.room = roomId;
         ws.user = {
           userId: Number.isFinite(Number(data.userId)) ? Number(data.userId) : null,
-          nickname: (data.nickname || 'guest').toString().slice(0, 40),
-          avatarUrl: data.avatarUrl ? String(data.avatarUrl).slice(0, 400) : null,
+          nickname: normalizeText(data.nickname, 40) || 'guest',
+          avatarUrl: normalizeAvatarUrl(data.avatarUrl),
           clientId: normalizeText(data.client_id ?? data.clientId, 80) || null,
         };
+        removeDuplicateRoomClients(room, ws);
         safeSend(ws, {
           type: 'history',
           room: roomId,
-          messages: room.messages.slice(-80),
+          messages: room.messages.slice(-80).map((message) => ({
+            ...message,
+            avatarUrl: normalizeAvatarUrl(message?.avatarUrl),
+          })),
         });
         broadcastRoomStats(roomId);
         return;
