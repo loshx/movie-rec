@@ -123,6 +123,11 @@ export default function ProfileEditScreen() {
       setMessage('Invalid avatar. Use Select photo or a valid URL.');
       return;
     }
+    const previousName = user.name ?? null;
+    const previousNickname = user.nickname ?? null;
+    const previousBio = ((user as any)?.bio ?? null) as string | null;
+    const previousAvatar = ((user as any)?.avatar_url ?? null) as string | null;
+    let localProfileUpdated = false;
     try {
       await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
       let nextAvatarUrl = cleanAvatarUrl;
@@ -146,6 +151,7 @@ export default function ProfileEditScreen() {
         bio,
         avatarUrl: nextAvatarUrl,
       });
+      localProfileUpdated = true;
 
       await syncCommentAvatarsForUser(user.id, nextAvatarUrl || null);
       await syncGalleryCommentAvatarsForUser(user.id, nextAvatarUrl || null);
@@ -189,6 +195,14 @@ export default function ProfileEditScreen() {
       setMessage('Profile updated.');
       router.back();
     } catch (err) {
+      if (localProfileUpdated) {
+        await updateProfile({
+          name: previousName,
+          nickname: previousNickname,
+          bio: previousBio,
+          avatarUrl: previousAvatar,
+        }).catch(() => {});
+      }
       setMessage(err instanceof Error ? err.message : 'Save failed.');
     }
   };

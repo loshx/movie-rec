@@ -2916,6 +2916,24 @@ const server = http.createServer(async (req, res) => {
       if (!auth) {
         const existingProfileUserId = findCanonicalUserIdByNickname(nickname);
         if (existingProfileUserId) {
+          const authByUser = getLocalAuthEntryByUserId(existingProfileUserId);
+          if (authByUser) {
+            const passwordHashByUser = hashLocalPassword(password);
+            if (passwordHashByUser !== authByUser.password_hash) {
+              return json(res, 401, { error: 'Wrong nickname or password.' });
+            }
+            const canonicalByUser = resolveCanonicalUserId(existingProfileUserId) || existingProfileUserId;
+            ensureUserProfile(canonicalByUser, nickname);
+            syncLocalAuthNicknameForUser(canonicalByUser, nickname);
+            const sessionByUser = upsertUserSession(canonicalByUser, null);
+            saveStore(store);
+            return json(res, 200, {
+              ok: true,
+              user: serializeLocalAuthUser(canonicalByUser),
+              session_token: sessionByUser.token,
+              canonical_user_id: canonicalByUser,
+            });
+          }
           return json(res, 404, {
             error: 'Account exists on backend but password is not synced yet. Login once from original device and retry.',
           });
@@ -2927,8 +2945,21 @@ const server = http.createServer(async (req, res) => {
         return json(res, 401, { error: 'Wrong nickname or password.' });
       }
       const canonicalUserId = resolveCanonicalUserId(auth.user_id) || auth.user_id;
-      ensureUserProfile(canonicalUserId, auth.nickname);
-      syncLocalAuthNicknameForUser(canonicalUserId, auth.nickname);
+      const profile = ensureUserProfile(canonicalUserId, null);
+      const profileNickname = normalizeText(profile?.nickname, 40);
+      const profileNickKey = nicknameKey(profileNickname);
+      const loginNickKey = nicknameKey(nickname);
+      const authNickKey = nicknameKey(auth.nickname);
+      if (profileNickKey && profileNickKey !== authNickKey) {
+        const synced = syncLocalAuthNicknameForUser(canonicalUserId, profileNickname);
+        if (synced && profileNickKey !== loginNickKey) {
+          saveStore(store);
+          return json(res, 404, { error: 'Nickname changed. Use your current nickname.' });
+        }
+      } else {
+        ensureUserProfile(canonicalUserId, auth.nickname);
+        syncLocalAuthNicknameForUser(canonicalUserId, auth.nickname);
+      }
       const session = upsertUserSession(canonicalUserId, null);
       saveStore(store);
       return json(res, 200, {
