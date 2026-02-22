@@ -25,16 +25,29 @@ const dataFile = configuredDataPath
   : path.join(__dirname, 'data', 'cinema-events.json');
 const dataDir = path.dirname(dataFile);
 const dataFileBackup = `${dataFile}.bak`;
+const CINEMA_POLL_TTL_MS = 12 * 60 * 60 * 1000;
+const CLOUDINARY_GALLERY_TAG = 'movie_rec_gallery';
+const CLOUDINARY_GALLERY_FOLDER = 'movie-rec-gallery';
+const CLOUDINARY_STORE_TAG = 'movie_rec_store';
+const CLOUDINARY_STORE_PUBLIC_ID = 'movie-rec-store/cinema-events';
+const CLOUDINARY_STORE_FILENAME = 'cinema-events.json';
+const CLOUDINARY_STORE_SYNC_DEBOUNCE_MS = 1200;
+const LOCAL_NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
+const LOCAL_PASSWORD_MIN_LEN = 8;
 
 function createEmptyStoreState() {
   return {
+    store_updated_at: nowIso(),
     idSeq: 1,
+    userIdSeq: 1,
     items: [],
     cinemaPollIdSeq: 1,
     cinemaPollCurrent: null,
     commentIdSeq: 1,
     comments: [],
     users: {},
+    localAuth: {},
+    userAliases: {},
     userSessions: {},
     follows: {},
     movieStates: {},
@@ -64,14 +77,54 @@ function hydrateStoreState(parsed) {
   const fallback = createEmptyStoreState();
   const galleryItems = Array.isArray(parsed?.galleryItems) ? parsed.galleryItems : [];
   const galleryComments = Array.isArray(parsed?.galleryComments) ? parsed.galleryComments : [];
+  const usersState = parsed?.users && typeof parsed.users === 'object' ? parsed.users : {};
+  const localAuthState = parsed?.localAuth && typeof parsed.localAuth === 'object' ? parsed.localAuth : {};
+  const maxUserIdFromProfiles = Object.entries(usersState).reduce((acc, [rawKey, profile]) => {
+    const idFromKey = parsePositiveNumber(rawKey) || 0;
+    const idFromProfile = parsePositiveNumber(profile?.user_id) || 0;
+    return Math.max(acc, idFromKey, idFromProfile);
+  }, 0);
+  const normalizeLocalAuthEntry = (rawRecord, fallbackUserId) => {
+    if (!rawRecord || typeof rawRecord !== 'object') return null;
+    const userId = parsePositiveNumber(rawRecord.user_id) || parsePositiveNumber(fallbackUserId);
+    const nickname = normalizeText(rawRecord.nickname, 40);
+    const passwordHash = String(rawRecord.password_hash || '').trim();
+    if (!userId || !nickname || !passwordHash) return null;
+    return {
+      user_id: userId,
+      nickname,
+      nickname_key: nicknameKey(rawRecord.nickname_key || nickname),
+      password_hash: passwordHash,
+      created_at: normalizeIso(rawRecord.created_at, nowIso()),
+      updated_at: normalizeIso(rawRecord.updated_at, nowIso()),
+    };
+  };
+  const hydratedLocalAuth = Object.entries(localAuthState).reduce((acc, [rawKey, rawRecord]) => {
+    const normalized = normalizeLocalAuthEntry(rawRecord, rawKey);
+    if (!normalized) return acc;
+    acc[String(normalized.user_id)] = normalized;
+    return acc;
+  }, {});
+  const maxUserIdFromAuth = Object.values(hydratedLocalAuth).reduce(
+    (acc, row) => Math.max(acc, parsePositiveNumber(row?.user_id) || 0),
+    0
+  );
   return {
+    store_updated_at: normalizeIso(parsed?.store_updated_at, nowIso()),
     idSeq: Number(parsed?.idSeq || 1),
+    userIdSeq: Number(
+      parsed?.userIdSeq ||
+        (Math.max(maxUserIdFromProfiles, maxUserIdFromAuth, parsePositiveNumber(parsed?.userIdSeq) || 0) + 1) ||
+        fallback.userIdSeq
+    ),
     items: Array.isArray(parsed?.items) ? parsed.items : [],
     cinemaPollIdSeq: Number(parsed?.cinemaPollIdSeq || fallback.cinemaPollIdSeq),
     cinemaPollCurrent: normalizeCinemaPollState(parsed?.cinemaPollCurrent),
     commentIdSeq: Number(parsed?.commentIdSeq || 1),
     comments: Array.isArray(parsed?.comments) ? parsed.comments : [],
-    users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
+    users: usersState,
+    localAuth: hydratedLocalAuth,
+    userAliases: parsed?.userAliases && typeof parsed.userAliases === 'object' ? parsed.userAliases : {},
     userSessions: parsed?.userSessions && typeof parsed.userSessions === 'object' ? parsed.userSessions : {},
     follows: parsed?.follows && typeof parsed.follows === 'object' ? parsed.follows : {},
     movieStates: parsed?.movieStates && typeof parsed.movieStates === 'object' ? parsed.movieStates : {},
@@ -120,7 +173,7 @@ function loadStore() {
   return createEmptyStoreState();
 }
 
-function saveStore(store) {
+function saveStoreLocallyOnly(store) {
   ensureStore();
   const serialized = JSON.stringify(store, null, 2);
   const tmpFile = `${dataFile}.${Date.now()}.tmp`;
@@ -136,9 +189,16 @@ function saveStore(store) {
     fs.copyFileSync(dataFile, dataFileBackup);
   } catch {
   }
+  return serialized;
 }
 
-const store = loadStore();
+function saveStore(store) {
+  store.store_updated_at = nowIso();
+  const serialized = saveStoreLocallyOnly(store);
+  void scheduleCloudStoreSync(serialized);
+}
+
+let store = loadStore();
 
 function nowIso() {
   return new Date().toISOString();
@@ -258,18 +318,24 @@ function normalizeCinemaPollState(input) {
       if (!optionId || !options.some((option) => option.id === optionId)) continue;
       votesByUser[String(userId)] = optionId;
     }
+    const createdAt = normalizeIso(input?.created_at, nowIso());
     const normalized = {
       id: parsePositiveNumber(input?.id) || 1,
       question,
       status,
       options: options.map((option) => ({ ...option, votes: 0 })),
       votes_by_user: votesByUser,
-      created_at: normalizeIso(input?.created_at, nowIso()),
+      created_at: createdAt,
       updated_at: normalizeIso(input?.updated_at ?? input?.created_at, nowIso()),
+      expires_at: normalizeIso(input?.expires_at, computeCinemaPollExpiresAt(createdAt)),
     };
     for (const optionId of Object.values(votesByUser)) {
       const option = normalized.options.find((row) => row.id === optionId);
       if (option) option.votes += 1;
+    }
+    if (normalized.status === 'open' && isCinemaPollExpired(normalized)) {
+      normalized.status = 'closed';
+      normalized.updated_at = nowIso();
     }
     return normalized;
   } catch {
@@ -302,19 +368,46 @@ function serializeCinemaPollForUser(poll, userIdInput) {
     }),
     created_at: poll.created_at,
     updated_at: poll.updated_at,
+    expires_at: poll.expires_at,
   };
+}
+
+function computeCinemaPollExpiresAt(createdAtInput) {
+  const createdAt = normalizeIso(createdAtInput, nowIso());
+  const createdAtMs = Date.parse(createdAt);
+  const expiresAtMs = Number.isFinite(createdAtMs) ? createdAtMs + CINEMA_POLL_TTL_MS : Date.now() + CINEMA_POLL_TTL_MS;
+  return new Date(expiresAtMs).toISOString();
+}
+
+function isCinemaPollExpired(poll, nowMsInput = Date.now()) {
+  if (!poll || poll.status !== 'open') return false;
+  const expiresAtMs = Date.parse(String(poll.expires_at || ''));
+  if (!Number.isFinite(expiresAtMs)) return false;
+  const nowMs = Number.isFinite(Number(nowMsInput)) ? Number(nowMsInput) : Date.now();
+  return nowMs >= expiresAtMs;
+}
+
+function closeExpiredCinemaPoll(nowMsInput = Date.now()) {
+  const poll = store.cinemaPollCurrent;
+  if (!poll || poll.status !== 'open') return false;
+  if (!isCinemaPollExpired(poll, nowMsInput)) return false;
+  poll.status = 'closed';
+  poll.updated_at = nowIso();
+  return true;
 }
 
 function createCinemaPoll(input) {
   const clean = normalizeCinemaPollInput(input);
+  const createdAt = nowIso();
   const nextPoll = {
     id: store.cinemaPollIdSeq++,
     question: clean.question,
     status: 'open',
     options: clean.options.map((option) => ({ ...option, votes: 0 })),
     votes_by_user: {},
-    created_at: nowIso(),
-    updated_at: nowIso(),
+    created_at: createdAt,
+    updated_at: createdAt,
+    expires_at: computeCinemaPollExpiresAt(createdAt),
   };
   store.cinemaPollCurrent = nextPoll;
   return nextPoll;
@@ -336,6 +429,11 @@ function voteCinemaPoll(pollIdInput, userIdInput, optionIdInput) {
   if (!poll) throw new Error('No active cinema poll.');
   const pollId = parsePositiveNumber(pollIdInput);
   if (!pollId || pollId !== Number(poll.id)) throw new Error('Cinema poll not found.');
+  if (isCinemaPollExpired(poll)) {
+    poll.status = 'closed';
+    poll.updated_at = nowIso();
+    throw new Error('Cinema poll is closed.');
+  }
   if (poll.status !== 'open') throw new Error('Cinema poll is closed.');
 
   const userId = parsePositiveNumber(userIdInput);
@@ -394,9 +492,11 @@ function normalizeProfileSync(body) {
 }
 
 function publicProfileView(userId) {
-  const profile = store.users[String(userId)];
+  const canonicalUserId = resolveCanonicalUserId(userId);
+  if (!canonicalUserId) return null;
+  const profile = store.users[String(canonicalUserId)];
   if (!profile) return null;
-  const movieState = store.movieStates[String(userId)] ? ensureUserMovieState(userId) : null;
+  const movieState = store.movieStates[String(canonicalUserId)] ? ensureUserMovieState(canonicalUserId) : null;
   const privacy = movieState
     ? normalizeMoviePrivacy(movieState.privacy, profile.privacy)
     : normalizeMoviePrivacy(profile.privacy, DEFAULT_MOVIE_PRIVACY);
@@ -416,8 +516,12 @@ function publicProfileView(userId) {
     Array.isArray(profile.rated) && profile.rated.length > 0
       ? profile.rated
       : movieState?.ratings ?? [];
-  const followers = Object.values(store.follows).filter((setLike) => Array.isArray(setLike) && setLike.includes(userId)).length;
-  const following = Array.isArray(store.follows[String(userId)]) ? store.follows[String(userId)].length : 0;
+  const followers = Object.values(store.follows).filter(
+    (setLike) => Array.isArray(setLike) && setLike.includes(canonicalUserId)
+  ).length;
+  const following = Array.isArray(store.follows[String(canonicalUserId)])
+    ? store.follows[String(canonicalUserId)].length
+    : 0;
   return {
     user_id: profile.user_id,
     nickname: profile.nickname,
@@ -437,18 +541,24 @@ function publicProfileView(userId) {
 }
 
 function followUser(followerId, targetId) {
-  if (followerId === targetId) throw new Error('Cannot follow yourself.');
-  if (!store.users[String(targetId)]) throw new Error('Target user not found.');
-  const key = String(followerId);
+  const canonicalFollowerId = resolveCanonicalUserId(followerId);
+  const canonicalTargetId = resolveCanonicalUserId(targetId);
+  if (!canonicalFollowerId || !canonicalTargetId) throw new Error('Invalid follow target.');
+  if (canonicalFollowerId === canonicalTargetId) throw new Error('Cannot follow yourself.');
+  if (!store.users[String(canonicalTargetId)]) throw new Error('Target user not found.');
+  const key = String(canonicalFollowerId);
   const current = Array.isArray(store.follows[key]) ? store.follows[key] : [];
-  if (!current.includes(targetId)) current.push(targetId);
+  if (!current.includes(canonicalTargetId)) current.push(canonicalTargetId);
   store.follows[key] = current;
 }
 
 function unfollowUser(followerId, targetId) {
-  const key = String(followerId);
+  const canonicalFollowerId = resolveCanonicalUserId(followerId);
+  const canonicalTargetId = resolveCanonicalUserId(targetId);
+  if (!canonicalFollowerId || !canonicalTargetId) return;
+  const key = String(canonicalFollowerId);
   const current = Array.isArray(store.follows[key]) ? store.follows[key] : [];
-  store.follows[key] = current.filter((id) => id !== targetId);
+  store.follows[key] = current.filter((id) => Number(id) !== Number(canonicalTargetId));
 }
 
 function validateEventInput(input) {
@@ -493,8 +603,10 @@ function normalizeCommentInput(input) {
   if (!Number.isFinite(userId) || userId <= 0) throw new Error('user_id is required.');
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) throw new Error('tmdb_id is required.');
   if (!text) throw new Error('Comment text is required.');
+  const canonicalUserId = resolveCanonicalUserIdForNickname(userId, nickname) || parsePositiveNumber(userId);
+  if (!canonicalUserId) throw new Error('user_id is required.');
   return {
-    user_id: userId,
+    user_id: canonicalUserId,
     tmdb_id: tmdbId,
     text: text.slice(0, 1000),
     nickname,
@@ -504,13 +616,7 @@ function normalizeCommentInput(input) {
 }
 
 function resolvePublicUserIdForNickname(nickname, fallbackUserId) {
-  const clean = String(nickname || '').trim().toLowerCase();
-  if (!clean) return fallbackUserId;
-  const match = Object.values(store.users).find(
-    (u) => String(u?.nickname || '').trim().toLowerCase() === clean
-  );
-  if (match && Number.isFinite(Number(match.user_id))) return Number(match.user_id);
-  return fallbackUserId;
+  return resolveCanonicalUserIdForNickname(fallbackUserId, nickname) || parsePositiveNumber(fallbackUserId) || null;
 }
 
 const DEFAULT_MOVIE_PRIVACY = Object.freeze({
@@ -524,6 +630,638 @@ function parsePositiveNumber(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.floor(parsed);
+}
+
+function ensureUserAliasesStore() {
+  if (!store.userAliases || typeof store.userAliases !== 'object') {
+    store.userAliases = {};
+  }
+  return store.userAliases;
+}
+
+function nicknameKey(value) {
+  return String(value || '').trim().toLowerCase();
+}
+
+function resolveCanonicalUserId(userIdInput) {
+  let userId = parsePositiveNumber(userIdInput);
+  if (!userId) return null;
+  const aliases = ensureUserAliasesStore();
+  const visited = [];
+  const seen = new Set();
+  while (!seen.has(userId)) {
+    seen.add(userId);
+    const aliasTarget = parsePositiveNumber(aliases[String(userId)]);
+    if (!aliasTarget || aliasTarget === userId) break;
+    visited.push(userId);
+    userId = aliasTarget;
+  }
+  for (const aliasId of visited) {
+    aliases[String(aliasId)] = userId;
+  }
+  return userId;
+}
+
+function setUserAlias(aliasIdInput, canonicalIdInput) {
+  const aliasId = parsePositiveNumber(aliasIdInput);
+  const canonicalId = resolveCanonicalUserId(canonicalIdInput);
+  if (!aliasId || !canonicalId) return null;
+  if (aliasId === canonicalId) return canonicalId;
+  const aliases = ensureUserAliasesStore();
+  aliases[String(aliasId)] = canonicalId;
+  for (const [rawId, rawTarget] of Object.entries(aliases)) {
+    const id = parsePositiveNumber(rawId);
+    const target = parsePositiveNumber(rawTarget);
+    if (!id || !target || id === canonicalId) continue;
+    if (target === aliasId) aliases[String(id)] = canonicalId;
+  }
+  return canonicalId;
+}
+
+function ensureLocalAuthStore() {
+  if (!store.localAuth || typeof store.localAuth !== 'object') {
+    store.localAuth = {};
+  }
+  return store.localAuth;
+}
+
+function validateLocalNickname(nicknameInput) {
+  const nickname = normalizeText(nicknameInput, 40);
+  if (!nickname) throw new Error('nickname is required.');
+  if (nickname.length < 3 || nickname.length > 20) {
+    throw new Error('Nickname must be 3-20 characters.');
+  }
+  if (!LOCAL_NICKNAME_RE.test(nickname)) {
+    throw new Error('Nickname can contain only letters, numbers, ".", "_" or "-".');
+  }
+  return nickname;
+}
+
+function validateLocalPassword(passwordInput) {
+  const password = String(passwordInput || '');
+  if (!password) throw new Error('password is required.');
+  if (password.length < LOCAL_PASSWORD_MIN_LEN) {
+    throw new Error(`Password must be at least ${LOCAL_PASSWORD_MIN_LEN} characters.`);
+  }
+  return password;
+}
+
+function hashLocalPassword(passwordInput) {
+  return crypto.createHash('sha256').update(String(passwordInput || '')).digest('hex');
+}
+
+function allocateCanonicalUserId() {
+  const fromProfiles = Object.entries(store.users || {}).reduce((acc, [rawUserId, profile]) => {
+    const idFromKey = parsePositiveNumber(rawUserId) || 0;
+    const idFromProfile = parsePositiveNumber(profile?.user_id) || 0;
+    return Math.max(acc, idFromKey, idFromProfile);
+  }, 0);
+  const fromAuth = Object.entries(ensureLocalAuthStore()).reduce((acc, [rawUserId, row]) => {
+    const idFromKey = parsePositiveNumber(rawUserId) || 0;
+    const idFromRow = parsePositiveNumber(row?.user_id) || 0;
+    return Math.max(acc, idFromKey, idFromRow);
+  }, 0);
+  const fromAliases = Object.entries(store.userAliases || {}).reduce((acc, [rawAliasId, rawTargetId]) => {
+    const aliasId = parsePositiveNumber(rawAliasId) || 0;
+    const targetId = parsePositiveNumber(rawTargetId) || 0;
+    return Math.max(acc, aliasId, targetId);
+  }, 0);
+  const next = Math.max(
+    1,
+    parsePositiveNumber(store.userIdSeq) || 1,
+    fromProfiles + 1,
+    fromAuth + 1,
+    fromAliases + 1
+  );
+  store.userIdSeq = next + 1;
+  return next;
+}
+
+function getLocalAuthEntryByUserId(userIdInput) {
+  const userId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!userId) return null;
+  const row = ensureLocalAuthStore()[String(userId)];
+  if (!row || typeof row !== 'object') return null;
+  const nickname = normalizeText(row.nickname, 40);
+  const passwordHash = String(row.password_hash || '').trim();
+  if (!nickname || !passwordHash) return null;
+  return {
+    user_id: userId,
+    nickname,
+    nickname_key: nicknameKey(row.nickname_key || nickname),
+    password_hash: passwordHash,
+    created_at: normalizeIso(row.created_at, nowIso()),
+    updated_at: normalizeIso(row.updated_at, nowIso()),
+  };
+}
+
+function findLocalAuthEntryByNickname(nicknameInput) {
+  const clean = nicknameKey(nicknameInput);
+  if (!clean) return null;
+  const rows = Object.entries(ensureLocalAuthStore());
+  for (const [rawUserId, row] of rows) {
+    const userId = resolveCanonicalUserId(row?.user_id) || resolveCanonicalUserId(rawUserId) || parsePositiveNumber(rawUserId);
+    const nickname = normalizeText(row?.nickname, 40);
+    const passwordHash = String(row?.password_hash || '').trim();
+    const rowNickKey = nicknameKey(row?.nickname_key || nickname);
+    if (!userId || !nickname || !passwordHash) continue;
+    if (rowNickKey !== clean) continue;
+    return {
+      user_id: userId,
+      nickname,
+      nickname_key: rowNickKey,
+      password_hash: passwordHash,
+      created_at: normalizeIso(row?.created_at, nowIso()),
+      updated_at: normalizeIso(row?.updated_at, nowIso()),
+    };
+  }
+  return null;
+}
+
+function upsertLocalAuthEntry(
+  userIdInput,
+  nicknameInput,
+  passwordInput,
+  options = { passwordAlreadyHashed: false }
+) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) throw new Error('Invalid user id.');
+  const nickname = validateLocalNickname(nicknameInput);
+  const passwordHash = options?.passwordAlreadyHashed
+    ? String(passwordInput || '').trim()
+    : hashLocalPassword(validateLocalPassword(passwordInput));
+  if (!passwordHash) throw new Error('password is required.');
+  const takenByNickname = findLocalAuthEntryByNickname(nickname);
+  if (takenByNickname && takenByNickname.user_id !== canonicalUserId) {
+    throw new Error('Nickname already used.');
+  }
+  const localAuth = ensureLocalAuthStore();
+  const existing = getLocalAuthEntryByUserId(canonicalUserId);
+  const now = nowIso();
+  const next = {
+    user_id: canonicalUserId,
+    nickname,
+    nickname_key: nicknameKey(nickname),
+    password_hash: passwordHash,
+    created_at: existing?.created_at || now,
+    updated_at: now,
+  };
+  localAuth[String(canonicalUserId)] = next;
+  return next;
+}
+
+function syncLocalAuthNicknameForUser(userIdInput, nicknameInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) return null;
+  const existing = getLocalAuthEntryByUserId(canonicalUserId);
+  if (!existing) return null;
+  const nickname = normalizeText(nicknameInput, 40);
+  if (!nickname) return existing;
+  const takenByNickname = findLocalAuthEntryByNickname(nickname);
+  if (takenByNickname && takenByNickname.user_id !== canonicalUserId) {
+    return existing;
+  }
+  const localAuth = ensureLocalAuthStore();
+  localAuth[String(canonicalUserId)] = {
+    ...existing,
+    nickname,
+    nickname_key: nicknameKey(nickname),
+    updated_at: nowIso(),
+  };
+  return localAuth[String(canonicalUserId)];
+}
+
+function maintainLocalAuthMappings() {
+  const source = ensureLocalAuthStore();
+  const normalizedByUser = {};
+  const sortedRows = Object.entries(source).sort(([a], [b]) => (parsePositiveNumber(a) || 0) - (parsePositiveNumber(b) || 0));
+  for (const [rawUserId, row] of sortedRows) {
+    const canonicalUserId =
+      resolveCanonicalUserId(row?.user_id) || resolveCanonicalUserId(rawUserId) || parsePositiveNumber(rawUserId);
+    const nickname = normalizeText(row?.nickname, 40);
+    const passwordHash = String(row?.password_hash || '').trim();
+    if (!canonicalUserId || !nickname || !passwordHash) continue;
+    const candidate = {
+      user_id: canonicalUserId,
+      nickname,
+      nickname_key: nicknameKey(row?.nickname_key || nickname),
+      password_hash: passwordHash,
+      created_at: normalizeIso(row?.created_at, nowIso()),
+      updated_at: normalizeIso(row?.updated_at, nowIso()),
+    };
+    const existing = normalizedByUser[String(canonicalUserId)];
+    if (!existing || Date.parse(String(candidate.updated_at || '')) >= Date.parse(String(existing.updated_at || ''))) {
+      normalizedByUser[String(canonicalUserId)] = candidate;
+    }
+  }
+  const nicknameOwner = new Map();
+  const deduped = {};
+  const ordered = Object.values(normalizedByUser).sort(
+    (a, b) => Date.parse(String(b.updated_at || '')) - Date.parse(String(a.updated_at || ''))
+  );
+  for (const row of ordered) {
+    const key = nicknameKey(row.nickname_key || row.nickname);
+    if (!key) continue;
+    const ownedBy = nicknameOwner.get(key);
+    if (ownedBy && ownedBy !== row.user_id) {
+      continue;
+    }
+    nicknameOwner.set(key, row.user_id);
+    deduped[String(row.user_id)] = {
+      ...row,
+      nickname_key: key,
+    };
+  }
+  store.localAuth = deduped;
+}
+
+function serializeLocalAuthUser(userIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) return null;
+  const auth = getLocalAuthEntryByUserId(canonicalUserId);
+  const profile = ensureUserProfile(canonicalUserId, auth?.nickname || null);
+  if (!profile) return null;
+  const nickname = normalizeText(auth?.nickname, 40) || normalizeText(profile.nickname, 40) || `user_${canonicalUserId}`;
+  profile.nickname = nickname;
+  profile.user_id = canonicalUserId;
+  profile.updated_at = normalizeIso(profile.updated_at, nowIso());
+  return {
+    user_id: canonicalUserId,
+    nickname,
+    name: normalizeText(profile.name, 80) || null,
+    email: null,
+    date_of_birth: null,
+    country: null,
+    bio: normalizeText(profile.bio, 300) || null,
+    avatar_url: normalizeAvatarUrl(profile.avatar_url),
+    role: nicknameKey(nickname) === 'admin' ? 'admin' : 'user',
+    auth_provider: 'local',
+    created_at: auth?.created_at || nowIso(),
+    updated_at: normalizeIso(profile.updated_at, nowIso()),
+  };
+}
+
+function dedupeByKey(rows, keySelector) {
+  const map = new Map();
+  for (const row of rows) {
+    const key = keySelector(row);
+    if (!key) continue;
+    map.set(String(key), row);
+  }
+  return Array.from(map.values());
+}
+
+function mergeUserProfiles(primaryProfile, secondaryProfile, canonicalUserId) {
+  const primary = primaryProfile && typeof primaryProfile === 'object' ? primaryProfile : {};
+  const secondary = secondaryProfile && typeof secondaryProfile === 'object' ? secondaryProfile : {};
+  const merged = {
+    ...secondary,
+    ...primary,
+    user_id: canonicalUserId,
+    nickname: normalizeText(primary.nickname, 40) || normalizeText(secondary.nickname, 40) || `user_${canonicalUserId}`,
+    name: normalizeText(primary.name, 80) || normalizeText(secondary.name, 80) || null,
+    bio: normalizeText(primary.bio, 300) || normalizeText(secondary.bio, 300) || null,
+    avatar_url: normalizeAvatarUrl(primary.avatar_url) || normalizeAvatarUrl(secondary.avatar_url) || null,
+    privacy: {
+      watchlist: !!(primary.privacy?.watchlist ?? secondary.privacy?.watchlist),
+      favorites: !!(primary.privacy?.favorites ?? secondary.privacy?.favorites),
+      watched: !!(primary.privacy?.watched ?? secondary.privacy?.watched),
+      rated: !!(primary.privacy?.rated ?? secondary.privacy?.rated),
+      favorite_actors: !!(primary.privacy?.favorite_actors ?? secondary.privacy?.favorite_actors),
+      favorite_directors: !!(primary.privacy?.favorite_directors ?? secondary.privacy?.favorite_directors),
+    },
+    watchlist: Array.isArray(primary.watchlist) ? primary.watchlist : Array.isArray(secondary.watchlist) ? secondary.watchlist : [],
+    favorites: Array.isArray(primary.favorites) ? primary.favorites : Array.isArray(secondary.favorites) ? secondary.favorites : [],
+    watched: Array.isArray(primary.watched) ? primary.watched : Array.isArray(secondary.watched) ? secondary.watched : [],
+    rated: Array.isArray(primary.rated) ? primary.rated : Array.isArray(secondary.rated) ? secondary.rated : [],
+    favorite_actors: Array.isArray(primary.favorite_actors)
+      ? primary.favorite_actors
+      : Array.isArray(secondary.favorite_actors)
+        ? secondary.favorite_actors
+        : [],
+    favorite_directors: Array.isArray(primary.favorite_directors)
+      ? primary.favorite_directors
+      : Array.isArray(secondary.favorite_directors)
+        ? secondary.favorite_directors
+        : [],
+    updated_at: normalizeIso(primary.updated_at ?? secondary.updated_at, nowIso()),
+  };
+  return merged;
+}
+
+function mergeUserMovieStates(canonicalUserId, aliasUserId) {
+  if (!canonicalUserId || !aliasUserId || canonicalUserId === aliasUserId) return;
+  const canonicalKey = String(canonicalUserId);
+  const aliasKey = String(aliasUserId);
+  const canonicalState = store.movieStates[canonicalKey];
+  const aliasState = store.movieStates[aliasKey];
+  if (!aliasState && !canonicalState) return;
+
+  const base = ensureUserMovieState(canonicalUserId);
+  const alias =
+    aliasState && typeof aliasState === 'object'
+      ? {
+          privacy: normalizeMoviePrivacy(aliasState.privacy, DEFAULT_MOVIE_PRIVACY),
+          watchlist: normalizeMovieList(aliasState.watchlist, 1200),
+          favorites: normalizeMovieList(aliasState.favorites, 1200),
+          watched: normalizeMovieList(aliasState.watched, 1200),
+          ratings: normalizeMovieRatings(aliasState.ratings, 1200),
+        }
+      : null;
+  if (alias) {
+    base.watchlist = normalizeMovieList([...(alias.watchlist || []), ...(base.watchlist || [])], 1200);
+    base.favorites = normalizeMovieList([...(alias.favorites || []), ...(base.favorites || [])], 1200);
+    base.watched = normalizeMovieList([...(alias.watched || []), ...(base.watched || [])], 1200);
+    base.ratings = normalizeMovieRatings([...(alias.ratings || []), ...(base.ratings || [])], 1200);
+    base.privacy = normalizeMoviePrivacy(
+      {
+        watchlist: !!alias.privacy?.watchlist || !!base.privacy?.watchlist,
+        favorites: !!alias.privacy?.favorites || !!base.privacy?.favorites,
+        watched: !!alias.privacy?.watched || !!base.privacy?.watched,
+        rated: !!alias.privacy?.rated || !!base.privacy?.rated,
+      },
+      base.privacy
+    );
+    base.updated_at = nowIso();
+    delete store.movieStates[aliasKey];
+  }
+  store.movieStates[canonicalKey] = base;
+}
+
+function remapFollowsToCanonicalIds() {
+  const next = {};
+  for (const [rawFollowerId, rawTargets] of Object.entries(store.follows || {})) {
+    const followerId = resolveCanonicalUserId(rawFollowerId);
+    if (!followerId) continue;
+    const currentTargets = Array.isArray(next[String(followerId)]) ? next[String(followerId)] : [];
+    const targetSet = new Set(currentTargets.map((x) => Number(x)));
+    for (const rawTarget of Array.isArray(rawTargets) ? rawTargets : []) {
+      const targetId = resolveCanonicalUserId(rawTarget);
+      if (!targetId || targetId === followerId) continue;
+      targetSet.add(targetId);
+    }
+    next[String(followerId)] = Array.from(targetSet);
+  }
+  store.follows = next;
+}
+
+function mergeUserIntoCanonicalUserId(aliasUserIdInput, canonicalUserIdInput) {
+  const aliasUserId = parsePositiveNumber(aliasUserIdInput);
+  const canonicalUserId = resolveCanonicalUserId(canonicalUserIdInput) || parsePositiveNumber(canonicalUserIdInput);
+  if (!aliasUserId || !canonicalUserId) return canonicalUserId || aliasUserId || null;
+  if (aliasUserId === canonicalUserId) return canonicalUserId;
+
+  setUserAlias(aliasUserId, canonicalUserId);
+
+  const aliasProfile = store.users[String(aliasUserId)];
+  const canonicalProfile = store.users[String(canonicalUserId)];
+  if (aliasProfile || canonicalProfile) {
+    store.users[String(canonicalUserId)] = mergeUserProfiles(canonicalProfile, aliasProfile, canonicalUserId);
+    if (aliasUserId !== canonicalUserId) {
+      delete store.users[String(aliasUserId)];
+    }
+  }
+
+  const aliasAuth = getLocalAuthEntryByUserId(aliasUserId);
+  const canonicalAuth = getLocalAuthEntryByUserId(canonicalUserId);
+  if (aliasAuth || canonicalAuth) {
+    const localAuth = ensureLocalAuthStore();
+    const sourceAuth = [canonicalAuth, aliasAuth]
+      .filter((row) => !!row)
+      .sort((a, b) => Date.parse(String(b.updated_at || '')) - Date.parse(String(a.updated_at || '')))[0];
+    const nextNickname =
+      normalizeText(canonicalAuth?.nickname, 40) ||
+      normalizeText(aliasAuth?.nickname, 40) ||
+      normalizeText(store.users[String(canonicalUserId)]?.nickname, 40) ||
+      `user_${canonicalUserId}`;
+    localAuth[String(canonicalUserId)] = {
+      ...sourceAuth,
+      user_id: canonicalUserId,
+      nickname: nextNickname,
+      nickname_key: nicknameKey(nextNickname),
+      created_at: canonicalAuth?.created_at || aliasAuth?.created_at || nowIso(),
+      updated_at: nowIso(),
+    };
+    if (aliasUserId !== canonicalUserId) {
+      delete localAuth[String(aliasUserId)];
+    }
+  }
+
+  for (const row of store.comments) {
+    const userId = parsePositiveNumber(row?.user_id);
+    const publicUserId = parsePositiveNumber(row?.public_user_id);
+    if (userId === aliasUserId) row.user_id = canonicalUserId;
+    if (publicUserId === aliasUserId) row.public_user_id = canonicalUserId;
+  }
+
+  for (const row of store.galleryComments) {
+    const userId = parsePositiveNumber(row?.user_id);
+    const publicUserId = parsePositiveNumber(row?.public_user_id);
+    if (userId === aliasUserId) row.user_id = canonicalUserId;
+    if (publicUserId === aliasUserId) row.public_user_id = canonicalUserId;
+  }
+
+  for (const row of store.galleryLikes) {
+    if (parsePositiveNumber(row?.user_id) === aliasUserId) row.user_id = canonicalUserId;
+  }
+  store.galleryLikes = dedupeByKey(
+    store.galleryLikes,
+    (row) => `${parsePositiveNumber(row?.user_id) || 0}:${parsePositiveNumber(row?.gallery_id) || 0}`
+  );
+
+  for (const row of store.galleryFavorites) {
+    if (parsePositiveNumber(row?.user_id) === aliasUserId) row.user_id = canonicalUserId;
+  }
+  store.galleryFavorites = dedupeByKey(
+    store.galleryFavorites,
+    (row) => `${parsePositiveNumber(row?.user_id) || 0}:${parsePositiveNumber(row?.gallery_id) || 0}`
+  );
+
+  for (const row of store.items) {
+    if (parsePositiveNumber(row?.created_by) === aliasUserId) row.created_by = canonicalUserId;
+  }
+
+  if (store.cinemaPollCurrent?.votes_by_user && typeof store.cinemaPollCurrent.votes_by_user === 'object') {
+    const nextVotesByUser = {};
+    for (const [rawUserId, optionId] of Object.entries(store.cinemaPollCurrent.votes_by_user)) {
+      const rawId = parsePositiveNumber(rawUserId);
+      if (!rawId) continue;
+      const canonicalId = rawId === aliasUserId ? canonicalUserId : resolveCanonicalUserId(rawId) || rawId;
+      nextVotesByUser[String(canonicalId)] = String(optionId || '');
+    }
+    store.cinemaPollCurrent.votes_by_user = nextVotesByUser;
+    for (const option of Array.isArray(store.cinemaPollCurrent.options) ? store.cinemaPollCurrent.options : []) {
+      option.votes = 0;
+    }
+    for (const optionId of Object.values(nextVotesByUser)) {
+      const option = store.cinemaPollCurrent.options.find((row) => row.id === optionId);
+      if (option) option.votes += 1;
+    }
+  }
+
+  mergeUserMovieStates(canonicalUserId, aliasUserId);
+  remapFollowsToCanonicalIds();
+
+  const normalizedSessions = {};
+  for (const [rawUserId, session] of Object.entries(store.userSessions || {})) {
+    const userId = parsePositiveNumber(rawUserId) || parsePositiveNumber(session?.user_id);
+    if (!userId) continue;
+    const canonicalId = userId === aliasUserId ? canonicalUserId : resolveCanonicalUserId(userId) || userId;
+    const existing = normalizedSessions[String(canonicalId)];
+    const nextSession = {
+      user_id: canonicalId,
+      token: String(session?.token || '').trim(),
+      created_at: normalizeIso(session?.created_at, nowIso()),
+      updated_at: normalizeIso(session?.updated_at, nowIso()),
+    };
+    if (!nextSession.token) continue;
+    if (!existing || Date.parse(String(nextSession.updated_at || '')) >= Date.parse(String(existing.updated_at || ''))) {
+      normalizedSessions[String(canonicalId)] = nextSession;
+    }
+  }
+  store.userSessions = normalizedSessions;
+
+  return canonicalUserId;
+}
+
+function findCanonicalUserIdByNickname(nicknameInput) {
+  const clean = nicknameKey(nicknameInput);
+  if (!clean) return null;
+  const profile = Object.values(store.users || {}).find((row) => nicknameKey(row?.nickname) === clean);
+  if (!profile) return null;
+  return resolveCanonicalUserId(profile.user_id);
+}
+
+function resolveCanonicalUserIdForNickname(userIdInput, nicknameInput) {
+  const inputUserId = parsePositiveNumber(userIdInput);
+  const canonicalFromInput = resolveCanonicalUserId(inputUserId);
+  const canonicalFromNickname = findCanonicalUserIdByNickname(nicknameInput);
+  if (canonicalFromNickname && canonicalFromInput && canonicalFromNickname !== canonicalFromInput) {
+    mergeUserIntoCanonicalUserId(canonicalFromInput, canonicalFromNickname);
+    setUserAlias(canonicalFromInput, canonicalFromNickname);
+    return canonicalFromNickname;
+  }
+  if (canonicalFromNickname && inputUserId && canonicalFromNickname !== inputUserId) {
+    setUserAlias(inputUserId, canonicalFromNickname);
+  }
+  return canonicalFromNickname || canonicalFromInput || inputUserId || null;
+}
+
+function getAliasUserIdsForCanonical(userIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput);
+  if (!canonicalUserId) return [];
+  const aliases = ensureUserAliasesStore();
+  const ids = new Set([canonicalUserId]);
+  for (const [rawAliasId, rawTargetId] of Object.entries(aliases)) {
+    const aliasId = parsePositiveNumber(rawAliasId);
+    const targetId = resolveCanonicalUserId(rawTargetId);
+    if (!aliasId || !targetId) continue;
+    if (targetId === canonicalUserId) ids.add(aliasId);
+  }
+  return Array.from(ids);
+}
+
+function ensureUserProfile(userIdInput, nicknameInput) {
+  const userId = resolveCanonicalUserId(userIdInput);
+  if (!userId) return null;
+  const key = String(userId);
+  const existing = store.users[key];
+  if (existing && typeof existing === 'object') {
+    if (nicknameInput) {
+      const nextNickname = normalizeText(nicknameInput, 40);
+      if (nextNickname) existing.nickname = nextNickname;
+    }
+    if (!existing.updated_at) existing.updated_at = nowIso();
+    existing.user_id = userId;
+    return existing;
+  }
+  const profile = {
+    user_id: userId,
+    nickname: normalizeText(nicknameInput, 40) || `user_${userId}`,
+    name: null,
+    bio: null,
+    avatar_url: null,
+    privacy: {
+      watchlist: false,
+      favorites: false,
+      watched: false,
+      rated: false,
+      favorite_actors: false,
+      favorite_directors: false,
+    },
+    watchlist: [],
+    favorites: [],
+    watched: [],
+    rated: [],
+    favorite_actors: [],
+    favorite_directors: [],
+    updated_at: nowIso(),
+  };
+  store.users[key] = profile;
+  return profile;
+}
+
+function maintainCanonicalUserMappings() {
+  ensureUserAliasesStore();
+
+  const normalizedUsers = {};
+  for (const [rawUserId, profile] of Object.entries(store.users || {})) {
+    const candidateUserId = parsePositiveNumber(profile?.user_id) || parsePositiveNumber(rawUserId);
+    if (!candidateUserId) continue;
+    const canonicalUserId = resolveCanonicalUserId(candidateUserId) || candidateUserId;
+    const existing = normalizedUsers[String(canonicalUserId)];
+    normalizedUsers[String(canonicalUserId)] = mergeUserProfiles(profile, existing, canonicalUserId);
+  }
+  store.users = normalizedUsers;
+
+  const aliasSnapshot = Object.entries(store.userAliases || {});
+  for (const [rawAliasId, rawTargetId] of aliasSnapshot) {
+    const aliasId = parsePositiveNumber(rawAliasId);
+    const targetId = resolveCanonicalUserId(rawTargetId) || parsePositiveNumber(rawTargetId);
+    if (!aliasId || !targetId || aliasId === targetId) continue;
+    mergeUserIntoCanonicalUserId(aliasId, targetId);
+  }
+
+  const firstByNickname = new Map();
+  const profiles = Object.values(store.users || {}).sort(
+    (a, b) => (parsePositiveNumber(a?.user_id) || 0) - (parsePositiveNumber(b?.user_id) || 0)
+  );
+  for (const profile of profiles) {
+    const userId = resolveCanonicalUserId(profile?.user_id) || parsePositiveNumber(profile?.user_id);
+    const nick = nicknameKey(profile?.nickname);
+    if (!userId || !nick) continue;
+    const firstId = firstByNickname.get(nick);
+    if (firstId && firstId !== userId) {
+      mergeUserIntoCanonicalUserId(userId, firstId);
+    } else {
+      firstByNickname.set(nick, userId);
+    }
+  }
+
+  const aliases = ensureUserAliasesStore();
+  for (const [rawAliasId, rawTargetId] of Object.entries(aliases)) {
+    const aliasId = parsePositiveNumber(rawAliasId);
+    const targetId = resolveCanonicalUserId(rawTargetId) || parsePositiveNumber(rawTargetId);
+    if (!aliasId || !targetId || aliasId === targetId) {
+      delete aliases[rawAliasId];
+      continue;
+    }
+    aliases[rawAliasId] = targetId;
+  }
+
+  maintainLocalAuthMappings();
+  remapFollowsToCanonicalIds();
+  const maxProfileUserId = Object.entries(store.users || {}).reduce((acc, [rawUserId, profile]) => {
+    const idFromKey = parsePositiveNumber(rawUserId) || 0;
+    const idFromProfile = parsePositiveNumber(profile?.user_id) || 0;
+    return Math.max(acc, idFromKey, idFromProfile);
+  }, 0);
+  const maxAuthUserId = Object.entries(store.localAuth || {}).reduce((acc, [rawUserId, row]) => {
+    const idFromKey = parsePositiveNumber(rawUserId) || 0;
+    const idFromRow = parsePositiveNumber(row?.user_id) || 0;
+    return Math.max(acc, idFromKey, idFromRow);
+  }, 0);
+  store.userIdSeq = Math.max(parsePositiveNumber(store.userIdSeq) || 1, maxProfileUserId + 1, maxAuthUserId + 1);
 }
 
 function parseOptionalNumber(value) {
@@ -609,11 +1347,13 @@ function normalizeMovieRatings(list, maxLen = 800) {
 }
 
 function ensureUserMovieState(userId) {
-  const key = String(userId);
+  const canonicalUserId = resolveCanonicalUserId(userId);
+  if (!canonicalUserId) throw new Error('Invalid user id for movie state.');
+  const key = String(canonicalUserId);
   const existing = store.movieStates[key];
   if (existing && typeof existing === 'object') {
     const normalized = {
-      user_id: Number(existing.user_id) || userId,
+      user_id: Number(existing.user_id) || canonicalUserId,
       privacy: normalizeMoviePrivacy(existing.privacy, DEFAULT_MOVIE_PRIVACY),
       watchlist: normalizeMovieList(existing.watchlist, 1200),
       favorites: normalizeMovieList(existing.favorites, 1200),
@@ -625,7 +1365,7 @@ function ensureUserMovieState(userId) {
     return normalized;
   }
   const created = {
-    user_id: userId,
+    user_id: canonicalUserId,
     privacy: { ...DEFAULT_MOVIE_PRIVACY },
     watchlist: [],
     favorites: [],
@@ -757,9 +1497,16 @@ function getMovieEngagementCounts(tmdbId, mediaType) {
   let favorites = 0;
   let watched = 0;
   let rated = 0;
+  const seenUsers = new Set();
   for (const [rawUserId, value] of Object.entries(store.movieStates || {})) {
-    const userId = parsePositiveNumber(rawUserId) || parsePositiveNumber(value?.user_id);
+    const userId =
+      resolveCanonicalUserId(rawUserId) ||
+      resolveCanonicalUserId(value?.user_id) ||
+      parsePositiveNumber(rawUserId) ||
+      parsePositiveNumber(value?.user_id);
     if (!userId) continue;
+    if (seenUsers.has(userId)) continue;
+    seenUsers.add(userId);
     const state = ensureUserMovieState(userId);
     if (state.favorites.some((entry) => Number(entry.tmdb_id) === tmdbId && normalizeMediaType(entry.media_type) === type)) {
       favorites += 1;
@@ -849,23 +1596,28 @@ function serializeGalleryItemForFeed(item, userId) {
 }
 
 function resolveNicknameForUser(userId, fallback = 'user') {
-  const profile = store.users[String(userId)];
+  const canonicalUserId = resolveCanonicalUserId(userId);
+  const profile = canonicalUserId ? store.users[String(canonicalUserId)] : null;
   if (!profile) return fallback;
   const nickname = normalizeText(profile.nickname, 40);
   return nickname || fallback;
 }
 
 function resolveAvatarForUser(userId, fallback = null) {
-  const profile = store.users[String(userId)];
+  const canonicalUserId = resolveCanonicalUserId(userId);
+  const profile = canonicalUserId ? store.users[String(canonicalUserId)] : null;
   const avatarFromProfile = normalizeAvatarUrl(profile?.avatar_url);
   if (avatarFromProfile) return avatarFromProfile;
   return normalizeAvatarUrl(fallback);
 }
 
 function resolveCommentIdentity(row) {
-  const fallbackUserId = parsePositiveNumber(row?.user_id) || null;
+  const fallbackUserId = resolveCanonicalUserId(row?.user_id) || parsePositiveNumber(row?.user_id) || null;
   const publicUserId =
-    parsePositiveNumber(row?.public_user_id) || resolvePublicUserIdForNickname(row?.nickname, fallbackUserId) || fallbackUserId;
+    resolveCanonicalUserId(row?.public_user_id) ||
+    parsePositiveNumber(row?.public_user_id) ||
+    resolvePublicUserIdForNickname(row?.nickname, fallbackUserId) ||
+    fallbackUserId;
   const fallbackNickname =
     normalizeText(row?.nickname, 40) || (publicUserId ? `user_${publicUserId}` : fallbackUserId ? `user_${fallbackUserId}` : 'user');
   const nickname = publicUserId ? resolveNicknameForUser(publicUserId, fallbackNickname) : fallbackNickname;
@@ -918,11 +1670,12 @@ function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
   const fallbackNickname = `user_${userId}`;
   const rawNickname = normalizeText(input?.nickname, 40) || resolveNicknameForUser(userId, fallbackNickname);
   const publicUserId = resolvePublicUserIdForNickname(rawNickname, userId);
+  const canonicalUserId = resolveCanonicalUserId(publicUserId || userId) || userId;
   const nickname = resolveNicknameForUser(publicUserId, rawNickname);
   const avatarUrl = resolveAvatarForUser(publicUserId, input?.avatar_url);
   return {
-    user_id: userId,
-    public_user_id: publicUserId,
+    user_id: canonicalUserId,
+    public_user_id: resolveCanonicalUserId(publicUserId || canonicalUserId) || canonicalUserId,
     gallery_id: galleryId,
     nickname,
     avatar_url: avatarUrl,
@@ -932,15 +1685,17 @@ function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
 }
 
 function toggleGalleryReaction(list, userId, galleryId) {
+  const canonicalUserId = resolveCanonicalUserId(userId) || parsePositiveNumber(userId);
+  if (!canonicalUserId) return false;
   const idx = list.findIndex(
-    (row) => Number(row.user_id) === Number(userId) && Number(row.gallery_id) === Number(galleryId)
+    (row) => Number(row.user_id) === Number(canonicalUserId) && Number(row.gallery_id) === Number(galleryId)
   );
   if (idx >= 0) {
     list.splice(idx, 1);
     return false;
   }
   list.push({
-    user_id: Number(userId),
+    user_id: Number(canonicalUserId),
     gallery_id: Number(galleryId),
     created_at: nowIso(),
   });
@@ -958,7 +1713,7 @@ function getUserTokenFromRequest(req) {
 }
 
 function getUserSession(userIdInput) {
-  const userId = parsePositiveNumber(userIdInput);
+  const userId = resolveCanonicalUserId(userIdInput);
   if (!userId) return null;
   const entry = store.userSessions ? store.userSessions[String(userId)] : null;
   if (!entry || typeof entry !== 'object') return null;
@@ -973,7 +1728,7 @@ function getUserSession(userIdInput) {
 }
 
 function upsertUserSession(userIdInput, tokenInput) {
-  const userId = parsePositiveNumber(userIdInput);
+  const userId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
   if (!userId) throw new Error('Invalid user id for session.');
   const token = String(tokenInput || '').trim() || crypto.randomBytes(24).toString('hex');
   const now = nowIso();
@@ -991,7 +1746,7 @@ function upsertUserSession(userIdInput, tokenInput) {
 }
 
 function requireUserSession(req, userIdInput) {
-  const userId = parsePositiveNumber(userIdInput);
+  const userId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
   if (!userId) return { ok: false, status: 400, error: 'user_id is required.' };
   const session = getUserSession(userId);
   if (!session) return { ok: false, status: 401, error: 'Session missing. Sync profile first.' };
@@ -999,6 +1754,111 @@ function requireUserSession(req, userIdInput) {
   if (!token) return { ok: false, status: 401, error: 'Missing x-user-token header.' };
   if (token !== session.token) return { ok: false, status: 403, error: 'Invalid user session token.' };
   return { ok: true, userId };
+}
+
+function recalculateCurrentCinemaPollVotes() {
+  const poll = store.cinemaPollCurrent;
+  if (!poll || !Array.isArray(poll.options)) return;
+  for (const option of poll.options) {
+    option.votes = 0;
+  }
+  const votesByUser = poll.votes_by_user && typeof poll.votes_by_user === 'object' ? poll.votes_by_user : {};
+  for (const optionId of Object.values(votesByUser)) {
+    const option = poll.options.find((row) => row.id === optionId);
+    if (option) option.votes += 1;
+  }
+  poll.updated_at = nowIso();
+}
+
+function deleteUserAccountFromStore(userIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) throw new Error('Invalid user id.');
+
+  const aliasIds = Array.from(
+    new Set([canonicalUserId, ...getAliasUserIdsForCanonical(canonicalUserId)].map((id) => parsePositiveNumber(id)).filter(Boolean))
+  );
+  const deletedIdsSet = new Set(aliasIds);
+  const avatarUrls = [];
+
+  for (const id of aliasIds) {
+    const profile = store.users[String(id)];
+    const avatarUrl = normalizeAvatarUrl(profile?.avatar_url);
+    if (avatarUrl && isCloudinaryImageOwnedByUser(avatarUrl, canonicalUserId)) {
+      avatarUrls.push(avatarUrl);
+    }
+  }
+
+  for (const id of aliasIds) {
+    delete store.users[String(id)];
+    delete store.movieStates[String(id)];
+    delete ensureLocalAuthStore()[String(id)];
+    delete store.userSessions[String(id)];
+  }
+
+  store.comments = store.comments.filter((row) => {
+    const userId = parsePositiveNumber(row?.user_id);
+    const publicUserId = parsePositiveNumber(row?.public_user_id);
+    return !deletedIdsSet.has(userId) && !deletedIdsSet.has(publicUserId);
+  });
+
+  store.galleryComments = store.galleryComments.filter((row) => {
+    const userId = parsePositiveNumber(row?.user_id);
+    const publicUserId = parsePositiveNumber(row?.public_user_id);
+    return !deletedIdsSet.has(userId) && !deletedIdsSet.has(publicUserId);
+  });
+
+  store.galleryLikes = store.galleryLikes.filter((row) => !deletedIdsSet.has(parsePositiveNumber(row?.user_id)));
+  store.galleryFavorites = store.galleryFavorites.filter((row) => !deletedIdsSet.has(parsePositiveNumber(row?.user_id)));
+
+  if (store.cinemaPollCurrent?.votes_by_user && typeof store.cinemaPollCurrent.votes_by_user === 'object') {
+    const nextVotesByUser = {};
+    for (const [rawUserId, optionId] of Object.entries(store.cinemaPollCurrent.votes_by_user)) {
+      const userId = parsePositiveNumber(rawUserId);
+      if (!userId || deletedIdsSet.has(userId)) continue;
+      nextVotesByUser[String(userId)] = String(optionId || '');
+    }
+    store.cinemaPollCurrent.votes_by_user = nextVotesByUser;
+    recalculateCurrentCinemaPollVotes();
+  }
+
+  for (const event of store.items) {
+    const createdBy = parsePositiveNumber(event?.created_by);
+    if (deletedIdsSet.has(createdBy)) {
+      event.created_by = null;
+      event.updated_at = nowIso();
+    }
+  }
+
+  const nextFollows = {};
+  for (const [rawFollowerId, rawTargets] of Object.entries(store.follows || {})) {
+    const followerId = parsePositiveNumber(rawFollowerId);
+    if (!followerId || deletedIdsSet.has(followerId)) continue;
+    const targetSet = new Set();
+    for (const rawTargetId of Array.isArray(rawTargets) ? rawTargets : []) {
+      const targetId = parsePositiveNumber(rawTargetId);
+      if (!targetId || deletedIdsSet.has(targetId) || targetId === followerId) continue;
+      targetSet.add(targetId);
+    }
+    nextFollows[String(followerId)] = Array.from(targetSet);
+  }
+  store.follows = nextFollows;
+
+  const aliases = ensureUserAliasesStore();
+  for (const [rawAliasId, rawTargetId] of Object.entries({ ...aliases })) {
+    const aliasId = parsePositiveNumber(rawAliasId);
+    const targetId = parsePositiveNumber(rawTargetId);
+    if (!aliasId || !targetId || deletedIdsSet.has(aliasId) || deletedIdsSet.has(targetId)) {
+      delete aliases[rawAliasId];
+    }
+  }
+
+  maintainCanonicalUserMappings();
+
+  return {
+    deleted_user_id: canonicalUserId,
+    deleted_alias_ids: aliasIds,
+    avatar_urls: Array.from(new Set(avatarUrls)),
+  };
 }
 
 function extractCloudinaryPublicId(imageUrl) {
@@ -1041,11 +1901,12 @@ function extractCloudinaryPublicId(imageUrl) {
 }
 
 function isCloudinaryImageOwnedByUser(imageUrl, userIdInput) {
-  const userId = parsePositiveNumber(userIdInput);
-  if (!userId) return false;
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) return false;
   const publicId = extractCloudinaryPublicId(imageUrl);
   if (!publicId) return false;
-  return new RegExp(`(^|/)u-${userId}(/|$)`).test(publicId);
+  const userIds = getAliasUserIdsForCanonical(canonicalUserId);
+  return userIds.some((userId) => new RegExp(`(^|/)u-${userId}(/|$)`).test(publicId));
 }
 
 function signCloudinaryDestroy(publicId, timestamp) {
@@ -1111,6 +1972,484 @@ function collectCloudinaryImageUrlsFromGalleryItem(item) {
   return urls;
 }
 
+function canUseCloudinaryServerCredentials() {
+  return !!(cloudinaryCloudName && cloudinaryApiKey && cloudinaryApiSecret);
+}
+
+function cloudinaryBasicAuthHeader() {
+  return `Basic ${Buffer.from(`${cloudinaryApiKey}:${cloudinaryApiSecret}`).toString('base64')}`;
+}
+
+async function cloudinaryGetJson(endpoint) {
+  if (!canUseCloudinaryServerCredentials()) return null;
+  const res = await fetch(endpoint, {
+    method: 'GET',
+    headers: {
+      authorization: cloudinaryBasicAuthHeader(),
+    },
+  });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = data?.error?.message || `Cloudinary API error ${res.status}`;
+    throw new Error(message);
+  }
+  return data;
+}
+
+function normalizeCloudinaryResourceTypeForApi(input) {
+  const clean = String(input || '').trim().toLowerCase();
+  if (clean === 'raw') return 'raw';
+  if (clean === 'video') return 'video';
+  return 'image';
+}
+
+async function listCloudinaryResources(resourceType, params = {}) {
+  if (!canUseCloudinaryServerCredentials()) return [];
+  const cleanResourceType = normalizeCloudinaryResourceTypeForApi(resourceType);
+  const resources = [];
+  let nextCursor = null;
+  do {
+    const search = new URLSearchParams({
+      max_results: '500',
+      ...params,
+      context: 'true',
+      tags: 'true',
+    });
+    if (nextCursor) search.set('next_cursor', nextCursor);
+    const endpoint = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/resources/${cleanResourceType}/upload?${search.toString()}`;
+    const payload = await cloudinaryGetJson(endpoint);
+    const rows = Array.isArray(payload?.resources) ? payload.resources : [];
+    for (const row of rows) resources.push(row);
+    nextCursor = typeof payload?.next_cursor === 'string' ? payload.next_cursor : null;
+  } while (nextCursor && resources.length < 5000);
+  return resources;
+}
+
+async function listCloudinaryResourcesByTag(resourceType, tag) {
+  if (!canUseCloudinaryServerCredentials()) return [];
+  const cleanResourceType = normalizeCloudinaryResourceTypeForApi(resourceType);
+  const cleanTag = String(tag || '').trim();
+  if (!cleanTag) return [];
+  const resources = [];
+  let nextCursor = null;
+  do {
+    const search = new URLSearchParams({
+      max_results: '500',
+      context: 'true',
+      tags: 'true',
+    });
+    if (nextCursor) search.set('next_cursor', nextCursor);
+    const endpoint = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/resources/${cleanResourceType}/tags/${encodeURIComponent(cleanTag)}?${search.toString()}`;
+    const payload = await cloudinaryGetJson(endpoint);
+    const rows = Array.isArray(payload?.resources) ? payload.resources : [];
+    for (const row of rows) resources.push(row);
+    nextCursor = typeof payload?.next_cursor === 'string' ? payload.next_cursor : null;
+  } while (nextCursor && resources.length < 5000);
+  return resources;
+}
+
+async function listCloudinaryImageResources(params = {}) {
+  return listCloudinaryResources('image', params);
+}
+
+async function listCloudinaryImageResourcesByTag(tag) {
+  return listCloudinaryResourcesByTag('image', tag);
+}
+
+function parseCloudinaryHexPalette(input) {
+  return String(input || '')
+    .split(',')
+    .map((x) => String(x).trim())
+    .filter((x) => /^#[0-9a-fA-F]{6}$/.test(x));
+}
+
+function sanitizeCloudinaryContextKey(input) {
+  return String(input || '')
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9_]/g, '_')
+    .replace(/_+/g, '_')
+    .replace(/^_+|_+$/g, '')
+    .slice(0, 64);
+}
+
+function sanitizeCloudinaryContextValue(input, maxLen = 1000) {
+  return String(input || '')
+    .replace(/[\r\n\t]+/g, ' ')
+    .replace(/([\\|=])/g, '\\$1')
+    .trim()
+    .slice(0, maxLen);
+}
+
+function serializeCloudinaryContextObject(input) {
+  const pairs = Object.entries(input || {})
+    .map(([rawKey, rawValue]) => {
+      const key = sanitizeCloudinaryContextKey(rawKey);
+      const value = sanitizeCloudinaryContextValue(rawValue);
+      if (!key || !value) return null;
+      return `${key}=${value}`;
+    })
+    .filter(Boolean)
+    .sort((a, b) => a.localeCompare(b));
+  return pairs.join('|');
+}
+
+function parseGalleryDetailsFromCloudinaryContext(input) {
+  const raw = String(input || '').trim();
+  if (!raw) return {};
+  try {
+    const parsed = JSON.parse(raw);
+    return normalizeGalleryDetails(parsed);
+  } catch {
+    return {};
+  }
+}
+
+function cloudinaryResourceToGalleryItem(resource, usedIds) {
+  const secureUrl = normalizeImageUrl(resource?.secure_url || resource?.url);
+  const publicId = normalizeText(resource?.public_id, 240);
+  if (!secureUrl || !publicId) return null;
+
+  const ctxRaw = resource?.context?.custom;
+  const ctx = ctxRaw && typeof ctxRaw === 'object' ? ctxRaw : {};
+  const fallbackTitle = normalizeText(publicId.split('/').pop()?.replace(/[-_]+/g, ' '), 120) || 'Gallery frame';
+  const title = normalizeText(ctx.g_title, 120) || fallbackTitle;
+  const tag = normalizeGalleryTag(ctx.g_tag);
+  const height = normalizeGalleryHeight(ctx.g_height);
+  const shotId = normalizeText(ctx.g_shot_id, 120) || null;
+  const titleHeader = normalizeText(ctx.g_title_header, 120) || null;
+  const imageId = normalizeText(ctx.g_image_id, 120) || null;
+  const paletteHex = parseCloudinaryHexPalette(ctx.g_palette_hex);
+  const details = parseGalleryDetailsFromCloudinaryContext(ctx.g_details);
+  const createdAt = normalizeText(resource?.created_at, 40) || nowIso();
+
+  let id = Number.parseInt(crypto.createHash('md5').update(publicId).digest('hex').slice(0, 8), 16);
+  if (!Number.isFinite(id) || id <= 0) id = usedIds.size + 1;
+  while (usedIds.has(id)) id += 1;
+  usedIds.add(id);
+
+  return {
+    id,
+    title,
+    image: secureUrl,
+    tag,
+    height,
+    shot_id: shotId,
+    title_header: titleHeader,
+    image_id: imageId,
+    image_url: secureUrl,
+    palette_hex: paletteHex,
+    details,
+    created_at: createdAt,
+  };
+}
+
+async function listCloudinaryGalleryResources() {
+  if (!canUseCloudinaryServerCredentials()) return [];
+  const byTag = await listCloudinaryImageResourcesByTag(CLOUDINARY_GALLERY_TAG);
+  const byFolder = await listCloudinaryImageResources({ prefix: `${CLOUDINARY_GALLERY_FOLDER}/` });
+  const seen = new Set();
+  const merged = [];
+  for (const row of [...byTag, ...byFolder]) {
+    const key = String(row?.public_id || '').trim();
+    if (!key || seen.has(key)) continue;
+    seen.add(key);
+    merged.push(row);
+  }
+  return merged;
+}
+
+async function tagCloudinaryAssetAsGallery(item) {
+  if (!canUseCloudinaryServerCredentials()) return false;
+  const publicId = extractCloudinaryPublicId(item?.image_url || item?.image);
+  if (!publicId) return false;
+  if (taggedGalleryCloudinaryPublicIds.has(publicId)) return true;
+
+  const context = serializeCloudinaryContextObject({
+    g_title: item?.title,
+    g_tag: item?.tag,
+    g_height: String(item?.height || ''),
+    g_shot_id: item?.shot_id || '',
+    g_title_header: item?.title_header || '',
+    g_image_id: item?.image_id || '',
+    g_palette_hex: Array.isArray(item?.palette_hex) ? item.palette_hex.join(',') : '',
+  });
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const toSign = {
+    public_id: publicId,
+    timestamp,
+    type: 'upload',
+    tags: CLOUDINARY_GALLERY_TAG,
+    context,
+  };
+  const signature = signCloudinaryParams(toSign);
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/image/explicit`;
+
+  const form = new URLSearchParams();
+  form.set('public_id', publicId);
+  form.set('timestamp', String(timestamp));
+  form.set('api_key', cloudinaryApiKey);
+  form.set('signature', signature);
+  form.set('type', 'upload');
+  form.set('tags', CLOUDINARY_GALLERY_TAG);
+  if (context) {
+    form.set('context', context);
+  }
+
+  const res = await fetch(endpoint, { method: 'POST', body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = data?.error?.message || `Cloudinary explicit failed with status ${res.status}`;
+    throw new Error(message);
+  }
+  taggedGalleryCloudinaryPublicIds.add(publicId);
+  return true;
+}
+
+let galleryHydratePromise = null;
+let galleryHydrateLastAttemptAt = 0;
+const GALLERY_HYDRATE_RETRY_MS = 30_000;
+const taggedGalleryCloudinaryPublicIds = new Set();
+let galleryTagSyncPromise = null;
+
+async function ensureStoredGalleryItemsTaggedInCloudinary() {
+  if (!canUseCloudinaryServerCredentials()) return;
+  if (!store.galleryItems.length) return;
+  if (galleryTagSyncPromise) return galleryTagSyncPromise;
+  galleryTagSyncPromise = (async () => {
+    for (const item of store.galleryItems) {
+      try {
+        await tagCloudinaryAssetAsGallery(item);
+      } catch (err) {
+        console.warn(
+          'Cloudinary gallery tag sync skipped:',
+          err instanceof Error ? err.message : String(err)
+        );
+      }
+    }
+  })().finally(() => {
+    galleryTagSyncPromise = null;
+  });
+  return galleryTagSyncPromise;
+}
+
+async function ensureGalleryHydratedFromCloudinary(force = false) {
+  if (!canUseCloudinaryServerCredentials()) return;
+  if (!force && store.galleryItems.length) return;
+  const now = Date.now();
+  if (!force && now - galleryHydrateLastAttemptAt < GALLERY_HYDRATE_RETRY_MS) return;
+  if (galleryHydratePromise) return galleryHydratePromise;
+
+  galleryHydrateLastAttemptAt = now;
+  galleryHydratePromise = (async () => {
+    const resources = await listCloudinaryGalleryResources();
+    if (!resources.length) return;
+    const usedIds = new Set();
+    const hydratedItems = resources
+      .sort((a, b) => Date.parse(String(b?.created_at || '')) - Date.parse(String(a?.created_at || '')))
+      .map((resource) => cloudinaryResourceToGalleryItem(resource, usedIds))
+      .filter(Boolean);
+    if (!hydratedItems.length) return;
+
+    store.galleryItems = hydratedItems;
+    store.galleryIdSeq = hydratedItems.reduce((acc, row) => Math.max(acc, Number(row.id) || 0), 0) + 1;
+    const validIds = new Set(hydratedItems.map((row) => Number(row.id)));
+    store.galleryLikes = store.galleryLikes.filter((row) => validIds.has(Number(row.gallery_id)));
+    store.galleryFavorites = store.galleryFavorites.filter((row) => validIds.has(Number(row.gallery_id)));
+    store.galleryComments = store.galleryComments.filter((row) => validIds.has(Number(row.gallery_id)));
+    store.galleryCommentIdSeq =
+      store.galleryComments.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1;
+    saveStore(store);
+  })()
+    .catch((err) => {
+      console.error('Cloudinary gallery hydrate failed:', err instanceof Error ? err.message : String(err));
+    })
+    .finally(() => {
+      galleryHydratePromise = null;
+    });
+  return galleryHydratePromise;
+}
+
+function pickLatestCloudinaryResource(resources) {
+  const list = Array.isArray(resources) ? resources : [];
+  if (!list.length) return null;
+  return [...list].sort((a, b) => Date.parse(String(b?.created_at || '')) - Date.parse(String(a?.created_at || '')))[0] || null;
+}
+
+async function listCloudinaryStoreResources() {
+  if (!canUseCloudinaryServerCredentials()) return [];
+  const byPrefix = await listCloudinaryResources('raw', { prefix: `${CLOUDINARY_STORE_PUBLIC_ID}` });
+  const byTag = await listCloudinaryResourcesByTag('raw', CLOUDINARY_STORE_TAG);
+  const seen = new Set();
+  const merged = [];
+  for (const row of [...byPrefix, ...byTag]) {
+    const publicId = normalizeText(row?.public_id, 280);
+    if (!publicId || seen.has(publicId)) continue;
+    seen.add(publicId);
+    merged.push(row);
+  }
+  return merged;
+}
+
+async function fetchCloudinaryStoreState() {
+  if (!canUseCloudinaryServerCredentials()) return null;
+  const resources = await listCloudinaryStoreResources();
+  if (!resources.length) return null;
+  const exact = resources.filter((row) => normalizeText(row?.public_id, 280) === CLOUDINARY_STORE_PUBLIC_ID);
+  const resource = pickLatestCloudinaryResource(exact.length ? exact : resources);
+  if (!resource) return null;
+  const fileUrl = normalizeImageUrl(resource?.secure_url || resource?.url);
+  if (!fileUrl) return null;
+  const res = await fetch(fileUrl, { method: 'GET' });
+  if (!res.ok) throw new Error(`Cloudinary store download failed with status ${res.status}`);
+  const raw = await res.text();
+  const clean = String(raw || '').trim();
+  if (!clean) return null;
+  const parsed = JSON.parse(clean);
+  return hydrateStoreState(parsed);
+}
+
+async function uploadStoreSnapshotToCloudinary(serializedStore) {
+  if (!canUseCloudinaryServerCredentials()) return false;
+  const cleanSerialized = String(serializedStore || '').trim();
+  if (!cleanSerialized) return false;
+
+  const timestamp = Math.floor(Date.now() / 1000);
+  const signature = signCloudinaryParams({
+    public_id: CLOUDINARY_STORE_PUBLIC_ID,
+    timestamp,
+    overwrite: 'true',
+    invalidate: 'true',
+    tags: CLOUDINARY_STORE_TAG,
+  });
+  const endpoint = `https://api.cloudinary.com/v1_1/${cloudinaryCloudName}/raw/upload`;
+  const form = new FormData();
+  form.set('public_id', CLOUDINARY_STORE_PUBLIC_ID);
+  form.set('timestamp', String(timestamp));
+  form.set('overwrite', 'true');
+  form.set('invalidate', 'true');
+  form.set('tags', CLOUDINARY_STORE_TAG);
+  form.set('api_key', cloudinaryApiKey);
+  form.set('signature', signature);
+  form.set(
+    'file',
+    new Blob([cleanSerialized], { type: 'application/json; charset=utf-8' }),
+    CLOUDINARY_STORE_FILENAME
+  );
+
+  const res = await fetch(endpoint, { method: 'POST', body: form });
+  const data = await res.json().catch(() => ({}));
+  if (!res.ok) {
+    const message = data?.error?.message || `Cloudinary store upload failed with status ${res.status}`;
+    throw new Error(message);
+  }
+  return true;
+}
+
+let cloudStoreSyncTimer = null;
+let cloudStoreSyncInProgress = false;
+let cloudStorePendingSerialized = null;
+let cloudStoreRestoreAttempted = false;
+let cloudStoreRestorePromise = null;
+
+async function flushCloudStoreSyncQueue() {
+  if (!canUseCloudinaryServerCredentials()) return;
+  if (cloudStoreSyncInProgress) return;
+  const pending = cloudStorePendingSerialized;
+  if (!pending) return;
+  cloudStorePendingSerialized = null;
+  cloudStoreSyncInProgress = true;
+  try {
+    await uploadStoreSnapshotToCloudinary(pending);
+  } catch (err) {
+    console.error('Cloudinary store sync failed:', err instanceof Error ? err.message : String(err));
+    cloudStorePendingSerialized = pending;
+  } finally {
+    cloudStoreSyncInProgress = false;
+  }
+  if (cloudStorePendingSerialized) {
+    if (cloudStoreSyncTimer) clearTimeout(cloudStoreSyncTimer);
+    cloudStoreSyncTimer = setTimeout(() => {
+      cloudStoreSyncTimer = null;
+      void flushCloudStoreSyncQueue();
+    }, CLOUDINARY_STORE_SYNC_DEBOUNCE_MS);
+  }
+}
+
+function scheduleCloudStoreSync(serializedStore) {
+  if (!canUseCloudinaryServerCredentials()) return;
+  const cleanSerialized = String(serializedStore || '').trim();
+  if (!cleanSerialized) return;
+  cloudStorePendingSerialized = cleanSerialized;
+  if (cloudStoreSyncTimer) clearTimeout(cloudStoreSyncTimer);
+  cloudStoreSyncTimer = setTimeout(() => {
+    cloudStoreSyncTimer = null;
+    void flushCloudStoreSyncQueue();
+  }, CLOUDINARY_STORE_SYNC_DEBOUNCE_MS);
+}
+
+async function forceCloudStoreSyncFromStore() {
+  if (!canUseCloudinaryServerCredentials()) return false;
+  store.store_updated_at = nowIso();
+  const serialized = JSON.stringify(store, null, 2);
+  saveStoreLocallyOnly(store);
+  await uploadStoreSnapshotToCloudinary(serialized);
+  return true;
+}
+
+async function restoreStoreFromCloudinaryBackup(force = false) {
+  if (!canUseCloudinaryServerCredentials()) return false;
+  if (!force && cloudStoreRestoreAttempted) return false;
+  if (cloudStoreRestorePromise && !force) return cloudStoreRestorePromise;
+  cloudStoreRestoreAttempted = true;
+  cloudStoreRestorePromise = (async () => {
+    const remoteStore = await fetchCloudinaryStoreState();
+    if (!remoteStore) return false;
+    store = remoteStore;
+    saveStoreLocallyOnly(store);
+    return true;
+  })()
+    .catch((err) => {
+      console.error('Cloudinary store restore failed:', err instanceof Error ? err.message : String(err));
+      return false;
+    })
+    .finally(() => {
+      cloudStoreRestorePromise = null;
+    });
+  return cloudStoreRestorePromise;
+}
+
+let shutdownSyncInProgress = false;
+
+async function flushCloudStoreSyncOnShutdown(signalName) {
+  if (shutdownSyncInProgress) return;
+  shutdownSyncInProgress = true;
+  try {
+    if (cloudStoreSyncTimer) {
+      clearTimeout(cloudStoreSyncTimer);
+      cloudStoreSyncTimer = null;
+    }
+    await flushCloudStoreSyncQueue();
+  } catch (err) {
+    console.error(
+      `Cloudinary store final sync failed on ${signalName}:`,
+      err instanceof Error ? err.message : String(err)
+    );
+  } finally {
+    process.exit(0);
+  }
+}
+
+function registerShutdownSyncHandlers() {
+  process.on('SIGTERM', () => {
+    void flushCloudStoreSyncOnShutdown('SIGTERM');
+  });
+  process.on('SIGINT', () => {
+    void flushCloudStoreSyncOnShutdown('SIGINT');
+  });
+}
+
 async function cleanupGalleryItemCloudinaryMedia(item) {
   const imageUrls = collectCloudinaryImageUrlsFromGalleryItem(item);
   for (const imageUrl of imageUrls) {
@@ -1119,9 +2458,15 @@ async function cleanupGalleryItemCloudinaryMedia(item) {
   return { deleted_images: imageUrls.size };
 }
 
-async function cleanupAllStoreCloudinaryMedia() {
+async function cleanupAllStoreCloudinaryMedia(options = {}) {
+  const preserveCanonicalUserIds = new Set(
+    (Array.isArray(options.preserveUserIds) ? options.preserveUserIds : [])
+      .map((value) => resolveCanonicalUserId(value) || parsePositiveNumber(value))
+      .filter(Boolean)
+  );
   const imageUrls = new Set();
   const videoUrls = new Set();
+  const rawUrls = new Set();
 
   for (const item of store.items) {
     const videoUrl = String(item?.video_url || '').trim();
@@ -1136,12 +2481,37 @@ async function cleanupAllStoreCloudinaryMedia() {
   }
 
   for (const profile of Object.values(store.users || {})) {
+    const profileUserId = parsePositiveNumber(profile?.user_id);
+    const canonicalProfileUserId = resolveCanonicalUserId(profileUserId) || profileUserId;
+    if (canonicalProfileUserId && preserveCanonicalUserIds.has(canonicalProfileUserId)) continue;
     const avatarUrl = String(profile?.avatar_url || '').trim();
     if (avatarUrl && extractCloudinaryPublicId(avatarUrl)) imageUrls.add(avatarUrl);
   }
 
+  try {
+    const galleryResources = await listCloudinaryGalleryResources();
+    for (const resource of galleryResources) {
+      const secureUrl = normalizeImageUrl(resource?.secure_url || resource?.url);
+      if (secureUrl && extractCloudinaryPublicId(secureUrl)) imageUrls.add(secureUrl);
+    }
+  } catch (err) {
+    console.error('Cloudinary gallery cleanup prefetch failed:', err instanceof Error ? err.message : String(err));
+  }
+
+  try {
+    const storeResources = await listCloudinaryStoreResources();
+    for (const resource of storeResources) {
+      const secureUrl = normalizeImageUrl(resource?.secure_url || resource?.url);
+      if (!secureUrl || !extractCloudinaryPublicId(secureUrl)) continue;
+      rawUrls.add(secureUrl);
+    }
+  } catch (err) {
+    console.error('Cloudinary store cleanup prefetch failed:', err instanceof Error ? err.message : String(err));
+  }
+
   let deletedImages = 0;
   let deletedVideos = 0;
+  let deletedRaw = 0;
   const failures = [];
 
   for (const imageUrl of imageUrls) {
@@ -1170,11 +2540,90 @@ async function cleanupAllStoreCloudinaryMedia() {
     }
   }
 
+  for (const rawUrl of rawUrls) {
+    try {
+      await destroyCloudinaryAssetByUrl(rawUrl, 'raw');
+      deletedRaw += 1;
+    } catch (err) {
+      failures.push({
+        resource_type: 'raw',
+        url: rawUrl,
+        error: err instanceof Error ? err.message : String(err),
+      });
+    }
+  }
+
   return {
     deleted_images: deletedImages,
     deleted_videos: deletedVideos,
+    deleted_raw: deletedRaw,
     failed: failures,
   };
+}
+
+function parseResetAdminKeepInput(input) {
+  const body = input && typeof input === 'object' ? input : {};
+  const userId =
+    parsePositiveNumber(body.keep_admin_user_id) ||
+    parsePositiveNumber(body.admin_user_id) ||
+    parsePositiveNumber(body.user_id) ||
+    null;
+  const nickname =
+    normalizeText(body.keep_admin_nickname, 40) ||
+    normalizeText(body.admin_nickname, 40) ||
+    normalizeText(body.nickname, 40) ||
+    null;
+  return { userId, nickname };
+}
+
+function sanitizeAdminProfileForReset(profileInput, fallbackUserId, fallbackNickname) {
+  const profile = profileInput && typeof profileInput === 'object' ? profileInput : {};
+  const userId = parsePositiveNumber(profile.user_id) || parsePositiveNumber(fallbackUserId) || 1;
+  const nickname = normalizeText(profile.nickname, 40) || normalizeText(fallbackNickname, 40) || 'admin';
+  const now = nowIso();
+  return {
+    user_id: userId,
+    nickname,
+    name: normalizeText(profile.name, 80) || 'Admin',
+    bio: normalizeText(profile.bio, 300) || null,
+    avatar_url: normalizeAvatarUrl(profile.avatar_url),
+    privacy: {
+      watchlist: false,
+      favorites: false,
+      watched: false,
+      rated: false,
+      favorite_actors: false,
+      favorite_directors: false,
+    },
+    watchlist: [],
+    favorites: [],
+    watched: [],
+    rated: [],
+    favorite_actors: [],
+    favorite_directors: [],
+    updated_at: now,
+  };
+}
+
+function resolveAdminProfileToKeepOnReset(input) {
+  const { userId, nickname } = parseResetAdminKeepInput(input);
+  const profiles = Object.values(store.users || {}).filter((row) => row && typeof row === 'object');
+
+  let matched = null;
+  if (userId) {
+    matched = profiles.find((row) => parsePositiveNumber(row.user_id) === userId) || null;
+  }
+  if (!matched && nickname) {
+    const target = nickname.toLowerCase();
+    matched = profiles.find((row) => String(row.nickname || '').trim().toLowerCase() === target) || null;
+  }
+  if (!matched) {
+    matched = profiles.find((row) => String(row.nickname || '').trim().toLowerCase() === 'admin') || null;
+  }
+
+  const fallbackUserId = userId || parsePositiveNumber(matched?.user_id) || 1;
+  const fallbackNickname = nickname || normalizeText(matched?.nickname, 40) || 'admin';
+  return sanitizeAdminProfileForReset(matched, fallbackUserId, fallbackNickname);
 }
 
 function normalizeCloudinaryResourceType(input) {
@@ -1197,7 +2646,7 @@ function createCloudinaryUploadSignaturePayload(input) {
     throw new Error('Cloudinary server credentials are missing.');
   }
   const resourceType = normalizeCloudinaryResourceType(input?.resource_type ?? input?.resourceType);
-  const userId = parsePositiveNumber(input?.user_id ?? input?.userId) || null;
+  const userId = resolveCanonicalUserId(input?.user_id ?? input?.userId) || parsePositiveNumber(input?.user_id ?? input?.userId) || null;
   const folderRoot = sanitizeCloudinaryPathSegment(input?.folder, 'movie-rec');
   const folder = userId ? `${folderRoot}/u-${userId}` : folderRoot;
   const timestamp = Math.floor(Date.now() / 1000);
@@ -1283,14 +2732,25 @@ async function cleanupExpiredCinemaEvents() {
   }
 }
 
-function resetAllStoreData() {
+function resetAllStoreData(adminProfileInput = null) {
+  const adminProfile =
+    adminProfileInput && typeof adminProfileInput === 'object'
+      ? sanitizeAdminProfileForReset(
+          adminProfileInput,
+          parsePositiveNumber(adminProfileInput.user_id) || 1,
+          normalizeText(adminProfileInput.nickname, 40) || 'admin'
+        )
+      : null;
   store.idSeq = 1;
+  store.userIdSeq = (parsePositiveNumber(adminProfile?.user_id) || 0) + 1;
   store.items = [];
   store.cinemaPollIdSeq = 1;
   store.cinemaPollCurrent = null;
   store.commentIdSeq = 1;
   store.comments = [];
-  store.users = {};
+  store.users = adminProfile ? { [String(adminProfile.user_id)]: adminProfile } : {};
+  store.localAuth = {};
+  store.userAliases = {};
   store.userSessions = {};
   store.follows = {};
   store.movieStates = {};
@@ -1301,6 +2761,7 @@ function resetAllStoreData() {
   store.galleryFavorites = [];
   store.galleryComments = [];
   saveStore(store);
+  return adminProfile;
 }
 
 const server = http.createServer(async (req, res) => {
@@ -1314,9 +2775,131 @@ const server = http.createServer(async (req, res) => {
 
   try {
     await cleanupExpiredCinemaEvents();
+    const pollClosedByExpiry = closeExpiredCinemaPoll();
+    if (pollClosedByExpiry) {
+      saveStore(store);
+    }
+    if (
+      pathname === '/api/gallery' ||
+      pathname.startsWith('/api/gallery/') ||
+      pathname.endsWith('/gallery-favorites')
+    ) {
+      void ensureStoredGalleryItemsTaggedInCloudinary();
+      await ensureGalleryHydratedFromCloudinary();
+    }
 
     if (method === 'GET' && pathname === '/health') {
       return json(res, 200, { ok: true, now: nowIso(), events: store.items.length });
+    }
+
+    if (method === 'GET' && pathname === '/api/auth/local/nickname-available') {
+      const nickname = normalizeText(url.searchParams.get('nickname'), 40);
+      const excludeUserId =
+        resolveCanonicalUserId(url.searchParams.get('exclude_user_id') || url.searchParams.get('excludeUserId')) ||
+        parsePositiveNumber(url.searchParams.get('exclude_user_id') || url.searchParams.get('excludeUserId'));
+      if (!nickname || nickname.length < 3 || nickname.length > 20 || !LOCAL_NICKNAME_RE.test(nickname)) {
+        return json(res, 200, { available: false });
+      }
+      const takenByAuth = findLocalAuthEntryByNickname(nickname);
+      if (takenByAuth && takenByAuth.user_id !== excludeUserId) {
+        return json(res, 200, { available: false });
+      }
+      const takenByProfileUserId = findCanonicalUserIdByNickname(nickname);
+      if (takenByProfileUserId && takenByProfileUserId !== excludeUserId) {
+        return json(res, 200, { available: false });
+      }
+      return json(res, 200, { available: true });
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/local/register') {
+      const body = await readBody(req);
+      const nickname = validateLocalNickname(body?.nickname);
+      const password = validateLocalPassword(body?.password);
+      const existingByNickname = findLocalAuthEntryByNickname(nickname);
+      if (existingByNickname) {
+        return json(res, 409, { error: 'Nickname already used.' });
+      }
+      const existingProfileUserId = findCanonicalUserIdByNickname(nickname);
+      if (existingProfileUserId) {
+        return json(res, 409, {
+          error: 'Account already exists on backend. Login once from original device to sync password.',
+        });
+      }
+
+      const canonicalUserId = allocateCanonicalUserId();
+      const profile = ensureUserProfile(canonicalUserId, nickname);
+      profile.name = normalizeText(body?.name, 80) || profile.name || null;
+      profile.updated_at = nowIso();
+      upsertLocalAuthEntry(canonicalUserId, nickname, password);
+      const session = upsertUserSession(canonicalUserId, null);
+      saveStore(store);
+      return json(res, 201, {
+        ok: true,
+        user: serializeLocalAuthUser(canonicalUserId),
+        session_token: session.token,
+        canonical_user_id: canonicalUserId,
+      });
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/local/login') {
+      const body = await readBody(req);
+      const nickname = validateLocalNickname(body?.nickname);
+      const password = validateLocalPassword(body?.password);
+      const auth = findLocalAuthEntryByNickname(nickname);
+      if (!auth) {
+        const existingProfileUserId = findCanonicalUserIdByNickname(nickname);
+        if (existingProfileUserId) {
+          return json(res, 404, {
+            error: 'Account exists on backend but password is not synced yet. Login once from original device and retry.',
+          });
+        }
+        return json(res, 404, { error: 'Account not found.' });
+      }
+      const passwordHash = hashLocalPassword(password);
+      if (passwordHash !== auth.password_hash) {
+        return json(res, 401, { error: 'Wrong nickname or password.' });
+      }
+      const canonicalUserId = resolveCanonicalUserId(auth.user_id) || auth.user_id;
+      ensureUserProfile(canonicalUserId, auth.nickname);
+      syncLocalAuthNicknameForUser(canonicalUserId, auth.nickname);
+      const session = upsertUserSession(canonicalUserId, null);
+      saveStore(store);
+      return json(res, 200, {
+        ok: true,
+        user: serializeLocalAuthUser(canonicalUserId),
+        session_token: session.token,
+        canonical_user_id: canonicalUserId,
+      });
+    }
+
+    if (method === 'POST' && pathname === '/api/auth/local/sync') {
+      const body = await readBody(req);
+      const requestedUserId =
+        resolveCanonicalUserId(body?.user_id ?? body?.userId) || parsePositiveNumber(body?.user_id ?? body?.userId);
+      if (!requestedUserId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      const sessionCheck = requireUserSession(req, requestedUserId);
+      if (!sessionCheck.ok) {
+        return json(res, sessionCheck.status, { error: sessionCheck.error });
+      }
+      const nickname = validateLocalNickname(body?.nickname);
+      const password = validateLocalPassword(body?.password);
+      const canonicalUserId = resolveCanonicalUserId(sessionCheck.userId) || sessionCheck.userId;
+      const takenByNickname = findLocalAuthEntryByNickname(nickname);
+      if (takenByNickname && takenByNickname.user_id !== canonicalUserId) {
+        return json(res, 409, { error: 'Nickname already used.' });
+      }
+      ensureUserProfile(canonicalUserId, nickname);
+      upsertLocalAuthEntry(canonicalUserId, nickname, password);
+      const session = upsertUserSession(canonicalUserId, null);
+      saveStore(store);
+      return json(res, 200, {
+        ok: true,
+        user: serializeLocalAuthUser(canonicalUserId),
+        session_token: session.token,
+        canonical_user_id: canonicalUserId,
+      });
     }
 
     if (method === 'GET' && pathname === '/api/cinema/latest') {
@@ -1375,13 +2958,17 @@ const server = http.createServer(async (req, res) => {
       const body = await readBody(req);
       const adminAuthorized = isAuthorizedAdmin(req);
       const requestedUserId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      const canonicalRequestedUserId =
+        resolveCanonicalUserId(requestedUserId) || parsePositiveNumber(requestedUserId) || null;
       let activeSession = null;
+      let activeUserId = canonicalRequestedUserId;
       if (!adminAuthorized) {
-        const sessionCheck = requireUserSession(req, requestedUserId);
+        const sessionCheck = requireUserSession(req, canonicalRequestedUserId);
         if (!sessionCheck.ok) {
           return json(res, sessionCheck.status, { error: sessionCheck.error });
         }
-        activeSession = getUserSession(requestedUserId);
+        activeUserId = resolveCanonicalUserId(sessionCheck.userId) || sessionCheck.userId;
+        activeSession = getUserSession(activeUserId);
         const requestedResourceType = normalizeCloudinaryResourceType(body?.resource_type ?? body?.resourceType);
         if (requestedResourceType !== 'image') {
           return json(res, 403, { error: 'Only image uploads are allowed for user sessions.' });
@@ -1392,20 +2979,20 @@ const server = http.createServer(async (req, res) => {
           ? body
           : {
               resource_type: 'image',
-              user_id: requestedUserId,
+              user_id: activeUserId,
               folder: 'movie-rec-avatars',
             }
       );
       if (activeSession?.token) {
-        return json(res, 200, { ...payload, session_token: activeSession.token });
+        return json(res, 200, { ...payload, session_token: activeSession.token, canonical_user_id: activeUserId });
       }
-      return json(res, 200, payload);
+      return json(res, 200, { ...payload, canonical_user_id: activeUserId });
     }
 
     if (method === 'POST' && pathname === '/api/media/cloudinary/delete-image') {
       const body = await readBody(req);
       const imageUrl = String(body?.image_url || '').trim();
-      const userId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      const userId = resolveCanonicalUserId(body?.user_id ?? body?.userId) || parsePositiveNumber(body?.user_id ?? body?.userId);
       if (!imageUrl) {
         return json(res, 400, { error: 'image_url is required.' });
       }
@@ -1447,31 +3034,40 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname === '/api/users/session/bootstrap') {
       const body = await readBody(req);
-      const userId = parsePositiveNumber(body?.user_id ?? body?.userId);
-      const nickname = String(body?.nickname || '').trim();
-      if (!userId) {
+      const requestedUserId = parsePositiveNumber(body?.user_id ?? body?.userId);
+      const nickname = normalizeText(body?.nickname, 40);
+      if (!requestedUserId) {
         return json(res, 400, { error: 'user_id is required.' });
       }
       if (!nickname) {
         return json(res, 400, { error: 'nickname is required.' });
       }
-      const existingProfile = store.users[String(userId)];
-      if (existingProfile) {
-        const existingNickname = String(existingProfile.nickname || '').trim().toLowerCase();
-        if (!existingNickname || existingNickname !== nickname.toLowerCase()) {
-          return json(res, 403, { error: 'Nickname mismatch for session bootstrap.' });
-        }
+      const canonicalUserId =
+        resolveCanonicalUserIdForNickname(requestedUserId, nickname) ||
+        resolveCanonicalUserId(requestedUserId) ||
+        requestedUserId;
+      if (canonicalUserId !== requestedUserId) {
+        setUserAlias(requestedUserId, canonicalUserId);
+        mergeUserIntoCanonicalUserId(requestedUserId, canonicalUserId);
       }
-      const session = upsertUserSession(userId, null);
+      ensureUserProfile(canonicalUserId, nickname);
+      const session = upsertUserSession(canonicalUserId, null);
       saveStore(store);
-      return json(res, 200, { ok: true, session_token: session.token });
+      return json(res, 200, { ok: true, session_token: session.token, canonical_user_id: canonicalUserId });
     }
 
     if (method === 'POST' && pathname === '/api/users/profile-sync') {
       const body = await readBody(req);
       const clean = normalizeProfileSync(body);
-      let activeSession = getUserSession(clean.user_id);
-      const existingProfile = store.users[String(clean.user_id)];
+      const canonicalByNickname = resolveCanonicalUserIdForNickname(clean.user_id, clean.nickname);
+      const canonicalUserId = canonicalByNickname || resolveCanonicalUserId(clean.user_id) || clean.user_id;
+      if (canonicalUserId !== clean.user_id) {
+        setUserAlias(clean.user_id, canonicalUserId);
+        mergeUserIntoCanonicalUserId(clean.user_id, canonicalUserId);
+      }
+      clean.user_id = canonicalUserId;
+      let activeSession = getUserSession(canonicalUserId);
+      const existingProfile = store.users[String(canonicalUserId)];
       const prevNickname = normalizeText(existingProfile?.nickname, 40) || '';
       if (activeSession) {
         const token = getUserTokenFromRequest(req);
@@ -1481,7 +3077,7 @@ const server = http.createServer(async (req, res) => {
           if (!existingNickname || existingNickname !== requestedNickname) {
             return json(res, 403, { error: 'Invalid user session token.' });
           }
-          activeSession = upsertUserSession(clean.user_id, null);
+          activeSession = upsertUserSession(canonicalUserId, null);
         }
       } else {
         if (existingProfile) {
@@ -1491,30 +3087,68 @@ const server = http.createServer(async (req, res) => {
             return json(res, 403, { error: 'Profile sync requires matching nickname for first session bootstrap.' });
           }
         }
-        activeSession = upsertUserSession(clean.user_id, null);
+        activeSession = upsertUserSession(canonicalUserId, null);
       }
-      store.users[String(clean.user_id)] = clean;
-      syncStoredCommentIdentityForUser(clean.user_id, prevNickname, clean.nickname, clean.avatar_url);
+      store.users[String(canonicalUserId)] = mergeUserProfiles(clean, existingProfile, canonicalUserId);
+      syncLocalAuthNicknameForUser(canonicalUserId, clean.nickname);
+      syncStoredCommentIdentityForUser(canonicalUserId, prevNickname, clean.nickname, clean.avatar_url);
       saveStore(store);
       return json(res, 200, {
         ok: true,
-        profile: publicProfileView(clean.user_id),
+        profile: publicProfileView(canonicalUserId),
         session_token: activeSession.token,
+        canonical_user_id: canonicalUserId,
+      });
+    }
+
+    if (method === 'DELETE' && /^\/api\/users\/\d+$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const requestedUserId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
+      if (!requestedUserId) return json(res, 400, { error: 'Invalid user id.' });
+
+      const sessionCheck = requireUserSession(req, requestedUserId);
+      if (!sessionCheck.ok) {
+        return json(res, sessionCheck.status, { error: sessionCheck.error });
+      }
+
+      const deletion = deleteUserAccountFromStore(sessionCheck.userId);
+      const avatarCleanup = {
+        deleted: [],
+        failed: [],
+      };
+      for (const avatarUrl of deletion.avatar_urls) {
+        try {
+          await destroyCloudinaryImageByUrl(avatarUrl);
+          avatarCleanup.deleted.push(avatarUrl);
+        } catch (err) {
+          avatarCleanup.failed.push({
+            avatar_url: avatarUrl,
+            error: err instanceof Error ? err.message : String(err),
+          });
+        }
+      }
+
+      saveStore(store);
+      return json(res, 200, {
+        ok: true,
+        deleted_user_id: deletion.deleted_user_id,
+        deleted_alias_ids: deletion.deleted_alias_ids,
+        avatar_cleanup: avatarCleanup,
       });
     }
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/public')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = Number(parts[2] || 0);
+      const userId = resolveCanonicalUserId(parts[2]) || Number(parts[2] || 0);
       const profile = publicProfileView(userId);
       return json(res, 200, { profile });
     }
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/follow')) {
       const parts = pathname.split('/').filter(Boolean);
-      const targetId = Number(parts[2] || 0);
+      const targetId = resolveCanonicalUserId(parts[2]) || Number(parts[2] || 0);
       const body = await readBody(req);
-      const followerId = Number(body?.follower_id);
+      const followerId = resolveCanonicalUserId(body?.follower_id) || Number(body?.follower_id);
       if (!Number.isFinite(followerId) || followerId <= 0) {
         return json(res, 400, { error: 'follower_id is required.' });
       }
@@ -1525,8 +3159,8 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'DELETE' && pathname.startsWith('/api/users/') && pathname.endsWith('/follow')) {
       const parts = pathname.split('/').filter(Boolean);
-      const targetId = Number(parts[2] || 0);
-      const followerId = Number(url.searchParams.get('follower_id') || 0);
+      const targetId = resolveCanonicalUserId(parts[2]) || Number(parts[2] || 0);
+      const followerId = resolveCanonicalUserId(url.searchParams.get('follower_id')) || Number(url.searchParams.get('follower_id') || 0);
       if (!Number.isFinite(followerId) || followerId <= 0) {
         return json(res, 400, { error: 'follower_id is required.' });
       }
@@ -1537,7 +3171,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/following')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = Number(parts[2] || 0);
+      const userId = resolveCanonicalUserId(parts[2]) || Number(parts[2] || 0);
       const ids = Array.isArray(store.follows[String(userId)]) ? store.follows[String(userId)] : [];
       const profiles = ids.map((id) => publicProfileView(id)).filter(Boolean);
       return json(res, 200, { users: profiles });
@@ -1545,7 +3179,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const state = ensureUserMovieState(userId);
       const tmdbId = parsePositiveNumber(url.searchParams.get('tmdb_id'));
@@ -1560,7 +3194,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const body = await readBody(req);
       const state = ensureUserMovieState(userId);
@@ -1578,7 +3212,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/toggle')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const body = await readBody(req);
       const tmdbId = parsePositiveNumber(body?.tmdb_id);
@@ -1594,7 +3228,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/watched')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const body = await readBody(req);
       const tmdbId = parsePositiveNumber(body?.tmdb_id);
@@ -1607,7 +3241,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/rating')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const body = await readBody(req);
       const tmdbId = parsePositiveNumber(body?.tmdb_id);
@@ -1619,7 +3253,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'POST' && pathname.startsWith('/api/users/') && pathname.endsWith('/movie-state/privacy')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const body = await readBody(req);
       const state = ensureUserMovieState(userId);
@@ -1631,7 +3265,7 @@ const server = http.createServer(async (req, res) => {
 
     if (method === 'GET' && pathname.startsWith('/api/users/') && pathname.endsWith('/gallery-favorites')) {
       const parts = pathname.split('/').filter(Boolean);
-      const userId = parsePositiveNumber(parts[2]);
+      const userId = resolveCanonicalUserId(parts[2]) || parsePositiveNumber(parts[2]);
       if (!userId) return json(res, 400, { error: 'Invalid user id.' });
       const favorites = store.galleryFavorites
         .filter((row) => Number(row.user_id) === userId)
@@ -1650,7 +3284,7 @@ const server = http.createServer(async (req, res) => {
     }
 
     if (method === 'GET' && pathname === '/api/gallery') {
-      const userId = parsePositiveNumber(url.searchParams.get('user_id')) || 0;
+      const userId = resolveCanonicalUserId(url.searchParams.get('user_id')) || parsePositiveNumber(url.searchParams.get('user_id')) || 0;
       const query = normalizeText(url.searchParams.get('query') || url.searchParams.get('q') || '', 120).toLowerCase();
       const items = store.galleryItems
         .filter((item) => {
@@ -1679,8 +3313,16 @@ const server = http.createServer(async (req, res) => {
         ...clean,
       };
       store.galleryItems.push(item);
+      try {
+        await tagCloudinaryAssetAsGallery(item);
+      } catch (err) {
+        console.warn(
+          'Cloudinary gallery tagging skipped:',
+          err instanceof Error ? err.message : String(err)
+        );
+      }
       saveStore(store);
-      const userId = parsePositiveNumber(body?.user_id) || 0;
+      const userId = resolveCanonicalUserId(body?.user_id) || parsePositiveNumber(body?.user_id) || 0;
       return json(res, 201, { item: serializeGalleryItemForFeed(item, userId) });
     }
 
@@ -1707,7 +3349,7 @@ const server = http.createServer(async (req, res) => {
       if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
       if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
       const body = await readBody(req);
-      const userId = parsePositiveNumber(body?.user_id);
+      const userId = resolveCanonicalUserId(body?.user_id) || parsePositiveNumber(body?.user_id);
       if (!userId) return json(res, 400, { error: 'user_id is required.' });
       const active = toggleGalleryReaction(store.galleryLikes, userId, galleryId);
       saveStore(store);
@@ -1720,7 +3362,7 @@ const server = http.createServer(async (req, res) => {
       if (!galleryId) return json(res, 400, { error: 'Invalid gallery id.' });
       if (!getGalleryItemById(galleryId)) return json(res, 404, { error: 'Gallery item not found.' });
       const body = await readBody(req);
-      const userId = parsePositiveNumber(body?.user_id);
+      const userId = resolveCanonicalUserId(body?.user_id) || parsePositiveNumber(body?.user_id);
       if (!userId) return json(res, 400, { error: 'user_id is required.' });
       const active = toggleGalleryReaction(store.galleryFavorites, userId, galleryId);
       saveStore(store);
@@ -1825,15 +3467,34 @@ const server = http.createServer(async (req, res) => {
       if (!isAuthorizedAdmin(req)) {
         return json(res, 403, { error: 'Forbidden.' });
       }
-      const cleanup = await cleanupAllStoreCloudinaryMedia();
+      const body = await readBody(req);
+      const keptAdmin = resolveAdminProfileToKeepOnReset(body);
+      const cleanup = await cleanupAllStoreCloudinaryMedia({ preserveUserIds: [keptAdmin.user_id] });
       if (cleanup.failed.length) {
         return json(res, 502, {
           error: 'Cloudinary cleanup failed. Reset aborted.',
           cleanup,
         });
       }
-      resetAllStoreData();
-      return json(res, 200, { ok: true, cleanup });
+      const kept = resetAllStoreData(keptAdmin);
+      try {
+        await forceCloudStoreSyncFromStore();
+      } catch (err) {
+        return json(res, 502, {
+          error: err instanceof Error ? err.message : 'Cloudinary store sync failed.',
+          cleanup,
+        });
+      }
+      return json(res, 200, {
+        ok: true,
+        cleanup,
+        kept_admin: kept
+          ? {
+              user_id: kept.user_id,
+              nickname: kept.nickname,
+            }
+          : null,
+      });
     }
 
     if (method === 'POST' && pathname === '/api/admin/cloudinary/delete-image') {
@@ -2013,10 +3674,21 @@ setInterval(() => {
   });
 }, EXPIRED_CLEANUP_INTERVAL_MS);
 
-server.listen(port, () => {
-  console.log(`Cinema backend running on http://localhost:${port}`);
-  console.log(
-    `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
-  );
-  console.log(`WS:    ws://localhost:${port}/ws`);
+async function startServer() {
+  await restoreStoreFromCloudinaryBackup();
+  maintainCanonicalUserMappings();
+  saveStore(store);
+  registerShutdownSyncHandlers();
+  server.listen(port, () => {
+    console.log(`Cinema backend running on http://localhost:${port}`);
+    console.log(
+      `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
+    );
+    console.log(`WS:    ws://localhost:${port}/ws`);
+  });
+}
+
+startServer().catch((err) => {
+  console.error('Backend startup failed:', err instanceof Error ? err.message : String(err));
+  process.exit(1);
 });

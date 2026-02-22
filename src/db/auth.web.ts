@@ -1,6 +1,7 @@
 import * as Crypto from 'expo-crypto';
 import Constants from 'expo-constants';
 import { ADMIN_LOCAL_LOGIN, ADMIN_LOCAL_PASSWORD } from '@/constants/auth';
+import type { BackendLocalAuthUser } from '@/lib/local-auth-backend';
 
 export type User = {
   id: number;
@@ -155,6 +156,107 @@ function markLoginFailure(identity: string) {
 function clearLoginGuard(identity: string) {
   delete webState.loginGuards[identity];
   saveState(webState);
+}
+
+function pruneUserScopedRecordKeys<T>(record: Record<string, T>, userId: number) {
+  const out: Record<string, T> = {};
+  const exact = String(userId);
+  const prefix = `${userId}:`;
+  for (const [key, value] of Object.entries(record ?? {})) {
+    if (key === exact || key.startsWith(prefix)) continue;
+    out[key] = value;
+  }
+  return out;
+}
+
+function purgeDeletedUserFromWebStores(userId: number) {
+  const userIdStr = String(userId);
+
+  try {
+    const raw = localStorage.getItem('movie_rec_user_movies');
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        watchlist?: Record<string, boolean>;
+        favorites?: Record<string, boolean>;
+        favoriteActors?: Record<string, boolean>;
+        favoriteDirectors?: Record<string, boolean>;
+        watched?: Record<string, boolean>;
+        privacy?: Record<string, unknown>;
+        watchlistMediaType?: Record<string, 'movie' | 'tv'>;
+        favoritesMediaType?: Record<string, 'movie' | 'tv'>;
+        watchedMediaType?: Record<string, 'movie' | 'tv'>;
+        ratingsMediaType?: Record<string, 'movie' | 'tv'>;
+        ratings?: Record<string, number>;
+        comments?: Array<{ user_id?: number }>;
+      };
+      const next = {
+        ...parsed,
+        watchlist: pruneUserScopedRecordKeys(parsed.watchlist ?? {}, userId),
+        favorites: pruneUserScopedRecordKeys(parsed.favorites ?? {}, userId),
+        favoriteActors: pruneUserScopedRecordKeys(parsed.favoriteActors ?? {}, userId),
+        favoriteDirectors: pruneUserScopedRecordKeys(parsed.favoriteDirectors ?? {}, userId),
+        watched: pruneUserScopedRecordKeys(parsed.watched ?? {}, userId),
+        privacy: pruneUserScopedRecordKeys(parsed.privacy ?? {}, userId),
+        watchlistMediaType: pruneUserScopedRecordKeys(parsed.watchlistMediaType ?? {}, userId),
+        favoritesMediaType: pruneUserScopedRecordKeys(parsed.favoritesMediaType ?? {}, userId),
+        watchedMediaType: pruneUserScopedRecordKeys(parsed.watchedMediaType ?? {}, userId),
+        ratingsMediaType: pruneUserScopedRecordKeys(parsed.ratingsMediaType ?? {}, userId),
+        ratings: pruneUserScopedRecordKeys(parsed.ratings ?? {}, userId),
+        comments: Array.isArray(parsed.comments)
+          ? parsed.comments.filter((row) => Number(row?.user_id) !== userId)
+          : [],
+      };
+      localStorage.setItem('movie_rec_user_movies', JSON.stringify(next));
+    }
+  } catch {
+  }
+
+  try {
+    const raw = localStorage.getItem('movie_rec_gallery_items_v2');
+    if (raw) {
+      const parsed = JSON.parse(raw) as {
+        likes?: Array<{ userId?: number }>;
+        favorites?: Array<{ userId?: number }>;
+        comments?: Array<{ userId?: number }>;
+      };
+      const next = {
+        ...parsed,
+        likes: Array.isArray(parsed.likes) ? parsed.likes.filter((row) => Number(row?.userId) !== userId) : [],
+        favorites: Array.isArray(parsed.favorites)
+          ? parsed.favorites.filter((row) => Number(row?.userId) !== userId)
+          : [],
+        comments: Array.isArray(parsed.comments)
+          ? parsed.comments.filter((row) => Number(row?.userId) !== userId)
+          : [],
+      };
+      localStorage.setItem('movie_rec_gallery_items_v2', JSON.stringify(next));
+    }
+  } catch {
+  }
+
+  try {
+    const raw = localStorage.getItem('movie_rec_search_history');
+    if (raw) {
+      const parsed = JSON.parse(raw) as { byUser?: Record<string, string[]> };
+      if (parsed?.byUser && typeof parsed.byUser === 'object' && userIdStr in parsed.byUser) {
+        delete parsed.byUser[userIdStr];
+        localStorage.setItem('movie_rec_search_history', JSON.stringify(parsed));
+      }
+    }
+  } catch {
+  }
+
+  try {
+    const raw = localStorage.getItem('movie_rec_search_click_history');
+    if (raw) {
+      const parsed = JSON.parse(raw) as { byUser?: Record<string, unknown[]> };
+      if (parsed?.byUser && typeof parsed.byUser === 'object' && userIdStr in parsed.byUser) {
+        delete parsed.byUser[userIdStr];
+        localStorage.setItem('movie_rec_search_click_history', JSON.stringify(parsed));
+      }
+    }
+  } catch {
+  }
 }
 
 function validatePassword(password: string) {
@@ -325,6 +427,62 @@ export async function loginUser(nickname: string, password: string): Promise<Use
   return user;
 }
 
+export async function upsertLocalUserFromBackend(input: {
+  user: BackendLocalAuthUser;
+  password: string;
+}): Promise<User> {
+  const remoteUser = input.user;
+  const nickname = String(remoteUser?.nickname || '').trim();
+  if (!nickname) {
+    throw new Error('Invalid backend user payload.');
+  }
+  validateNickname(nickname);
+  const passwordHash = await hashPassword(String(input.password || ''));
+  const now = nowIso();
+  const role: 'user' | 'admin' = remoteUser.role === 'admin' ? 'admin' : 'user';
+  const authProvider: 'local' | 'google' | 'auth0' =
+    remoteUser.auth_provider === 'auth0' ? 'auth0' : remoteUser.auth_provider === 'google' ? 'google' : 'local';
+  const existing = webState.users.find((u) => u.nickname.toLowerCase() === nickname.toLowerCase()) || null;
+  if (existing) {
+    existing.name = remoteUser.name?.trim() || null;
+    existing.email = remoteUser.email?.trim() || null;
+    existing.date_of_birth = remoteUser.date_of_birth?.trim() || null;
+    existing.country = remoteUser.country?.trim() || null;
+    existing.bio = remoteUser.bio?.trim() || null;
+    existing.avatar_url = remoteUser.avatar_url?.trim() || null;
+    existing.password_hash = passwordHash;
+    existing.role = role;
+    existing.auth_provider = authProvider;
+    existing.updated_at = now;
+    webState.sessionUserId = existing.id;
+    clearLoginGuard(loginIdentity(nickname));
+    saveState(webState);
+    return existing;
+  }
+
+  const user: WebUser = {
+    id: webState.idSeq++,
+    name: remoteUser.name?.trim() || null,
+    nickname,
+    email: remoteUser.email?.trim() || null,
+    date_of_birth: remoteUser.date_of_birth?.trim() || null,
+    country: remoteUser.country?.trim() || null,
+    bio: remoteUser.bio?.trim() || null,
+    avatar_url: remoteUser.avatar_url?.trim() || null,
+    password_hash: passwordHash,
+    role,
+    auth_provider: authProvider,
+    google_sub: null,
+    created_at: now,
+    updated_at: now,
+  };
+  webState.users.push(user);
+  webState.sessionUserId = user.id;
+  clearLoginGuard(loginIdentity(nickname));
+  saveState(webState);
+  return user;
+}
+
 export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
   const sub = profile.sub;
   const email = profile.email?.trim() || null;
@@ -440,6 +598,22 @@ export async function getCurrentUser(): Promise<User | null> {
 export async function logoutUser() {
   webState.sessionUserId = null;
   saveState(webState);
+}
+
+export async function deleteUserAccount(userId: number) {
+  const idx = webState.users.findIndex((u) => u.id === userId);
+  if (idx < 0) return;
+  const user = webState.users[idx];
+  if (user.role === 'admin') {
+    throw new Error('Admin account cannot be deleted.');
+  }
+  webState.users.splice(idx, 1);
+  if (webState.sessionUserId === userId) {
+    webState.sessionUserId = null;
+  }
+  delete webState.loginGuards[loginIdentity(user.nickname)];
+  saveState(webState);
+  purgeDeletedUserFromWebStores(userId);
 }
 
 export async function resetDatabaseKeepAdminOnly() {

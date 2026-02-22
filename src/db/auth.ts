@@ -3,6 +3,7 @@ import * as SQLite from 'expo-sqlite';
 import Constants from 'expo-constants';
 import { getDb } from './database';
 import { ADMIN_LOCAL_LOGIN, ADMIN_LOCAL_PASSWORD } from '@/constants/auth';
+import type { BackendLocalAuthUser } from '@/lib/local-auth-backend';
 
 export type User = {
   id: number;
@@ -355,6 +356,81 @@ export async function loginUser(nickname: string, password: string): Promise<Use
   return user;
 }
 
+export async function upsertLocalUserFromBackend(input: {
+  user: BackendLocalAuthUser;
+  password: string;
+}): Promise<User> {
+  const db = await getDb();
+  const remoteUser = input.user;
+  const nickname = String(remoteUser?.nickname || '').trim();
+  if (!nickname) {
+    throw new Error('Invalid backend user payload.');
+  }
+  validateNickname(nickname);
+  const passwordHash = await hashPassword(String(input.password || ''));
+  const now = nowIso();
+  const role: 'user' | 'admin' = remoteUser.role === 'admin' ? 'admin' : 'user';
+  const authProvider: 'local' | 'google' | 'auth0' =
+    remoteUser.auth_provider === 'auth0' ? 'auth0' : remoteUser.auth_provider === 'google' ? 'google' : 'local';
+  const existing = await db.getFirstAsync<User>('SELECT * FROM users WHERE LOWER(nickname) = LOWER(?)', nickname);
+  let targetUserId: number;
+  if (existing) {
+    await db.runAsync(
+      `
+      UPDATE users
+      SET name = ?, email = ?, date_of_birth = ?, country = ?, bio = ?, avatar_url = ?, password_hash = ?, role = ?, auth_provider = ?, updated_at = ?
+      WHERE id = ?
+      `,
+      remoteUser.name?.trim() || null,
+      remoteUser.email?.trim() || null,
+      remoteUser.date_of_birth?.trim() || null,
+      remoteUser.country?.trim() || null,
+      remoteUser.bio?.trim() || null,
+      remoteUser.avatar_url?.trim() || null,
+      passwordHash,
+      role,
+      authProvider,
+      now,
+      existing.id
+    );
+    targetUserId = existing.id;
+  } else {
+    const result = await db.runAsync(
+      `
+      INSERT INTO users
+        (name, nickname, email, date_of_birth, country, bio, avatar_url, password_hash, role, auth_provider, google_sub, created_at, updated_at)
+      VALUES
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+      `,
+      remoteUser.name?.trim() || null,
+      nickname,
+      remoteUser.email?.trim() || null,
+      remoteUser.date_of_birth?.trim() || null,
+      remoteUser.country?.trim() || null,
+      remoteUser.bio?.trim() || null,
+      remoteUser.avatar_url?.trim() || null,
+      passwordHash,
+      role,
+      authProvider,
+      now,
+      now
+    );
+    targetUserId = Number(result.lastInsertRowId);
+  }
+
+  await clearLoginGuard(db, loginIdentity(nickname));
+  await db.runAsync(
+    'INSERT OR REPLACE INTO auth_sessions (id, user_id, created_at) VALUES (1, ?, ?)',
+    targetUserId,
+    now
+  );
+  const user = await db.getFirstAsync<User>('SELECT * FROM users WHERE id = ?', targetUserId);
+  if (!user) {
+    throw new Error('Failed to persist backend user locally.');
+  }
+  return user;
+}
+
 export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
   const db = await getDb();
   const sub = profile.sub;
@@ -489,6 +565,41 @@ export async function updateUserProfile(
   const updated = await db.getFirstAsync<User>('SELECT * FROM users WHERE id = ?', userId);
   if (!updated) throw new Error('User not found.');
   return updated;
+}
+
+export async function deleteUserAccount(userId: number) {
+  const db = await getDb();
+  const currentUser = await db.getFirstAsync<User>('SELECT * FROM users WHERE id = ?', userId);
+  if (!currentUser) return;
+  if (currentUser.role === 'admin') {
+    throw new Error('Admin account cannot be deleted.');
+  }
+
+  await db.execAsync('BEGIN IMMEDIATE TRANSACTION;');
+  try {
+    await db.runAsync('DELETE FROM auth_sessions WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM auth_login_attempts WHERE identity = ?', loginIdentity(currentUser.nickname));
+    await db.runAsync('DELETE FROM user_comments WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_movies WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_watchlist WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_favorites WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_favorite_actors WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_favorite_directors WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_ratings WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_watched WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_list_privacy WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_search_history WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM user_search_clicks WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM gallery_comments WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM gallery_likes WHERE user_id = ?', userId);
+    await db.runAsync('DELETE FROM gallery_favorites WHERE user_id = ?', userId);
+    await db.runAsync('UPDATE cinema_events SET created_by = NULL WHERE created_by = ?', userId);
+    await db.runAsync('DELETE FROM users WHERE id = ?', userId);
+    await db.execAsync('COMMIT;');
+  } catch (err) {
+    await db.execAsync('ROLLBACK;');
+    throw err;
+  }
 }
 
 export async function resetDatabaseKeepAdminOnly() {

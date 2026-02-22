@@ -12,10 +12,19 @@ import {
   updateUserProfile,
   User,
   resetDatabaseKeepAdminOnly,
+  deleteUserAccount,
+  upsertLocalUserFromBackend,
 } from '@/db/auth';
 import { syncUserHistoryToMl } from '@/lib/ml-sync';
 import { clearBackendUserSession } from '@/lib/backend-session';
-import { bootstrapBackendUserSession } from '@/lib/social-backend';
+import { bootstrapBackendUserSession, deletePublicAccount } from '@/lib/social-backend';
+import {
+  BackendLocalAuthError,
+  backendLocalLogin,
+  backendLocalNicknameAvailable,
+  backendLocalRegister,
+  backendLocalSyncCredentials,
+} from '@/lib/local-auth-backend';
 
 type AuthContextValue = {
   user: User | null;
@@ -47,6 +56,7 @@ type AuthContextValue = {
     bio?: string | null;
     avatarUrl?: string | null;
   }) => Promise<void>;
+  deleteAccount: () => Promise<void>;
   logout: () => Promise<void>;
   resetToAdminOnly: () => Promise<void>;
   error: string | null;
@@ -91,17 +101,88 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       login: async (nickname, password) => {
         setError(null);
         clearBackendUserSession();
-        const u = await loginUser(nickname, password);
+        const cleanNickname = String(nickname || '').trim();
+        const cleanPassword = String(password || '');
+        let u: User | null = null;
+        let usedLocalFallback = false;
+        let remoteNotFoundError: BackendLocalAuthError | null = null;
+
+        try {
+          const remote = await backendLocalLogin({
+            nickname: cleanNickname,
+            password: cleanPassword,
+          });
+          if (remote?.user) {
+            u = await upsertLocalUserFromBackend({ user: remote.user, password: cleanPassword });
+          }
+        } catch (err) {
+          if (!(err instanceof BackendLocalAuthError) || err.status !== 404) {
+            throw err;
+          }
+          remoteNotFoundError = err;
+        }
+
+        if (!u) {
+          usedLocalFallback = true;
+          try {
+            u = await loginUser(cleanNickname, cleanPassword);
+          } catch (localErr) {
+            if (remoteNotFoundError) {
+              throw remoteNotFoundError;
+            }
+            throw localErr;
+          }
+        }
+
         setUser(u);
-        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
+        await bootstrapBackendUserSession(u.id, u.nickname).catch(() => null);
+        if (usedLocalFallback && u.role !== 'admin') {
+          await backendLocalSyncCredentials({
+            userId: u.id,
+            nickname: u.nickname,
+            password: cleanPassword,
+          }).catch(() => null);
+        }
         void syncUserHistoryToMl(u.id).catch(() => {});
       },
       register: async (input) => {
         setError(null);
         clearBackendUserSession();
-        const u = await registerUser(input);
+        const cleanNickname = String(input.nickname || '').trim();
+        const cleanPassword = String(input.password || '');
+        let u: User | null = null;
+        let usedLocalFallback = false;
+
+        try {
+          const remote = await backendLocalRegister({
+            nickname: cleanNickname,
+            password: cleanPassword,
+            name: input.name ?? null,
+          });
+          if (remote?.user) {
+            u = await upsertLocalUserFromBackend({ user: remote.user, password: cleanPassword });
+          }
+        } catch (err) {
+          if (err instanceof BackendLocalAuthError) {
+            throw err;
+          }
+          throw err;
+        }
+
+        if (!u) {
+          usedLocalFallback = true;
+          u = await registerUser(input);
+        }
+
         setUser(u);
-        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
+        await bootstrapBackendUserSession(u.id, u.nickname).catch(() => null);
+        if (usedLocalFallback && u.role !== 'admin') {
+          await backendLocalSyncCredentials({
+            userId: u.id,
+            nickname: u.nickname,
+            password: cleanPassword,
+          }).catch(() => null);
+        }
         void syncUserHistoryToMl(u.id).catch(() => {});
       },
       loginWithAuth0: async (profile) => {
@@ -114,6 +195,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
         setError(null);
+        const remoteAvailable = await backendLocalNicknameAvailable(nickname, excludeUserId ?? null);
+        if (typeof remoteAvailable === 'boolean') {
+          return remoteAvailable;
+        }
         return isNicknameAvailable(nickname, excludeUserId);
       },
       updateProfile: async (input) => {
@@ -121,6 +206,18 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setError(null);
         const u = await updateUserProfile(user.id, input);
         setUser(u);
+      },
+      deleteAccount: async () => {
+        if (!user) return;
+        setError(null);
+        if (user.role === 'admin') {
+          throw new Error('Admin account cannot be deleted.');
+        }
+        await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
+        await deletePublicAccount(user.id);
+        await deleteUserAccount(user.id);
+        clearBackendUserSession();
+        setUser(null);
       },
       logout: async () => {
         setError(null);
