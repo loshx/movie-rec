@@ -26,6 +26,26 @@ export type BackendCinemaInput = {
   createdBy?: number | null;
 };
 
+export type BackendCinemaPollOption = {
+  id: string;
+  title: string;
+  poster_url: string | null;
+  tmdb_id: number | null;
+  votes: number;
+  percent: number;
+};
+
+export type BackendCinemaPoll = {
+  id: number;
+  question: string;
+  status: 'open' | 'closed';
+  total_votes: number;
+  user_vote_option_id: string | null;
+  options: BackendCinemaPollOption[];
+  created_at: string;
+  updated_at: string;
+};
+
 export type BackendCloudinarySignature = {
   resource_type: 'image' | 'video';
   upload_url: string;
@@ -58,6 +78,22 @@ export function getBackendApiUrl(path: string) {
   return `${base}${path.startsWith('/') ? path : `/${path}`}`;
 }
 
+class BackendRequestError extends Error {
+  status: number;
+
+  constructor(status: number, message: string) {
+    super(message);
+    this.name = 'BackendRequestError';
+    this.status = Number(status) || 0;
+  }
+}
+
+function rethrowIfMissingCinemaPollRoute(error: unknown): never | void {
+  if (error instanceof BackendRequestError && error.status === 404) {
+    throw new Error('Cinema poll endpoint is missing on backend. Deploy latest backend to Render and retry.');
+  }
+}
+
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
   const res = await fetch(url, init);
   if (!res.ok) {
@@ -67,7 +103,7 @@ async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
       if (payload?.error) message = String(payload.error);
     } catch {
     }
-    throw new Error(message);
+    throw new BackendRequestError(res.status, message);
   }
   return (await res.json()) as T;
 }
@@ -94,6 +130,110 @@ export async function backendGetLatestCinemaEvent() {
   if (!url) return null;
   const payload = await requestJson<{ event: BackendCinemaEvent | null }>(url);
   return payload.event;
+}
+
+export async function backendGetCurrentCinemaPoll(userId?: number | null) {
+  const search = new URLSearchParams();
+  const cleanUserId = Number(userId ?? 0);
+  if (Number.isFinite(cleanUserId) && cleanUserId > 0) {
+    search.set('user_id', String(cleanUserId));
+  }
+  const url = getBackendApiUrl(`/api/cinema/poll/current${search.toString() ? `?${search.toString()}` : ''}`);
+  if (!url) return null;
+  try {
+    const payload = await requestJson<{ poll: BackendCinemaPoll | null }>(url);
+    return payload.poll ?? null;
+  } catch (error) {
+    rethrowIfMissingCinemaPollRoute(error);
+    throw error;
+  }
+}
+
+export async function backendCreateCinemaPoll(
+  input: {
+    question?: string | null;
+    options: Array<{
+      id?: string;
+      title: string;
+      poster_url: string;
+      tmdb_id?: number | null;
+    }>;
+  },
+  options?: { adminKey?: string | null }
+) {
+  const url = getBackendApiUrl('/api/cinema/poll');
+  if (!url) throw new Error('Backend URL missing.');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const adminKey = normalizeAdminKey(options?.adminKey);
+  if (!adminKey) throw new Error('Admin API key is required.');
+  headers['x-admin-key'] = adminKey;
+  try {
+    const payload = await requestJson<{ poll: BackendCinemaPoll | null }>(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        question: input.question ?? null,
+        options: input.options ?? [],
+      }),
+    });
+    return payload.poll ?? null;
+  } catch (error) {
+    rethrowIfMissingCinemaPollRoute(error);
+    throw error;
+  }
+}
+
+export async function backendVoteCinemaPoll(pollId: number, userId: number, optionId: string) {
+  const cleanPollId = Number(pollId);
+  const cleanUserId = Number(userId);
+  const cleanOptionId = String(optionId || '').trim();
+  if (!Number.isFinite(cleanPollId) || cleanPollId <= 0) throw new Error('Invalid poll id.');
+  if (!Number.isFinite(cleanUserId) || cleanUserId <= 0) throw new Error('Invalid user id.');
+  if (!cleanOptionId) throw new Error('option_id is required.');
+  const url = getBackendApiUrl(`/api/cinema/poll/${encodeURIComponent(String(cleanPollId))}/vote`);
+  if (!url) throw new Error('Backend URL missing.');
+  try {
+    const payload = await requestJson<{ poll: BackendCinemaPoll | null }>(url, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        user_id: cleanUserId,
+        option_id: cleanOptionId,
+      }),
+    });
+    return payload.poll ?? null;
+  } catch (error) {
+    rethrowIfMissingCinemaPollRoute(error);
+    throw error;
+  }
+}
+
+export async function backendCloseCinemaPoll(pollId: number, options?: { adminKey?: string | null }) {
+  const cleanPollId = Number(pollId);
+  if (!Number.isFinite(cleanPollId) || cleanPollId <= 0) throw new Error('Invalid poll id.');
+  const url = getBackendApiUrl(`/api/cinema/poll/${encodeURIComponent(String(cleanPollId))}/close`);
+  if (!url) throw new Error('Backend URL missing.');
+  const headers: Record<string, string> = {
+    'Content-Type': 'application/json',
+  };
+  const adminKey = normalizeAdminKey(options?.adminKey);
+  if (!adminKey) throw new Error('Admin API key is required.');
+  headers['x-admin-key'] = adminKey;
+  try {
+    const payload = await requestJson<{ poll: BackendCinemaPoll | null }>(url, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({}),
+    });
+    return payload.poll ?? null;
+  } catch (error) {
+    rethrowIfMissingCinemaPollRoute(error);
+    throw error;
+  }
 }
 
 export async function backendCreateCinemaEvent(
@@ -215,6 +355,19 @@ export async function backendGetCloudinaryUploadSignature(
           .map((x) => String(x ?? '').trim())
           .filter((x, idx, arr) => x.length > 0 && arr.indexOf(x) === idx)
       : [];
+    const publicProfileUrl = getBackendApiUrl(`/api/users/${encodeURIComponent(String(userId))}/public`);
+    if (publicProfileUrl) {
+      try {
+        const publicProfilePayload = await requestJson<{ profile?: { nickname?: string | null } | null }>(
+          publicProfileUrl
+        );
+        const serverNickname = String(publicProfilePayload?.profile?.nickname ?? '').trim();
+        if (serverNickname && !nicknames.some((x) => x.toLowerCase() === serverNickname.toLowerCase())) {
+          nicknames.push(serverNickname);
+        }
+      } catch {
+      }
+    }
     for (const nickname of nicknames) {
       try {
         const payload = await requestJson<{ session_token?: string | null }>(bootstrapUrl, {

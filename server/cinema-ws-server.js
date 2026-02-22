@@ -24,11 +24,14 @@ const dataFile = configuredDataPath
   ? path.resolve(configuredDataPath)
   : path.join(__dirname, 'data', 'cinema-events.json');
 const dataDir = path.dirname(dataFile);
+const dataFileBackup = `${dataFile}.bak`;
 
 function createEmptyStoreState() {
   return {
     idSeq: 1,
     items: [],
+    cinemaPollIdSeq: 1,
+    cinemaPollCurrent: null,
     commentIdSeq: 1,
     comments: [],
     users: {},
@@ -46,50 +49,93 @@ function createEmptyStoreState() {
 
 function ensureStore() {
   if (!fs.existsSync(dataDir)) fs.mkdirSync(dataDir, { recursive: true });
+  if (!fs.existsSync(dataFile) && fs.existsSync(dataFileBackup)) {
+    try {
+      fs.copyFileSync(dataFileBackup, dataFile);
+    } catch {
+    }
+  }
   if (!fs.existsSync(dataFile)) {
     fs.writeFileSync(dataFile, JSON.stringify(createEmptyStoreState(), null, 2), 'utf8');
   }
 }
 
+function hydrateStoreState(parsed) {
+  const fallback = createEmptyStoreState();
+  const galleryItems = Array.isArray(parsed?.galleryItems) ? parsed.galleryItems : [];
+  const galleryComments = Array.isArray(parsed?.galleryComments) ? parsed.galleryComments : [];
+  return {
+    idSeq: Number(parsed?.idSeq || 1),
+    items: Array.isArray(parsed?.items) ? parsed.items : [],
+    cinemaPollIdSeq: Number(parsed?.cinemaPollIdSeq || fallback.cinemaPollIdSeq),
+    cinemaPollCurrent: normalizeCinemaPollState(parsed?.cinemaPollCurrent),
+    commentIdSeq: Number(parsed?.commentIdSeq || 1),
+    comments: Array.isArray(parsed?.comments) ? parsed.comments : [],
+    users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
+    userSessions: parsed?.userSessions && typeof parsed.userSessions === 'object' ? parsed.userSessions : {},
+    follows: parsed?.follows && typeof parsed.follows === 'object' ? parsed.follows : {},
+    movieStates: parsed?.movieStates && typeof parsed.movieStates === 'object' ? parsed.movieStates : {},
+    galleryIdSeq: Number(
+      parsed?.galleryIdSeq ||
+        (galleryItems.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
+        fallback.galleryIdSeq
+    ),
+    galleryCommentIdSeq: Number(
+      parsed?.galleryCommentIdSeq ||
+        (galleryComments.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
+        fallback.galleryCommentIdSeq
+    ),
+    galleryItems,
+    galleryLikes: Array.isArray(parsed?.galleryLikes) ? parsed.galleryLikes : [],
+    galleryFavorites: Array.isArray(parsed?.galleryFavorites) ? parsed.galleryFavorites : [],
+    galleryComments,
+  };
+}
+
+function parseStoreFile(filePath) {
+  try {
+    if (!fs.existsSync(filePath)) return null;
+    const parsed = JSON.parse(fs.readFileSync(filePath, 'utf8'));
+    return hydrateStoreState(parsed);
+  } catch {
+    return null;
+  }
+}
+
 function loadStore() {
   ensureStore();
-  try {
-    const parsed = JSON.parse(fs.readFileSync(dataFile, 'utf8'));
-    const fallback = createEmptyStoreState();
-    const galleryItems = Array.isArray(parsed?.galleryItems) ? parsed.galleryItems : [];
-    const galleryComments = Array.isArray(parsed?.galleryComments) ? parsed.galleryComments : [];
-    return {
-      idSeq: Number(parsed?.idSeq || 1),
-      items: Array.isArray(parsed?.items) ? parsed.items : [],
-      commentIdSeq: Number(parsed?.commentIdSeq || 1),
-      comments: Array.isArray(parsed?.comments) ? parsed.comments : [],
-      users: parsed?.users && typeof parsed.users === 'object' ? parsed.users : {},
-      userSessions: parsed?.userSessions && typeof parsed.userSessions === 'object' ? parsed.userSessions : {},
-      follows: parsed?.follows && typeof parsed.follows === 'object' ? parsed.follows : {},
-      movieStates: parsed?.movieStates && typeof parsed.movieStates === 'object' ? parsed.movieStates : {},
-      galleryIdSeq: Number(
-        parsed?.galleryIdSeq ||
-          (galleryItems.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
-          fallback.galleryIdSeq
-      ),
-      galleryCommentIdSeq: Number(
-        parsed?.galleryCommentIdSeq ||
-          (galleryComments.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
-          fallback.galleryCommentIdSeq
-      ),
-      galleryItems,
-      galleryLikes: Array.isArray(parsed?.galleryLikes) ? parsed.galleryLikes : [],
-      galleryFavorites: Array.isArray(parsed?.galleryFavorites) ? parsed.galleryFavorites : [],
-      galleryComments,
-    };
-  } catch {
-    return createEmptyStoreState();
+  const primary = parseStoreFile(dataFile);
+  if (primary) return primary;
+
+  const backup = parseStoreFile(dataFileBackup);
+  if (backup) {
+    try {
+      const tmpFile = `${dataFile}.${Date.now()}.tmp`;
+      fs.writeFileSync(tmpFile, JSON.stringify(backup, null, 2), 'utf8');
+      fs.renameSync(tmpFile, dataFile);
+    } catch {
+    }
+    return backup;
   }
+  return createEmptyStoreState();
 }
 
 function saveStore(store) {
   ensureStore();
-  fs.writeFileSync(dataFile, JSON.stringify(store, null, 2), 'utf8');
+  const serialized = JSON.stringify(store, null, 2);
+  const tmpFile = `${dataFile}.${Date.now()}.tmp`;
+  try {
+    if (fs.existsSync(dataFile)) {
+      fs.copyFileSync(dataFile, dataFileBackup);
+    }
+  } catch {
+  }
+  fs.writeFileSync(tmpFile, serialized, 'utf8');
+  fs.renameSync(tmpFile, dataFile);
+  try {
+    fs.copyFileSync(dataFile, dataFileBackup);
+  } catch {
+  }
 }
 
 const store = loadStore();
@@ -159,6 +205,162 @@ function getCurrentEvent(nowIsoValue = nowIso()) {
   if (upcoming) return upcoming;
 
   return getLatestEvent();
+}
+
+function normalizeCinemaPollOptionInput(input, index) {
+  const optionIdRaw = normalizeText(input?.id, 20).toLowerCase();
+  const optionId = optionIdRaw || `opt_${index + 1}`;
+  const title = normalizeText(input?.title, 120);
+  const posterUrl = normalizeImageUrl(input?.poster_url ?? input?.posterUrl);
+  const tmdbId = parsePositiveNumber(input?.tmdb_id ?? input?.tmdbId);
+  if (!title) throw new Error(`Poll option #${index + 1} title is required.`);
+  if (!posterUrl) throw new Error(`Poll option #${index + 1} poster_url is required.`);
+  return {
+    id: optionId,
+    title,
+    poster_url: posterUrl,
+    tmdb_id: tmdbId || null,
+    votes: Math.max(0, Number(input?.votes) || 0),
+  };
+}
+
+function normalizeCinemaPollInput(input) {
+  const question = normalizeText(input?.question, 180) || 'Choose next movie';
+  const optionsInput = Array.isArray(input?.options) ? input.options : [];
+  if (optionsInput.length !== 3) {
+    throw new Error('Cinema poll must contain exactly 3 options.');
+  }
+  const options = optionsInput.map((option, index) => normalizeCinemaPollOptionInput(option, index));
+  const uniqueIds = new Set(options.map((option) => option.id));
+  if (uniqueIds.size !== options.length) {
+    throw new Error('Poll option ids must be unique.');
+  }
+  return {
+    question,
+    options,
+  };
+}
+
+function normalizeCinemaPollState(input) {
+  if (!input || typeof input !== 'object') return null;
+  try {
+    const question = normalizeText(input?.question, 180) || 'Choose next movie';
+    const status = String(input?.status || '').toLowerCase() === 'closed' ? 'closed' : 'open';
+    const optionsInput = Array.isArray(input?.options) ? input.options : [];
+    if (optionsInput.length !== 3) return null;
+    const options = optionsInput.map((option, index) => normalizeCinemaPollOptionInput(option, index));
+    const rawVotesByUser = input?.votes_by_user && typeof input.votes_by_user === 'object' ? input.votes_by_user : {};
+    const votesByUser = {};
+    for (const [rawUserId, rawOptionId] of Object.entries(rawVotesByUser)) {
+      const userId = parsePositiveNumber(rawUserId);
+      if (!userId) continue;
+      const optionId = normalizeText(rawOptionId, 20).toLowerCase();
+      if (!optionId || !options.some((option) => option.id === optionId)) continue;
+      votesByUser[String(userId)] = optionId;
+    }
+    const normalized = {
+      id: parsePositiveNumber(input?.id) || 1,
+      question,
+      status,
+      options: options.map((option) => ({ ...option, votes: 0 })),
+      votes_by_user: votesByUser,
+      created_at: normalizeIso(input?.created_at, nowIso()),
+      updated_at: normalizeIso(input?.updated_at ?? input?.created_at, nowIso()),
+    };
+    for (const optionId of Object.values(votesByUser)) {
+      const option = normalized.options.find((row) => row.id === optionId);
+      if (option) option.votes += 1;
+    }
+    return normalized;
+  } catch {
+    return null;
+  }
+}
+
+function serializeCinemaPollForUser(poll, userIdInput) {
+  if (!poll) return null;
+  const userId = parsePositiveNumber(userIdInput);
+  const totalVotes = poll.options.reduce((sum, option) => sum + Math.max(0, Number(option.votes) || 0), 0);
+  const userVoteOptionId = userId ? String(poll.votes_by_user?.[String(userId)] || '') || null : null;
+  return {
+    id: Number(poll.id),
+    question: poll.question,
+    status: poll.status === 'closed' ? 'closed' : 'open',
+    total_votes: totalVotes,
+    user_vote_option_id: userVoteOptionId,
+    options: poll.options.map((option) => {
+      const votes = Math.max(0, Number(option.votes) || 0);
+      const percent = totalVotes > 0 ? Math.round((votes / totalVotes) * 100) : 0;
+      return {
+        id: option.id,
+        title: option.title,
+        poster_url: option.poster_url,
+        tmdb_id: option.tmdb_id ?? null,
+        votes,
+        percent,
+      };
+    }),
+    created_at: poll.created_at,
+    updated_at: poll.updated_at,
+  };
+}
+
+function createCinemaPoll(input) {
+  const clean = normalizeCinemaPollInput(input);
+  const nextPoll = {
+    id: store.cinemaPollIdSeq++,
+    question: clean.question,
+    status: 'open',
+    options: clean.options.map((option) => ({ ...option, votes: 0 })),
+    votes_by_user: {},
+    created_at: nowIso(),
+    updated_at: nowIso(),
+  };
+  store.cinemaPollCurrent = nextPoll;
+  return nextPoll;
+}
+
+function closeCinemaPoll(pollIdInput) {
+  if (!store.cinemaPollCurrent) return null;
+  const pollId = parsePositiveNumber(pollIdInput);
+  if (pollId && Number(store.cinemaPollCurrent.id) !== pollId) {
+    return null;
+  }
+  store.cinemaPollCurrent.status = 'closed';
+  store.cinemaPollCurrent.updated_at = nowIso();
+  return store.cinemaPollCurrent;
+}
+
+function voteCinemaPoll(pollIdInput, userIdInput, optionIdInput) {
+  const poll = store.cinemaPollCurrent;
+  if (!poll) throw new Error('No active cinema poll.');
+  const pollId = parsePositiveNumber(pollIdInput);
+  if (!pollId || pollId !== Number(poll.id)) throw new Error('Cinema poll not found.');
+  if (poll.status !== 'open') throw new Error('Cinema poll is closed.');
+
+  const userId = parsePositiveNumber(userIdInput);
+  if (!userId) throw new Error('user_id is required.');
+
+  const optionId = normalizeText(optionIdInput, 20).toLowerCase();
+  if (!optionId) throw new Error('option_id is required.');
+  const selectedOption = poll.options.find((option) => option.id === optionId);
+  if (!selectedOption) throw new Error('Invalid option_id.');
+
+  const previousOptionId = String(poll.votes_by_user?.[String(userId)] || '').toLowerCase();
+  if (previousOptionId && previousOptionId !== optionId) {
+    const previousOption = poll.options.find((option) => option.id === previousOptionId);
+    if (previousOption && previousOption.votes > 0) {
+      previousOption.votes -= 1;
+    }
+  }
+
+  if (!previousOptionId || previousOptionId !== optionId) {
+    selectedOption.votes += 1;
+  }
+
+  poll.votes_by_user[String(userId)] = optionId;
+  poll.updated_at = nowIso();
+  return poll;
 }
 
 function normalizeProfileSync(body) {
@@ -1084,6 +1286,8 @@ async function cleanupExpiredCinemaEvents() {
 function resetAllStoreData() {
   store.idSeq = 1;
   store.items = [];
+  store.cinemaPollIdSeq = 1;
+  store.cinemaPollCurrent = null;
   store.commentIdSeq = 1;
   store.comments = [];
   store.users = {};
@@ -1122,6 +1326,49 @@ const server = http.createServer(async (req, res) => {
     if (method === 'GET' && pathname === '/api/cinema/current') {
       const now = url.searchParams.get('now') || nowIso();
       return json(res, 200, { event: getCurrentEvent(now) });
+    }
+
+    if (method === 'GET' && pathname === '/api/cinema/poll/current') {
+      const userId = parsePositiveNumber(url.searchParams.get('user_id'));
+      const poll = serializeCinemaPollForUser(store.cinemaPollCurrent, userId || null);
+      return json(res, 200, { poll });
+    }
+
+    if (method === 'POST' && pathname === '/api/cinema/poll') {
+      if (!isAuthorizedAdmin(req)) {
+        return json(res, 401, { error: 'Unauthorized admin request.' });
+      }
+      const body = await readBody(req);
+      const poll = createCinemaPoll(body);
+      saveStore(store);
+      return json(res, 201, { poll: serializeCinemaPollForUser(poll, null) });
+    }
+
+    if (method === 'POST' && /^\/api\/cinema\/poll\/\d+\/vote$/.test(pathname)) {
+      const parts = pathname.split('/').filter(Boolean);
+      const pollId = parsePositiveNumber(parts[3]);
+      if (!pollId) return json(res, 400, { error: 'Invalid poll id.' });
+      const body = await readBody(req);
+      const userId = parsePositiveNumber(body?.user_id);
+      const optionId = normalizeText(body?.option_id, 20).toLowerCase();
+      if (!userId) return json(res, 400, { error: 'user_id is required.' });
+      if (!optionId) return json(res, 400, { error: 'option_id is required.' });
+      const poll = voteCinemaPoll(pollId, userId, optionId);
+      saveStore(store);
+      return json(res, 200, { poll: serializeCinemaPollForUser(poll, userId) });
+    }
+
+    if (method === 'POST' && /^\/api\/cinema\/poll\/\d+\/close$/.test(pathname)) {
+      if (!isAuthorizedAdmin(req)) {
+        return json(res, 401, { error: 'Unauthorized admin request.' });
+      }
+      const parts = pathname.split('/').filter(Boolean);
+      const pollId = parsePositiveNumber(parts[3]);
+      if (!pollId) return json(res, 400, { error: 'Invalid poll id.' });
+      const poll = closeCinemaPoll(pollId);
+      if (!poll) return json(res, 404, { error: 'Cinema poll not found.' });
+      saveStore(store);
+      return json(res, 200, { poll: serializeCinemaPollForUser(poll, null) });
     }
 
     if (method === 'POST' && pathname === '/api/media/cloudinary/sign-upload') {
@@ -1190,6 +1437,10 @@ const server = http.createServer(async (req, res) => {
         updated_at: createdAt,
       };
       store.items.push(event);
+      if (store.cinemaPollCurrent && store.cinemaPollCurrent.status === 'open') {
+        store.cinemaPollCurrent.status = 'closed';
+        store.cinemaPollCurrent.updated_at = nowIso();
+      }
       saveStore(store);
       return json(res, 201, { event });
     }
@@ -1645,11 +1896,20 @@ function safeSend(ws, payload) {
   ws.send(JSON.stringify(payload));
 }
 
-function userKeyFor(ws) {
+function viewerKeyFor(ws) {
   if (Number.isFinite(ws?.user?.userId) && ws.user.userId > 0) {
     return `u:${ws.user.userId}`;
   }
+  if (ws?.user?.clientId) {
+    return `c:${ws.user.clientId}`;
+  }
   return `g:${ws.sessionId}`;
+}
+
+function roomViewerCount(room) {
+  const viewers = new Set();
+  room.clients.forEach((client) => viewers.add(viewerKeyFor(client)));
+  return viewers.size;
 }
 
 function broadcastRoomStats(roomId) {
@@ -1658,7 +1918,7 @@ function broadcastRoomStats(roomId) {
   const payload = {
     type: 'stats',
     room: roomId,
-    viewers: room.clients.size,
+    viewers: roomViewerCount(room),
     likes: room.likes.size,
   };
   room.clients.forEach((client) => safeSend(client, payload));
@@ -1667,12 +1927,19 @@ function broadcastRoomStats(roomId) {
 wss.on('connection', (ws) => {
   ws.sessionId = `${Date.now()}-${Math.random().toString(16).slice(2, 8)}`;
   ws.room = null;
-  ws.user = { userId: null, nickname: 'guest', avatarUrl: null };
+  ws.user = { userId: null, nickname: 'guest', avatarUrl: null, clientId: null };
 
   ws.on('message', (raw) => {
     try {
       const data = JSON.parse(String(raw));
       if (data.type === 'join' && data.room) {
+        if (ws.room) {
+          const prevRoom = rooms.get(ws.room);
+          if (prevRoom) {
+            prevRoom.clients.delete(ws);
+            broadcastRoomStats(ws.room);
+          }
+        }
         const roomId = String(data.room);
         const room = getRoom(roomId);
         room.clients.add(ws);
@@ -1681,6 +1948,7 @@ wss.on('connection', (ws) => {
           userId: Number.isFinite(Number(data.userId)) ? Number(data.userId) : null,
           nickname: (data.nickname || 'guest').toString().slice(0, 40),
           avatarUrl: data.avatarUrl ? String(data.avatarUrl).slice(0, 400) : null,
+          clientId: normalizeText(data.client_id ?? data.clientId, 80) || null,
         };
         safeSend(ws, {
           type: 'history',
@@ -1712,7 +1980,7 @@ wss.on('connection', (ws) => {
 
       if (data.type === 'like' && ws.room) {
         const room = getRoom(ws.room);
-        const key = userKeyFor(ws);
+        const key = viewerKeyFor(ws);
         if (data.liked) room.likes.add(key);
         else room.likes.delete(key);
         safeSend(ws, { type: 'liked', room: ws.room, liked: !!data.liked });
@@ -1727,7 +1995,11 @@ wss.on('connection', (ws) => {
     const room = rooms.get(ws.room);
     if (!room) return;
     room.clients.delete(ws);
-    room.likes.delete(userKeyFor(ws));
+    const key = viewerKeyFor(ws);
+    const hasSibling = Array.from(room.clients).some((client) => viewerKeyFor(client) === key);
+    if (!hasSibling) {
+      room.likes.delete(key);
+    }
     broadcastRoomStats(ws.room);
     if (room.clients.size === 0 && room.messages.length === 0 && room.likes.size === 0) {
       rooms.delete(ws.room);
@@ -1743,6 +2015,8 @@ setInterval(() => {
 
 server.listen(port, () => {
   console.log(`Cinema backend running on http://localhost:${port}`);
-  console.log(`REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, POST /api/cinema/events`);
+  console.log(
+    `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
+  );
   console.log(`WS:    ws://localhost:${port}/ws`);
 });
