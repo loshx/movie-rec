@@ -1,30 +1,38 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
-import { Picker } from '@react-native-picker/picker';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { addGalleryItem, clearGalleryAll, type GalleryDetails } from '@/db/gallery';
-import { createCinemaEvent, getLatestCinemaEvent } from '@/db/cinema';
-import { getFeaturedMovie, setFeaturedMovie } from '@/db/featured';
+import { closeCinemaPoll, createCinemaEvent, createCinemaPoll, getCurrentCinemaPoll, getLatestCinemaEvent } from '@/db/cinema';
 import { hasCloudinaryConfig, uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/cloudinary';
-import { backendResetAllData, hasBackendApi } from '@/lib/cinema-backend';
+import { hasBackendApi } from '@/lib/cinema-backend';
 import { setRuntimeAdminKey } from '@/lib/admin-session';
-import { getMovieById, getMovieCredits } from '@/lib/tmdb';
+import { getMovieById, getMovieCredits, posterUrl } from '@/lib/tmdb';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
 type ImportEntry = {
   index?: number;
   shotid?: string;
+  shot_id?: string;
+  shotId?: string;
+  title?: string;
   title_header?: string;
+  titleHeader?: string;
   image_id?: string;
+  imageId?: string;
   image_url?: string;
+  imageUrl?: string;
+  url?: string;
+  secure_url?: string;
   image_file?: string;
   palette_hex?: string[];
+  paletteHex?: string[];
   details?: Record<string, unknown>;
+  [key: string]: unknown;
 };
 
 function roundToNextFiveMinutes(d = new Date()) {
@@ -153,6 +161,30 @@ function parseJsonPayload(raw: string): ImportEntry[] {
   throw lastError instanceof Error ? lastError : new Error('Invalid JSON payload.');
 }
 
+function getImportEntryValue(entry: ImportEntry, keys: string[]): unknown {
+  const row = entry as Record<string, unknown>;
+  for (const key of keys) {
+    if (Object.prototype.hasOwnProperty.call(row, key)) {
+      return row[key];
+    }
+  }
+  const lower = new Map<string, unknown>();
+  for (const [rawKey, rawValue] of Object.entries(row)) {
+    lower.set(String(rawKey).trim().toLowerCase(), rawValue);
+  }
+  for (const key of keys) {
+    const hit = lower.get(String(key).trim().toLowerCase());
+    if (hit !== undefined) return hit;
+  }
+  return undefined;
+}
+
+function getImportEntryString(entry: ImportEntry, keys: string[]) {
+  const value = getImportEntryValue(entry, keys);
+  if (value === null || value === undefined) return '';
+  return String(value).trim();
+}
+
 function normalizeDetails(input: unknown): GalleryDetails {
   if (!input || typeof input !== 'object') return {};
   const out: GalleryDetails = {};
@@ -194,6 +226,44 @@ function normalizeDetails(input: unknown): GalleryDetails {
   return out;
 }
 
+function normalizeImportEntryDetails(entry: ImportEntry): GalleryDetails {
+  const nested = normalizeDetails(entry.details);
+  if (Object.keys(nested).length > 0) return nested;
+
+  const flatSource = entry as Record<string, unknown>;
+  const flat: Record<string, unknown> = {};
+  for (const [rawKey, rawValue] of Object.entries(flatSource)) {
+    const key = String(rawKey || '').trim();
+    if (!key) continue;
+    const keyLower = key.toLowerCase();
+    if (
+      keyLower === 'index' ||
+      keyLower === 'shotid' ||
+      keyLower === 'shot_id' ||
+      keyLower === 'title' ||
+      keyLower === 'title_header' ||
+      keyLower === 'titleheader' ||
+      keyLower === 'image_id' ||
+      keyLower === 'imageid' ||
+      keyLower === 'image_url' ||
+      keyLower === 'imageurl' ||
+      keyLower === 'image_file' ||
+      keyLower === 'palette_hex' ||
+      keyLower === 'palettehex' ||
+      keyLower === 'details' ||
+      keyLower === 'tag' ||
+      keyLower === 'height'
+    ) {
+      continue;
+    }
+    if (rawValue === null || rawValue === undefined || typeof rawValue === 'object') continue;
+    if (!/^[A-Z][A-Z0-9 /&().'_-]{1,80}$/.test(key)) continue;
+    flat[key] = rawValue;
+  }
+
+  return normalizeDetails(flat);
+}
+
 function parsePalette(value: unknown) {
   if (!Array.isArray(value)) return [];
   return value
@@ -218,17 +288,10 @@ function isRemoteHttpUrl(value: string) {
 }
 
 export default function AdminScreen() {
-  const { user, resetToAdminOnly } = useAuth();
+  const { user } = useAuth();
   const theme = useTheme();
 
-  const [tmdbId, setTmdbId] = useState('');
   const [adminApiKey, setAdminApiKey] = useState('');
-  const [title, setTitle] = useState('');
-  const [overview, setOverview] = useState('');
-  const [backdropPath, setBackdropPath] = useState('');
-  const [posterPath, setPosterPath] = useState('');
-  const [featuredMessage, setFeaturedMessage] = useState<string | null>(null);
-
   const rounded = useMemo(() => roundToNextFiveMinutes(), []);
   const [cinemaTitle, setCinemaTitle] = useState('');
   const [cinemaDesc, setCinemaDesc] = useState('');
@@ -242,7 +305,13 @@ export default function AdminScreen() {
   const [uploading, setUploading] = useState(false);
   const [latestCinemaInfo, setLatestCinemaInfo] = useState<string>('');
   const [pickedDurationSec, setPickedDurationSec] = useState<number | null>(null);
-  const [resetConfirm, setResetConfirm] = useState('');
+  const [pollQuestion, setPollQuestion] = useState('Choose next movie for Cinema');
+  const [pollTmdb1, setPollTmdb1] = useState('');
+  const [pollTmdb2, setPollTmdb2] = useState('');
+  const [pollTmdb3, setPollTmdb3] = useState('');
+  const [pollSubmitting, setPollSubmitting] = useState(false);
+  const [pollCurrentId, setPollCurrentId] = useState<number | null>(null);
+  const [pollMessage, setPollMessage] = useState<string | null>(null);
   const [galleryImageInputs, setGalleryImageInputs] = useState<string[]>([]);
   const [galleryJsonInput, setGalleryJsonInput] = useState('');
   const [galleryMessage, setGalleryMessage] = useState<string | null>(null);
@@ -274,17 +343,13 @@ export default function AdminScreen() {
 
   useEffect(() => {
     (async () => {
-      const featured = await getFeaturedMovie();
-      if (featured) {
-        setTmdbId(featured.tmdb_id ? String(featured.tmdb_id) : '');
-        setTitle(featured.title ?? '');
-        setOverview(featured.overview ?? '');
-        setBackdropPath(featured.backdrop_path ?? '');
-        setPosterPath(featured.poster_path ?? '');
-      }
       const latest = await getLatestCinemaEvent();
       if (latest) {
         setLatestCinemaInfo(`${latest.title} (${fmtShortIso(latest.start_at)})`);
+      }
+      const currentPoll = await getCurrentCinemaPoll();
+      if (currentPoll) {
+        setPollCurrentId(Number(currentPoll.id));
       }
     })();
   }, []);
@@ -299,6 +364,21 @@ export default function AdminScreen() {
     () => new Date(Date.parse(startIso) + estimatedDurationSec * 1000).toISOString(),
     [startIso, estimatedDurationSec]
   );
+  const dayOptions = useMemo(
+    () =>
+      Array.from({ length: 6 }, (_, offset) => {
+        const date = new Date();
+        date.setHours(0, 0, 0, 0);
+        date.setDate(date.getDate() + offset);
+        const day = String(date.getDate()).padStart(2, '0');
+        const month = String(date.getMonth() + 1).padStart(2, '0');
+        const weekday = date.toLocaleDateString(undefined, { weekday: 'short' });
+        const label =
+          offset === 0 ? `Today (${weekday} ${day}/${month})` : offset === 1 ? `Tomorrow (${weekday} ${day}/${month})` : `${weekday} ${day}/${month}`;
+        return { offset, label };
+      }),
+    []
+  );
 
   if (!isAdmin) {
     return (
@@ -308,34 +388,33 @@ export default function AdminScreen() {
     );
   }
 
-  const onFetchFeatured = async () => {
-    setFeaturedMessage(null);
-    const id = Number(tmdbId);
-    if (!id) {
-      setFeaturedMessage('Invalid TMDB ID.');
-      return;
-    }
-    try {
-      const movie = await getMovieById(id);
-      setTitle(movie.title ?? '');
-      setOverview(movie.overview ?? '');
-      setBackdropPath(movie.backdrop_path ?? '');
-      setPosterPath(movie.poster_path ?? '');
-    } catch (err) {
-      setFeaturedMessage(err instanceof Error ? err.message : 'TMDB error.');
-    }
+  const shiftStartHour = (delta: number) => {
+    setStartHour((prev) => {
+      const next = (prev + delta) % 24;
+      return next < 0 ? next + 24 : next;
+    });
   };
 
-  const onSaveFeatured = async () => {
-    setFeaturedMessage(null);
-    await setFeaturedMovie({
-      tmdbId: tmdbId ? Number(tmdbId) : null,
-      title: title || null,
-      overview: overview || null,
-      backdropPath: backdropPath || null,
-      posterPath: posterPath || null,
+  const shiftStartMinute = (deltaSteps: number) => {
+    setStartMinute((prevMinute) => {
+      let nextMinute = prevMinute + deltaSteps * 5;
+      let hourCarry = 0;
+      while (nextMinute >= 60) {
+        nextMinute -= 60;
+        hourCarry += 1;
+      }
+      while (nextMinute < 0) {
+        nextMinute += 60;
+        hourCarry -= 1;
+      }
+      if (hourCarry !== 0) {
+        setStartHour((prevHour) => {
+          const nextHour = (prevHour + hourCarry) % 24;
+          return nextHour < 0 ? nextHour + 24 : nextHour;
+        });
+      }
+      return nextMinute;
     });
-    setFeaturedMessage('Featured movie saved.');
   };
 
   const onPickVideo = async () => {
@@ -415,10 +494,23 @@ export default function AdminScreen() {
     }
     setGallerySubmitting(true);
     try {
-      const entries = parseJsonPayload(galleryJsonInput.trim());
+      const parsedEntries = parseJsonPayload(galleryJsonInput.trim());
       const selectedImages = galleryImageInputs
         .map((x) => String(x).trim())
         .filter(Boolean);
+      const entries =
+        parsedEntries.length === 1 && selectedImages.length > 1
+          ? selectedImages.map((_, idx) => ({
+              ...parsedEntries[0],
+              index: Number(parsedEntries[0].index ?? idx + 1),
+            }))
+          : parsedEntries;
+      if (selectedImages.length > 0 && selectedImages.length !== entries.length) {
+        setGalleryMessage(
+          `Image count (${selectedImages.length}) must match JSON items (${entries.length}).`
+        );
+        return;
+      }
       const uploadedSelectedImageUrls: string[] = [];
       if (selectedImages.length) {
         if (!cloudinaryReady) {
@@ -435,7 +527,10 @@ export default function AdminScreen() {
           if (isRemoteHttpUrl(uri)) {
             uploadedSelectedImageUrls.push(uri);
           } else {
-            const uploaded = await uploadImageToCloudinary(uri, { adminKey: cleanAdminKey || null });
+            const uploaded = await uploadImageToCloudinary(uri, {
+              adminKey: cleanAdminKey || null,
+              folder: 'movie-rec-gallery',
+            });
             uploadedSelectedImageUrls.push(uploaded.secureUrl);
           }
         }
@@ -445,15 +540,46 @@ export default function AdminScreen() {
 
       for (let idx = 0; idx < entries.length; idx += 1) {
         const entry = entries[idx];
-        const details = normalizeDetails(entry.details);
-        const palette = parsePalette(entry.palette_hex);
-        const titleHeader = String(entry.title_header ?? '').trim();
-        const title = titleHeader || String(entry.image_id ?? entry.shotid ?? entry.index ?? 'Frame').trim();
-        const imageFromJson = String(entry.image_url ?? '').trim();
+        const details = normalizeImportEntryDetails(entry);
+        const palette = parsePalette(
+          getImportEntryValue(entry, ['palette_hex', 'paletteHex', 'palette'])
+        );
+        const titleHeader = getImportEntryString(entry, ['title_header', 'titleHeader']);
+        const explicitTitle = getImportEntryString(entry, ['title', 'name', 'movie_title']);
+        const shotId = getImportEntryString(entry, ['shotid', 'shot_id', 'shotId']);
+        const imageId = getImportEntryString(entry, ['image_id', 'imageId']);
+        const imageFromJson = getImportEntryString(entry, [
+          'image_url',
+          'imageUrl',
+          'url',
+          'secure_url',
+        ]);
+        const detailTitle =
+          String(details.TITLE ?? '').trim() ||
+          String(details['MOVIE TITLE'] ?? '').trim() ||
+          String(details.MOVIE ?? '').trim();
+        const title =
+          explicitTitle ||
+          titleHeader ||
+          detailTitle ||
+          imageId ||
+          shotId ||
+          (Number.isFinite(Number(entry.index)) ? `Frame ${Number(entry.index)}` : '');
         const imageFromSelected =
           uploadedSelectedImageUrls[idx] ||
           (uploadedSelectedImageUrls.length === 1 ? uploadedSelectedImageUrls[0] : '');
-        const image = imageFromSelected || (isRemoteHttpUrl(imageFromJson) ? imageFromJson : '');
+        let image = imageFromSelected;
+        if (!image && isRemoteHttpUrl(imageFromJson) && hasBackendApi() && cloudinaryReady && cleanAdminKey) {
+          setGalleryMessage(`Uploading image ${idx + 1}/${entries.length} to Cloudinary...`);
+          const uploaded = await uploadImageToCloudinary(imageFromJson, {
+            adminKey: cleanAdminKey || null,
+            folder: 'movie-rec-gallery',
+          });
+          image = uploaded.secureUrl;
+        }
+        if (!image) {
+          image = isRemoteHttpUrl(imageFromJson) ? imageFromJson : '';
+        }
         if (!title || !image) continue;
 
         const detailsGenre = String(details.GENRE ?? '').split(',')[0] ?? '';
@@ -463,10 +589,10 @@ export default function AdminScreen() {
           image,
           tag,
           height: normalizeCardHeight(240),
-          shotId: String(entry.shotid ?? '').trim() || null,
+          shotId: shotId || null,
           titleHeader: titleHeader || null,
-          imageId: String(entry.image_id ?? '').trim() || null,
-          imageUrl: imageFromJson || null,
+          imageId: imageId || null,
+          imageUrl: image || imageFromJson || null,
           paletteHex: palette,
           details,
         });
@@ -497,8 +623,8 @@ export default function AdminScreen() {
       setGalleryPalettePreview([]);
       setGalleryImageInputs([]);
       setGalleryJsonInput('');
-    } catch {
-      setGalleryMessage('Could not clear gallery.');
+    } catch (err) {
+      setGalleryMessage(err instanceof Error ? err.message : 'Could not clear gallery.');
     }
   };
 
@@ -602,32 +728,87 @@ export default function AdminScreen() {
     }
   };
 
-  const onResetDb = async () => {
-    setCinemaMessage(null);
-    if (resetConfirm.trim().toUpperCase() !== 'RESET') {
-      setCinemaMessage('Type RESET to confirm full reset.');
+  const onPublishCinemaPoll = async () => {
+    setPollMessage(null);
+    if (!hasBackendApi()) {
+      setPollMessage('Cinema poll requires backend URL.');
       return;
     }
-    if (hasBackendApi() && !cleanAdminKey) {
-      setCinemaMessage('Admin API key is required for backend reset.');
+    if (!cleanAdminKey) {
+      setPollMessage('Admin API key is required for cinema poll.');
       return;
     }
+
+    const ids = [pollTmdb1, pollTmdb2, pollTmdb3]
+      .map((value) => Number(value))
+      .filter((value) => Number.isFinite(value) && value > 0)
+      .map((value) => Number(value));
+    if (ids.length !== 3) {
+      setPollMessage('Poll needs 3 valid TMDB IDs.');
+      return;
+    }
+    const uniqueIds = new Set(ids);
+    if (uniqueIds.size !== 3) {
+      setPollMessage('Poll TMDB IDs must be different.');
+      return;
+    }
+
     try {
-      await resetToAdminOnly();
-      if (hasBackendApi()) {
-        await backendResetAllData({ adminKey: cleanAdminKey || null });
-      }
-      setResetConfirm('');
-      setCinemaMessage('Full reset done. Only admin is kept. Cinema/comments/social data cleared.');
-      setLatestCinemaInfo('');
+      setPollSubmitting(true);
+      const movies = await Promise.all(ids.map((tmdbId) => getMovieById(tmdbId)));
+      const options = movies.map((movie, index) => {
+        const poster = posterUrl(movie.poster_path, 'w500');
+        if (!poster) {
+          throw new Error(`Movie "${movie.title}" has no poster.`);
+        }
+        return {
+          id: `opt_${index + 1}`,
+          title: String(movie.title || `Movie ${index + 1}`).trim(),
+          poster_url: poster,
+          tmdb_id: Number(movie.id),
+        };
+      });
+      const poll = await createCinemaPoll(
+        {
+          question: pollQuestion.trim() || 'Choose next movie',
+          options,
+        },
+        { adminKey: cleanAdminKey || null }
+      );
+      setPollCurrentId(Number(poll.id));
+      setPollMessage('Cinema poll published.');
     } catch (err) {
-      setCinemaMessage(err instanceof Error ? err.message : 'Reset failed.');
+      setPollMessage(err instanceof Error ? err.message : 'Could not publish cinema poll.');
+    } finally {
+      setPollSubmitting(false);
     }
   };
 
-  const dayOptions = ['Today', 'Tomorrow', 'In 2 days', 'In 3 days', 'In 4 days', 'In 5 days'];
-  const hourOptions = Array.from({ length: 24 }, (_, i) => i);
-  const minuteOptions = Array.from({ length: 12 }, (_, i) => i * 5);
+  const onCloseCinemaPoll = async () => {
+    setPollMessage(null);
+    if (!hasBackendApi()) {
+      setPollMessage('Cinema poll requires backend URL.');
+      return;
+    }
+    if (!cleanAdminKey) {
+      setPollMessage('Admin API key is required for closing cinema poll.');
+      return;
+    }
+    if (!pollCurrentId) {
+      setPollMessage('No active poll id in this session. Create a poll first.');
+      return;
+    }
+    try {
+      setPollSubmitting(true);
+      await closeCinemaPoll(pollCurrentId, { adminKey: cleanAdminKey || null });
+      setPollCurrentId(null);
+      setPollMessage('Cinema poll closed.');
+    } catch (err) {
+      setPollMessage(err instanceof Error ? err.message : 'Could not close cinema poll.');
+    } finally {
+      setPollSubmitting(false);
+    }
+  };
 
   return (
     <ScrollView style={[styles.container, { backgroundColor: theme.background }]} contentContainerStyle={styles.scroll}>
@@ -636,9 +817,23 @@ export default function AdminScreen() {
         <Text style={styles.backText}>Go back</Text>
       </Pressable>
 
+      <View style={styles.pageHeader}>
+        <Text style={styles.pageEyebrow}>Control Center</Text>
+        <Text style={styles.pageTitle}>Admin Dashboard</Text>
+        <Text style={styles.pageHint}>Minimal setup for cinema scheduling, polls and gallery import.</Text>
+        <View style={styles.pageHeaderStatuses}>
+          <View style={[styles.statusPill, hasBackendApi() ? styles.statusOk : styles.statusWarn]}>
+            <Text style={styles.statusText}>Backend {hasBackendApi() ? 'Connected' : 'Local only'}</Text>
+          </View>
+          <View style={[styles.statusPill, cloudinaryReady ? styles.statusOk : styles.statusWarn]}>
+            <Text style={styles.statusText}>Cloudinary {cloudinaryReady ? 'Ready' : 'Missing config'}</Text>
+          </View>
+        </View>
+      </View>
+
       <View style={styles.card}>
-        <Text style={styles.title}>Admin Panel</Text>
-        <Text style={styles.subtitle}>Featured movie editor.</Text>
+        <Text style={styles.cardTitle}>Admin Access</Text>
+        <Text style={styles.subtitle}>Runtime key used for protected backend actions.</Text>
         <Text style={styles.label}>Admin API key (runtime only)</Text>
         <TextInput
           style={styles.input}
@@ -650,45 +845,21 @@ export default function AdminScreen() {
           placeholder="Paste Render ADMIN_API_KEY"
           placeholderTextColor="rgba(255,255,255,0.55)"
         />
-
-        <Text style={styles.label}>TMDB ID</Text>
-        <TextInput
-          style={styles.input}
-          value={tmdbId}
-          onChangeText={setTmdbId}
-          placeholder="ex: 603692"
-          placeholderTextColor="rgba(255,255,255,0.55)"
-          keyboardType="number-pad"
-        />
-
-        <Pressable onPress={onFetchFeatured} style={styles.fetchBtn}>
-          <Text style={styles.fetchText}>Fetch from TMDB</Text>
-        </Pressable>
-
-        <Text style={styles.label}>Title</Text>
-        <TextInput style={styles.input} value={title} onChangeText={setTitle} />
-
-        <Text style={styles.label}>Overview</Text>
-        <TextInput style={[styles.input, styles.textarea]} value={overview} onChangeText={setOverview} multiline />
-
-        <Text style={styles.label}>Backdrop Path</Text>
-        <TextInput style={styles.input} value={backdropPath} onChangeText={setBackdropPath} />
-
-        <Text style={styles.label}>Poster Path</Text>
-        <TextInput style={styles.input} value={posterPath} onChangeText={setPosterPath} />
-
-        {featuredMessage ? <Text style={styles.message}>{featuredMessage}</Text> : null}
-
-        <Pressable onPress={onSaveFeatured} style={styles.saveBtn}>
-          <Text style={styles.saveText}>Save featured</Text>
-        </Pressable>
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.title}>Cinema Scheduler</Text>
+        <Text style={styles.cardTitle}>Cinema Scheduler</Text>
         <Text style={styles.subtitle}>Publish one live cinema event with MP4 + chat room.</Text>
-        <Text style={styles.mini}>Latest event: {latestCinemaInfo || 'none'}</Text>
-        <Text style={styles.mini}>Upload service: {cloudinaryReady ? 'configured' : 'missing config'}</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Latest event</Text>
+            <Text style={styles.infoValue}>{latestCinemaInfo || 'none'}</Text>
+          </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Upload service</Text>
+            <Text style={styles.infoValue}>{cloudinaryReady ? 'configured' : 'missing config'}</Text>
+          </View>
+        </View>
 
         <Text style={styles.label}>TMDB ID (required)</Text>
         <TextInput
@@ -723,36 +894,43 @@ export default function AdminScreen() {
         />
 
         <Text style={styles.label}>Start time</Text>
-        <View style={styles.pickerRow}>
-          <View style={styles.pickerBoxLarge}>
-            <Picker
-              selectedValue={startDayOffset}
-              onValueChange={(v) => setStartDayOffset(Number(v))}
-              style={styles.picker}>
-              {dayOptions.map((label, idx) => (
-                <Picker.Item key={label} label={label} value={idx} color="#fff" />
-              ))}
-            </Picker>
+        <View style={styles.dayChipWrap}>
+          {dayOptions.map((option) => (
+            <Pressable
+              key={option.offset}
+              style={[styles.dayChip, startDayOffset === option.offset ? styles.dayChipActive : null]}
+              onPress={() => setStartDayOffset(option.offset)}>
+              <Text style={[styles.dayChipText, startDayOffset === option.offset ? styles.dayChipTextActive : null]}>
+                {option.label}
+              </Text>
+            </Pressable>
+          ))}
+        </View>
+
+        <View style={styles.timeRow}>
+          <View style={styles.timeControl}>
+            <Text style={styles.timeLabel}>Hour</Text>
+            <View style={styles.timeStepper}>
+              <Pressable onPress={() => shiftStartHour(-1)} style={styles.timeBtn}>
+                <Text style={styles.timeBtnText}>-</Text>
+              </Pressable>
+              <Text style={styles.timeValue}>{String(startHour).padStart(2, '0')}</Text>
+              <Pressable onPress={() => shiftStartHour(1)} style={styles.timeBtn}>
+                <Text style={styles.timeBtnText}>+</Text>
+              </Pressable>
+            </View>
           </View>
-          <View style={styles.pickerBoxSmall}>
-            <Picker
-              selectedValue={startHour}
-              onValueChange={(v) => setStartHour(Number(v))}
-              style={styles.picker}>
-              {hourOptions.map((h) => (
-                <Picker.Item key={h} label={String(h).padStart(2, '0')} value={h} color="#fff" />
-              ))}
-            </Picker>
-          </View>
-          <View style={styles.pickerBoxSmall}>
-            <Picker
-              selectedValue={startMinute}
-              onValueChange={(v) => setStartMinute(Number(v))}
-              style={styles.picker}>
-              {minuteOptions.map((m) => (
-                <Picker.Item key={m} label={String(m).padStart(2, '0')} value={m} color="#fff" />
-              ))}
-            </Picker>
+          <View style={styles.timeControl}>
+            <Text style={styles.timeLabel}>Minute</Text>
+            <View style={styles.timeStepper}>
+              <Pressable onPress={() => shiftStartMinute(-1)} style={styles.timeBtn}>
+                <Text style={styles.timeBtnText}>-</Text>
+              </Pressable>
+              <Text style={styles.timeValue}>{String(startMinute).padStart(2, '0')}</Text>
+              <Pressable onPress={() => shiftStartMinute(1)} style={styles.timeBtn}>
+                <Text style={styles.timeBtnText}>+</Text>
+              </Pressable>
+            </View>
           </View>
         </View>
 
@@ -791,7 +969,60 @@ export default function AdminScreen() {
       </View>
 
       <View style={styles.card}>
-        <Text style={styles.title}>Gallery Import</Text>
+        <Text style={styles.cardTitle}>Cinema Poll</Text>
+        <Text style={styles.subtitle}>Run poll separately from scheduler.</Text>
+        <View style={styles.infoRow}>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Current poll</Text>
+            <Text style={styles.infoValue}>{pollCurrentId ? `#${pollCurrentId}` : 'none'}</Text>
+          </View>
+        </View>
+        <Text style={styles.label}>Poll question</Text>
+        <TextInput
+          style={styles.input}
+          value={pollQuestion}
+          onChangeText={setPollQuestion}
+          placeholder="Choose next movie for Cinema"
+          placeholderTextColor="rgba(255,255,255,0.55)"
+        />
+        <Text style={styles.label}>Poll option TMDB IDs (3 movies)</Text>
+        <TextInput
+          style={styles.input}
+          value={pollTmdb1}
+          onChangeText={setPollTmdb1}
+          placeholder="Option 1 TMDB ID"
+          placeholderTextColor="rgba(255,255,255,0.55)"
+          keyboardType="number-pad"
+        />
+        <TextInput
+          style={styles.input}
+          value={pollTmdb2}
+          onChangeText={setPollTmdb2}
+          placeholder="Option 2 TMDB ID"
+          placeholderTextColor="rgba(255,255,255,0.55)"
+          keyboardType="number-pad"
+        />
+        <TextInput
+          style={styles.input}
+          value={pollTmdb3}
+          onChangeText={setPollTmdb3}
+          placeholder="Option 3 TMDB ID"
+          placeholderTextColor="rgba(255,255,255,0.55)"
+          keyboardType="number-pad"
+        />
+        <View style={styles.inlineRow}>
+          <Pressable onPress={onPublishCinemaPoll} style={[styles.fetchBtn, styles.inlineBtn]} disabled={pollSubmitting}>
+            <Text style={styles.fetchText}>{pollSubmitting ? 'Publishing poll...' : 'Publish poll'}</Text>
+          </Pressable>
+          <Pressable onPress={onCloseCinemaPoll} style={[styles.resetBtn, styles.inlineBtn]} disabled={pollSubmitting}>
+            <Text style={styles.resetText}>Close poll</Text>
+          </Pressable>
+        </View>
+        {pollMessage ? <Text style={styles.message}>{pollMessage}</Text> : null}
+      </View>
+
+      <View style={styles.card}>
+        <Text style={styles.cardTitle}>Gallery Import</Text>
         <Text style={styles.subtitle}>Upload image + paste JSON. Title/details/palette are extracted automatically.</Text>
 
         <Text style={styles.label}>Images</Text>
@@ -828,22 +1059,7 @@ export default function AdminScreen() {
           <Text style={styles.saveText}>{gallerySubmitting ? 'Adding...' : 'Add to gallery'}</Text>
         </Pressable>
         <Pressable onPress={onClearGallery} style={styles.resetBtn}>
-          <Text style={styles.saveText}>Clear gallery</Text>
-        </Pressable>
-      </View>
-
-      <View style={styles.card}>
-        <Text style={styles.title}>Danger Zone</Text>
-        <Text style={styles.subtitle}>Full reset: delete all users and data, keep only admin.</Text>
-        <TextInput
-          style={styles.input}
-          value={resetConfirm}
-          onChangeText={setResetConfirm}
-          placeholder='Type "RESET"'
-          placeholderTextColor="rgba(255,255,255,0.55)"
-        />
-        <Pressable onPress={onResetDb} style={styles.resetBtn}>
-          <Text style={styles.saveText}>Reset DB (keep admin)</Text>
+          <Text style={styles.resetText}>Clear gallery</Text>
         </Pressable>
       </View>
     </ScrollView>
@@ -853,11 +1069,66 @@ export default function AdminScreen() {
 const styles = StyleSheet.create({
   container: {
     flex: 1,
-    padding: Spacing.four,
+    paddingHorizontal: Spacing.four,
   },
   scroll: {
-    paddingBottom: 100,
+    alignSelf: 'center',
+    width: '100%',
+    maxWidth: 980,
+    paddingTop: Spacing.three,
+    paddingBottom: 120,
     gap: Spacing.four,
+  },
+  pageHeader: {
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    padding: Spacing.three,
+    gap: 6,
+  },
+  pageEyebrow: {
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    letterSpacing: 1.2,
+    color: 'rgba(255,255,255,0.55)',
+    textTransform: 'uppercase',
+  },
+  pageTitle: {
+    fontFamily: Fonts.serif,
+    fontSize: 26,
+    color: '#fff',
+  },
+  pageHint: {
+    fontFamily: Fonts.serif,
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.72)',
+  },
+  pageHeaderStatuses: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 4,
+  },
+  statusPill: {
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  statusOk: {
+    borderColor: 'rgba(34,197,94,0.45)',
+    backgroundColor: 'rgba(34,197,94,0.15)',
+  },
+  statusWarn: {
+    borderColor: 'rgba(245,158,11,0.45)',
+    backgroundColor: 'rgba(245,158,11,0.14)',
+  },
+  statusText: {
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    color: '#fff',
   },
   backBtn: {
     flexDirection: 'row',
@@ -865,22 +1136,22 @@ const styles = StyleSheet.create({
     alignSelf: 'flex-start',
     gap: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.14)',
     borderRadius: 999,
     paddingHorizontal: 12,
-    paddingVertical: 8,
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 7,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
   backText: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
   },
   card: {
-    backgroundColor: '#101215',
+    backgroundColor: '#0f1114',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    borderRadius: Spacing.four,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
     padding: Spacing.four,
   },
   title: {
@@ -888,11 +1159,20 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.serif,
     color: '#fff',
   },
+  cardTitle: {
+    fontSize: 18,
+    fontFamily: Fonts.mono,
+    color: '#fff',
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
   subtitle: {
     marginTop: Spacing.one,
     marginBottom: Spacing.three,
     fontFamily: Fonts.serif,
-    color: 'rgba(255,255,255,0.74)',
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.68)',
   },
   mini: {
     fontFamily: Fonts.mono,
@@ -900,46 +1180,127 @@ const styles = StyleSheet.create({
     marginBottom: 4,
     color: 'rgba(255,255,255,0.66)',
   },
+  infoRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginBottom: Spacing.three,
+  },
+  infoBox: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.03)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+  },
+  infoLabel: {
+    fontFamily: Fonts.mono,
+    fontSize: 9,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+    color: 'rgba(255,255,255,0.58)',
+    marginBottom: 3,
+  },
+  infoValue: {
+    fontFamily: Fonts.serif,
+    fontSize: 12,
+    color: '#fff',
+  },
   label: {
     fontFamily: Fonts.mono,
-    fontSize: 11,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
     marginBottom: Spacing.one,
-    color: 'rgba(255,255,255,0.66)',
+    color: 'rgba(255,255,255,0.56)',
   },
   input: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.12)',
+    backgroundColor: 'rgba(255,255,255,0.035)',
     color: '#fff',
-    borderRadius: Spacing.two,
+    borderRadius: 12,
     paddingHorizontal: Spacing.two,
-    paddingVertical: Spacing.two,
-    marginBottom: Spacing.three,
+    paddingVertical: 11,
+    marginBottom: Spacing.two + 2,
     fontFamily: Fonts.serif,
+    fontSize: 14,
   },
-  pickerRow: {
+  dayChipWrap: {
     flexDirection: 'row',
+    flexWrap: 'wrap',
     gap: 8,
-    marginBottom: 10,
+    marginBottom: Spacing.two + 2,
   },
-  pickerBoxLarge: {
-    flex: 1.4,
+  dayChip: {
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
+    borderColor: 'rgba(255,255,255,0.16)',
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 7,
+    backgroundColor: 'rgba(255,255,255,0.04)',
   },
-  pickerBoxSmall: {
-    flex: 0.7,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    borderRadius: 10,
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    overflow: 'hidden',
+  dayChipActive: {
+    borderColor: 'rgba(96,165,250,0.65)',
+    backgroundColor: 'rgba(96,165,250,0.2)',
   },
-  picker: {
+  dayChipText: {
+    color: 'rgba(255,255,255,0.78)',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+  },
+  dayChipTextActive: {
     color: '#fff',
+  },
+  timeRow: {
+    flexDirection: 'row',
+    gap: 10,
+    marginBottom: 12,
+  },
+  timeControl: {
+    flex: 1,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 12,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    padding: 10,
+    gap: 8,
+  },
+  timeLabel: {
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    color: 'rgba(255,255,255,0.56)',
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+  },
+  timeStepper: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  timeBtn: {
+    width: 34,
+    height: 34,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  timeBtnText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 16,
+    lineHeight: 18,
+  },
+  timeValue: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 19,
+    minWidth: 38,
+    textAlign: 'center',
   },
   textarea: {
     height: 90,
@@ -970,36 +1331,73 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 9,
   },
+  inlineRow: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: Spacing.two,
+    marginBottom: Spacing.one,
+  },
+  inlineBtn: {
+    flex: 1,
+  },
   fetchBtn: {
     alignItems: 'center',
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.two,
-    backgroundColor: '#C1121F',
-    marginBottom: Spacing.three,
+    justifyContent: 'center',
+    minHeight: 44,
+    paddingVertical: Spacing.one + 2,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    marginBottom: Spacing.two + 2,
   },
   fetchText: {
     color: '#fff',
     fontFamily: Fonts.mono,
+    fontSize: 12,
   },
   message: {
-    marginBottom: Spacing.two,
+    marginBottom: Spacing.two + 2,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    borderRadius: 10,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
     fontFamily: Fonts.mono,
+    fontSize: 11,
     color: '#fff',
   },
   saveBtn: {
-    backgroundColor: '#111',
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.two,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: '#f2f4f8',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: Spacing.one + 2,
+    borderRadius: 12,
     alignItems: 'center',
   },
   saveText: {
+    color: '#0c0f13',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
+  },
+  resetText: {
     color: '#fff',
     fontFamily: Fonts.mono,
+    fontSize: 12,
+    fontWeight: '700',
   },
   resetBtn: {
-    backgroundColor: '#8B0A16',
-    paddingVertical: Spacing.two,
-    borderRadius: Spacing.two,
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.42)',
+    backgroundColor: 'rgba(239,68,68,0.18)',
+    minHeight: 44,
+    justifyContent: 'center',
+    paddingVertical: Spacing.one + 2,
+    borderRadius: 12,
     alignItems: 'center',
   },
 });

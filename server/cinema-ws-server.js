@@ -2179,6 +2179,18 @@ function cloudinaryResourceToGalleryItem(resource, usedIds) {
 
   const ctxRaw = resource?.context?.custom;
   const ctx = ctxRaw && typeof ctxRaw === 'object' ? ctxRaw : {};
+  const hasGalleryContext =
+    !!normalizeText(ctx.g_title, 120) ||
+    !!normalizeText(ctx.g_tag, 60) ||
+    !!normalizeText(ctx.g_shot_id, 120) ||
+    !!normalizeText(ctx.g_image_id, 120) ||
+    !!normalizeText(ctx.g_title_header, 120) ||
+    !!String(ctx.g_palette_hex || '').trim() ||
+    !!String(ctx.g_details || '').trim();
+  if (!hasGalleryContext) {
+    // Skip orphan Cloudinary images that were uploaded without gallery metadata.
+    return null;
+  }
   const fallbackTitle = normalizeText(publicId.split('/').pop()?.replace(/[-_]+/g, ' '), 120) || 'Gallery frame';
   const title = normalizeText(ctx.g_title, 120) || fallbackTitle;
   const tag = normalizeGalleryTag(ctx.g_tag);
@@ -3474,13 +3486,23 @@ const server = http.createServer(async (req, res) => {
       if (!targetItem) {
         return json(res, 404, { error: 'Gallery item not found.' });
       }
-      const cleanup = await cleanupGalleryItemCloudinaryMedia(targetItem);
+      let cleanup = { deleted_images: 0 };
+      let cleanupError = null;
+      try {
+        cleanup = await cleanupGalleryItemCloudinaryMedia(targetItem);
+      } catch (err) {
+        cleanupError = err instanceof Error ? err.message : String(err);
+        console.warn(
+          `Gallery media cleanup failed for item ${galleryId}:`,
+          cleanupError
+        );
+      }
       store.galleryItems = store.galleryItems.filter((item) => Number(item.id) !== galleryId);
       store.galleryLikes = store.galleryLikes.filter((row) => Number(row.gallery_id) !== galleryId);
       store.galleryFavorites = store.galleryFavorites.filter((row) => Number(row.gallery_id) !== galleryId);
       store.galleryComments = store.galleryComments.filter((row) => Number(row.gallery_id) !== galleryId);
       saveStore(store);
-      return json(res, 200, { ok: true, cleanup });
+      return json(res, 200, { ok: true, cleanup, cleanup_error: cleanupError });
     }
 
     if (method === 'POST' && /^\/api\/gallery\/\d+\/toggle-like$/.test(pathname)) {
