@@ -216,6 +216,26 @@ function titleKey(value: string | null | undefined) {
     .trim();
 }
 
+function dedupeMappedGalleryRows<T extends { title?: string | null; imageId?: string | null; shotId?: string | null }>(
+  rows: T[]
+) {
+  const seen = new Set<string>();
+  const seenTitle = new Set<string>();
+  return rows.filter((row) => {
+    const key = dedupeKey({
+      imageId: row.imageId,
+      shotId: row.shotId,
+      title: row.title ?? '',
+    });
+    const tKey = titleKey(row.title);
+    if (seen.has(key)) return false;
+    if (seenTitle.has(tKey)) return false;
+    seen.add(key);
+    seenTitle.add(tKey);
+    return true;
+  });
+}
+
 function parsePaletteJson(raw: string | null | undefined) {
   if (!raw) return [];
   try {
@@ -278,9 +298,37 @@ function parseDetailsJson(raw: string | null | undefined): GalleryDetails {
 }
 
 let ensureSeededOncePromise: Promise<void> | null = null;
+const GALLERY_SEED_DISABLED_FLAG_KEY = 'gallery_seed_disabled';
+
+async function ensureGalleryFlagsTable() {
+  const db = await getDb();
+  await db.execAsync(`
+    CREATE TABLE IF NOT EXISTS app_flags (
+      key TEXT PRIMARY KEY,
+      value TEXT NOT NULL
+    );
+  `);
+  return db;
+}
+
+async function isGallerySeedDisabledNative() {
+  const db = await ensureGalleryFlagsTable();
+  const row = await db.getFirstAsync<{ value: string }>('SELECT value FROM app_flags WHERE key = ?', GALLERY_SEED_DISABLED_FLAG_KEY);
+  return String(row?.value || '').trim() === '1';
+}
+
+async function setGallerySeedDisabledNative(disabled: boolean) {
+  const db = await ensureGalleryFlagsTable();
+  await db.runAsync(
+    'INSERT OR REPLACE INTO app_flags (key, value) VALUES (?, ?)',
+    GALLERY_SEED_DISABLED_FLAG_KEY,
+    disabled ? '1' : '0'
+  );
+}
 
 async function ensureSeeded() {
   const db = await getDb();
+  const seedDisabled = await isGallerySeedDisabledNative();
   const seedByTitle = new Map(SEED_ITEMS.map((item) => [titleKey(item.title), item]));
   const existingRows = await db.getAllAsync<{
     id: number;
@@ -379,6 +427,8 @@ async function ensureSeeded() {
       )
   );
 
+  if (seedDisabled) return;
+
   for (const item of SEED_ITEMS) {
     const key = dedupeKey(item);
     if (existingKeys.has(key)) continue;
@@ -427,8 +477,8 @@ export async function getGalleryItems(opts?: { userId?: number; query?: string }
       `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`
     );
     if (Array.isArray(payload?.items)) {
-      const remoteItems = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
-      if (remoteItems.length > 0) return remoteItems;
+      const mapped = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
+      return dedupeMappedGalleryRows(mapped);
     }
   }
 
@@ -698,7 +748,7 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
     `/api/users/${encodeURIComponent(String(userId))}/gallery-favorites`
   );
   if (Array.isArray(remote?.items)) {
-    return remote.items.map(mapRemoteGalleryItem);
+    return dedupeMappedGalleryRows(remote.items.map(mapRemoteGalleryItem));
   }
 
   const db = await getDb();
@@ -750,18 +800,29 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
 }
 
 export async function clearGalleryAll() {
+  let remoteError: Error | null = null;
   if (hasBackendApi()) {
     const remoteList = await requestBackendJson<{ items?: RemoteGalleryItem[] }>('/api/gallery');
     if (!Array.isArray(remoteList?.items)) {
-      throw new Error('Remote gallery list failed.');
-    }
-    for (const item of remoteList.items) {
-      const remoteDelete = await requestBackendJson<{ ok?: boolean }>(
-        `/api/gallery/${encodeURIComponent(String(Number(item.id)))}`,
-        { method: 'DELETE' }
-      );
-      if (!remoteDelete?.ok) {
-        throw new Error(`Remote gallery delete failed for id ${item.id}.`);
+      remoteError = new Error('Remote gallery list failed.');
+    } else {
+      const failedIds: Array<string | number> = [];
+      for (const item of remoteList.items) {
+        const itemId = Number(item.id);
+        if (!Number.isFinite(itemId) || itemId <= 0) {
+          failedIds.push(String(item.id));
+          continue;
+        }
+        const remoteDelete = await requestBackendJson<{ ok?: boolean }>(
+          `/api/gallery/${encodeURIComponent(String(itemId))}`,
+          { method: 'DELETE' }
+        );
+        if (!remoteDelete?.ok) {
+          failedIds.push(item.id);
+        }
+      }
+      if (failedIds.length > 0) {
+        remoteError = new Error(`Remote gallery delete failed for id(s): ${failedIds.join(', ')}`);
       }
     }
   }
@@ -773,10 +834,13 @@ export async function clearGalleryAll() {
     DELETE FROM gallery_favorites;
     DELETE FROM gallery_items;
   `);
+  await setGallerySeedDisabledNative(true);
   ensureSeededOncePromise = null;
+  if (remoteError) throw remoteError;
 }
 
 export async function restoreGallerySeed() {
+  await setGallerySeedDisabledNative(false);
   ensureSeededOncePromise = null;
   await ensureSeededOnce();
 }

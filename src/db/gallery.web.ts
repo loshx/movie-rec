@@ -283,6 +283,48 @@ function mapRemoteGalleryComment(row: RemoteGalleryComment): GalleryComment {
   };
 }
 
+function remoteTitleKey(value: string | null | undefined) {
+  return String(value ?? '')
+    .toLowerCase()
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+function remoteDedupeKey(item: {
+  title?: string | null;
+  imageId?: string | null;
+  shotId?: string | null;
+  imageUrl?: string | null;
+  image?: string | null;
+}) {
+  const imageId = String(item.imageId ?? '').trim().toLowerCase();
+  const shotId = String(item.shotId ?? '').trim().toLowerCase();
+  if (imageId || shotId) return `${imageId}::${shotId}`;
+  const imageUrl = String(item.imageUrl ?? item.image ?? '').trim().toLowerCase();
+  if (imageUrl) return `img:${imageUrl}`;
+  return `title:${remoteTitleKey(item.title)}`;
+}
+
+function dedupeMappedGalleryRows<T extends {
+  title?: string | null;
+  imageId?: string | null;
+  shotId?: string | null;
+  imageUrl?: string | null;
+  image?: string | null;
+}>(rows: T[]) {
+  const seen = new Set<string>();
+  const seenTitle = new Set<string>();
+  return rows.filter((row) => {
+    const key = remoteDedupeKey(row);
+    const title = remoteTitleKey(row.title);
+    if (seen.has(key)) return false;
+    if (seenTitle.has(title)) return false;
+    seen.add(key);
+    seenTitle.add(title);
+    return true;
+  });
+}
+
 function seedKey(item: { imageId?: string | null; shotId?: string | null; title: string }) {
   const imageId = String(item.imageId ?? '').trim().toLowerCase();
   const shotId = String(item.shotId ?? '').trim().toLowerCase();
@@ -377,8 +419,8 @@ export async function getGalleryItems(opts?: { userId?: number; query?: string }
       `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`
     );
     if (Array.isArray(payload?.items)) {
-      const remoteItems = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
-      if (remoteItems.length > 0) return remoteItems;
+      const mapped = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
+      return dedupeMappedGalleryRows(mapped);
     }
   }
 
@@ -580,7 +622,7 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
     `/api/users/${encodeURIComponent(String(userId))}/gallery-favorites`
   );
   if (Array.isArray(remote?.items)) {
-    return remote.items.map(mapRemoteGalleryItem);
+    return dedupeMappedGalleryRows(remote.items.map(mapRemoteGalleryItem));
   }
 
   const ids = new Set(state.favorites.filter((x) => x.userId === userId).map((x) => x.galleryId));
@@ -588,18 +630,29 @@ export async function getUserFavoriteGallery(userId: number): Promise<GalleryIte
 }
 
 export async function clearGalleryAll() {
+  let remoteError: Error | null = null;
   if (hasBackendApi()) {
     const remoteList = await requestBackendJson<{ items?: RemoteGalleryItem[] }>('/api/gallery');
     if (!Array.isArray(remoteList?.items)) {
-      throw new Error('Remote gallery list failed.');
-    }
-    for (const item of remoteList.items) {
-      const remoteDelete = await requestBackendJson<{ ok?: boolean }>(
-        `/api/gallery/${encodeURIComponent(String(Number(item.id)))}`,
-        { method: 'DELETE' }
-      );
-      if (!remoteDelete?.ok) {
-        throw new Error(`Remote gallery delete failed for id ${item.id}.`);
+      remoteError = new Error('Remote gallery list failed.');
+    } else {
+      const failedIds: Array<string | number> = [];
+      for (const item of remoteList.items) {
+        const itemId = Number(item.id);
+        if (!Number.isFinite(itemId) || itemId <= 0) {
+          failedIds.push(String(item.id));
+          continue;
+        }
+        const remoteDelete = await requestBackendJson<{ ok?: boolean }>(
+          `/api/gallery/${encodeURIComponent(String(itemId))}`,
+          { method: 'DELETE' }
+        );
+        if (!remoteDelete?.ok) {
+          failedIds.push(item.id);
+        }
+      }
+      if (failedIds.length > 0) {
+        remoteError = new Error(`Remote gallery delete failed for id(s): ${failedIds.join(', ')}`);
       }
     }
   }
@@ -615,6 +668,7 @@ export async function clearGalleryAll() {
   state.idSeq = 1;
   state.commentIdSeq = 1;
   saveState(state);
+  if (remoteError) throw remoteError;
 }
 
 export async function restoreGallerySeed() {
