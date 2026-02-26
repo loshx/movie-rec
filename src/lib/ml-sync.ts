@@ -6,7 +6,12 @@ import {
   getUserWatchlist,
   getUserWatched,
 } from '@/db/user-movies';
-import { hasMlApi, ingestMlInteractionsBatch, MlInteractionEvent } from '@/lib/ml-recommendations';
+import {
+  hasMlApi,
+  ingestMlInteractionsBatch,
+  MlInteractionEvent,
+  replaceMlUserInteractions,
+} from '@/lib/ml-recommendations';
 import { getPersonCombinedCredits } from '@/lib/tmdb';
 
 function pushIf<T>(arr: T[], value: T | null | undefined) {
@@ -139,5 +144,9 @@ export async function syncUserHistoryToMl(userId: number) {
     if (!dedup.has(key)) dedup.set(key, item);
   }
 
-  await ingestMlInteractionsBatch(Array.from(dedup.values()));
+  const finalPayload = Array.from(dedup.values());
+  const replaced = await replaceMlUserInteractions(userId, finalPayload);
+  if (!replaced) {
+    await ingestMlInteractionsBatch(finalPayload);
+  }
 }

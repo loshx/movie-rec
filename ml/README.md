@@ -14,10 +14,13 @@ Table: `user_interactions`
 - `user_id` (int)
 - `tmdb_id` (int)
 - `media_type` (`movie` or `tv`)
-- `event_type` (`watchlist`, `watched`, `favorite`, `rating`)
 - `event_type` (`watchlist`, `watched`, `favorite`, `rating`, `favorite_actor`)
-- `event_value` (float, only used for ratings)
+- `event_value` (float)
 - `occurred_at` (timestamp)
+
+Notes:
+- For binary events (`watchlist`, `watched`, `favorite`), use `event_value=1` for ON and `event_value=0` for OFF.
+- Training keeps only the latest event state per `(user_id, tmdb_id, event_type)` and applies a mild recency decay.
 
 Use `ml/schema.sql` to create tables in PostgreSQL.
 
@@ -71,3 +74,13 @@ In `app.json` set:
 ```
 
 If URL is empty or API is down, the app automatically falls back to the existing non-ML logic.
+
+## 7) Full user state sync (recommended)
+
+Replace all ML interactions for one user with the current app snapshot:
+
+```bash
+curl -X POST "http://localhost:8008/ingest/replace-user" ^
+  -H "Content-Type: application/json" ^
+  -d "{\"user_id\":1,\"interactions\":[{\"user_id\":1,\"tmdb_id\":550,\"media_type\":\"movie\",\"event_type\":\"favorite\",\"event_value\":1}]}"
+```

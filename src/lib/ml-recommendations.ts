@@ -1,4 +1,5 @@
 import Constants from 'expo-constants';
+import { resolveBackendUserId } from './backend-session';
 
 type MlRecoItem = {
   tmdb_id: number;
@@ -43,22 +44,55 @@ export type MlInteractionEvent = {
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_ML_API_URL?: string;
 };
+const ML_REQUEST_TIMEOUT_MS = 4500;
 
-const BASE_URL = extra.EXPO_PUBLIC_ML_API_URL?.trim() || '';
+function mlBaseUrl() {
+  return (process.env.EXPO_PUBLIC_ML_API_URL ?? extra.EXPO_PUBLIC_ML_API_URL ?? '')
+    .trim()
+    .replace(/\/+$/, '');
+}
+
+async function fetchWithTimeout(url: string, init?: RequestInit) {
+  const controller = init?.signal ? null : new AbortController();
+  const timeout = controller ? setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS) : null;
+  try {
+    return await fetch(url, {
+      ...(init ?? {}),
+      signal: init?.signal ?? controller?.signal,
+    });
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
+}
+
+function isMixedContentBlockedOnWeb() {
+  const baseUrl = mlBaseUrl();
+  if (typeof window === 'undefined') return false;
+  const pageProtocol = String(window.location?.protocol || '').toLowerCase();
+  const apiProtocol = String(baseUrl.split(':')[0] || '').toLowerCase();
+  return pageProtocol === 'https:' && apiProtocol === 'http';
+}
+
+function canUseMlApi() {
+  return !!mlBaseUrl() && !isMixedContentBlockedOnWeb();
+}
 
 export function hasMlApi() {
-  return !!BASE_URL;
+  return canUseMlApi();
 }
 
 export async function getMlRecommendations(
   userId: number,
   options?: { mediaType?: 'movie' | 'tv'; topN?: number }
 ) {
-  if (!BASE_URL) return [];
+  if (!canUseMlApi()) return [];
+  const resolvedUserId = resolveBackendUserId(userId) ?? Number(userId);
+  if (!Number.isFinite(resolvedUserId) || resolvedUserId <= 0) return [];
+  const baseUrl = mlBaseUrl();
   const mediaType = options?.mediaType ?? 'movie';
   const topN = options?.topN ?? 20;
-  const url = `${BASE_URL}/recommendations/${userId}?media_type=${mediaType}&top_n=${topN}`;
-  const res = await fetch(url);
+  const url = `${baseUrl}/recommendations/${resolvedUserId}?media_type=${mediaType}&top_n=${topN}`;
+  const res = await fetchWithTimeout(url);
   if (!res.ok) {
     throw new Error(`ML service error: ${res.status}`);
   }
@@ -67,27 +101,71 @@ export async function getMlRecommendations(
 }
 
 export async function ingestMlInteraction(payload: MlInteractionEvent) {
-  if (!BASE_URL) return;
-  await fetch(`${BASE_URL}/ingest`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  if (!canUseMlApi()) return;
+  const resolvedUserId = resolveBackendUserId(payload.user_id) ?? Number(payload.user_id);
+  if (!Number.isFinite(resolvedUserId) || resolvedUserId <= 0) return;
+  const baseUrl = mlBaseUrl();
+  try {
+    await fetchWithTimeout(`${baseUrl}/ingest`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ ...payload, user_id: resolvedUserId }),
+    });
+  } catch {
+  }
 }
 
 export async function ingestMlInteractionsBatch(payload: MlInteractionEvent[]) {
-  if (!BASE_URL || payload.length === 0) return;
-  await fetch(`${BASE_URL}/ingest/batch`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify(payload),
-  });
+  if (!canUseMlApi() || payload.length === 0) return;
+  const normalizedPayload = payload
+    .map((entry) => ({
+      ...entry,
+      user_id: resolveBackendUserId(entry.user_id) ?? Number(entry.user_id),
+    }))
+    .filter((entry) => Number.isFinite(entry.user_id) && Number(entry.user_id) > 0);
+  if (normalizedPayload.length === 0) return;
+  const baseUrl = mlBaseUrl();
+  try {
+    await fetchWithTimeout(`${baseUrl}/ingest/batch`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(normalizedPayload),
+    });
+  } catch {
+  }
+}
+
+export async function replaceMlUserInteractions(userId: number, payload: MlInteractionEvent[]) {
+  if (!canUseMlApi()) return false;
+  const resolvedUserId = resolveBackendUserId(userId) ?? Number(userId);
+  if (!Number.isFinite(resolvedUserId) || resolvedUserId <= 0) return false;
+  const normalizedPayload = payload
+    .map((entry) => ({
+      ...entry,
+      user_id: resolvedUserId,
+    }))
+    .filter((entry) => Number.isFinite(entry.tmdb_id) && Number(entry.tmdb_id) > 0);
+  const baseUrl = mlBaseUrl();
+  try {
+    const res = await fetchWithTimeout(`${baseUrl}/ingest/replace-user`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        user_id: resolvedUserId,
+        interactions: normalizedPayload,
+      }),
+    });
+    return res.ok;
+  } catch {
+    return false;
+  }
 }
 
 export async function syncMlFollowingGraph(followerId: number, followingIds: number[]) {
-  if (!BASE_URL) return;
-  const cleanFollowerId = Number(followerId);
+  if (!canUseMlApi()) return;
+  const cleanFollowerId = Number(resolveBackendUserId(followerId) ?? followerId);
   if (!Number.isFinite(cleanFollowerId) || cleanFollowerId <= 0) return;
+  const baseUrl = mlBaseUrl();
   const cleanFollowingIds = Array.from(
     new Set(
       (followingIds ?? [])
@@ -95,14 +173,17 @@ export async function syncMlFollowingGraph(followerId: number, followingIds: num
         .filter((id) => Number.isFinite(id) && id > 0 && id !== cleanFollowerId)
     )
   );
-  await fetch(`${BASE_URL}/follows/sync`, {
-    method: 'POST',
-    headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({
-      follower_id: cleanFollowerId,
-      following_ids: cleanFollowingIds,
-    }),
-  });
+  try {
+    await fetchWithTimeout(`${baseUrl}/follows/sync`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        follower_id: cleanFollowerId,
+        following_ids: cleanFollowingIds,
+      }),
+    });
+  } catch {
+  }
 }
 
 export async function getMlRecommendationExplain(
@@ -110,10 +191,13 @@ export async function getMlRecommendationExplain(
   tmdbId: number,
   options?: { mediaType?: 'movie' | 'tv' }
 ) {
-  if (!BASE_URL) return null;
+  if (!canUseMlApi()) return null;
+  const resolvedUserId = resolveBackendUserId(userId) ?? Number(userId);
+  if (!Number.isFinite(resolvedUserId) || resolvedUserId <= 0) return null;
+  const baseUrl = mlBaseUrl();
   const mediaType = options?.mediaType ?? 'movie';
-  const url = `${BASE_URL}/explain/${userId}/${tmdbId}?media_type=${mediaType}`;
-  const res = await fetch(url);
+  const url = `${baseUrl}/explain/${resolvedUserId}/${tmdbId}?media_type=${mediaType}`;
+  const res = await fetchWithTimeout(url);
   if (!res.ok) {
     throw new Error(`ML explain error: ${res.status}`);
   }

@@ -595,16 +595,14 @@ export async function toggleWatchlist(userId: number, tmdbId: number, mediaType:
     }
   );
   if (typeof remote?.active === 'boolean') {
-    if (remote.active) {
-      void ingestMlInteraction({
-        user_id: userId,
-        tmdb_id: tmdbId,
-        media_type: mediaType,
-        event_type: 'watchlist',
-        event_value: 1,
-        occurred_at: nowIso(),
-      }).catch(() => {});
-    }
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watchlist',
+      event_value: remote.active ? 1 : 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return remote.active;
   }
   if (hasBackendApi()) return false;
@@ -617,6 +615,14 @@ export async function toggleWatchlist(userId: number, tmdbId: number, mediaType:
   );
   if (existing) {
     await db.runAsync('DELETE FROM user_watchlist WHERE user_id = ? AND tmdb_id = ?', userId, tmdbId);
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watchlist',
+      event_value: 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return false;
   }
   await db.runAsync(
@@ -651,16 +657,14 @@ export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 
     }
   );
   if (typeof remote?.active === 'boolean') {
-    if (remote.active) {
-      void ingestMlInteraction({
-        user_id: userId,
-        tmdb_id: tmdbId,
-        media_type: mediaType,
-        event_type: 'favorite',
-        event_value: 1,
-        occurred_at: nowIso(),
-      }).catch(() => {});
-    }
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'favorite',
+      event_value: remote.active ? 1 : 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return remote.active;
   }
   if (hasBackendApi()) return false;
@@ -673,6 +677,14 @@ export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 
   );
   if (existing) {
     await db.runAsync('DELETE FROM user_favorites WHERE user_id = ? AND tmdb_id = ?', userId, tmdbId);
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'favorite',
+      event_value: 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return false;
   }
   await db.runAsync(
@@ -707,16 +719,14 @@ export async function toggleWatched(userId: number, tmdbId: number, mediaType: '
     }
   );
   if (typeof remote?.active === 'boolean') {
-    if (remote.active) {
-      void ingestMlInteraction({
-        user_id: userId,
-        tmdb_id: tmdbId,
-        media_type: mediaType,
-        event_type: 'watched',
-        event_value: 1,
-        occurred_at: nowIso(),
-      }).catch(() => {});
-    }
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watched',
+      event_value: remote.active ? 1 : 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return remote.active;
   }
   if (hasBackendApi()) return false;
@@ -729,6 +739,14 @@ export async function toggleWatched(userId: number, tmdbId: number, mediaType: '
   );
   if (existing) {
     await db.runAsync('DELETE FROM user_watched WHERE user_id = ? AND tmdb_id = ?', userId, tmdbId);
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watched',
+      event_value: 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return false;
   }
   await db.runAsync(
@@ -768,16 +786,14 @@ export async function setWatched(
     }
   );
   if (typeof remote?.watched === 'boolean') {
-    if (remote.watched) {
-      void ingestMlInteraction({
-        user_id: userId,
-        tmdb_id: tmdbId,
-        media_type: mediaType,
-        event_type: 'watched',
-        event_value: 1,
-        occurred_at: nowIso(),
-      }).catch(() => {});
-    }
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watched',
+      event_value: remote.watched ? 1 : 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return remote.watched;
   }
   if (hasBackendApi()) return false;
@@ -785,6 +801,14 @@ export async function setWatched(
   const db = await getDb();
   if (!watched) {
     await db.runAsync('DELETE FROM user_watched WHERE user_id = ? AND tmdb_id = ?', userId, tmdbId);
+    void ingestMlInteraction({
+      user_id: userId,
+      tmdb_id: tmdbId,
+      media_type: mediaType,
+      event_type: 'watched',
+      event_value: 0,
+      occurred_at: nowIso(),
+    }).catch(() => {});
     return false;
   }
   await db.runAsync(

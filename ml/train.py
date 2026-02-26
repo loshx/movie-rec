@@ -17,6 +17,22 @@ EVENT_WEIGHTS = {
     "favorite_actor": 1.65,
 }
 
+BLEND_WEIGHTS = {
+    "user_knn": 0.34,
+    "item_knn": 0.28,
+    "svd": 0.20,
+    "follow_taste": 0.14,
+    "popularity": 0.04,
+}
+
+MIN_PERSONAL_SIGNAL = 0.05
+PROFILE_SEED_COUNT = 5
+PROFILE_NEIGHBOR_COUNT = 35
+PROFILE_ITEM_BLEND_WEIGHT = 0.45
+RECENCY_HALF_LIFE_DAYS = 240.0
+RECENCY_MIN_MULTIPLIER = 0.72
+RECENCY_MAX_MULTIPLIER = 1.08
+
 
 @dataclass
 class RecoArtifacts:
@@ -35,21 +51,90 @@ class RecoArtifacts:
     follows_by_follower: Dict[int, Set[int]]
 
 
-def _normalize_scores(df: pd.DataFrame) -> pd.DataFrame:
-    work = df.copy()
-    work["event_weight"] = work["event_type"].map(EVENT_WEIGHTS).fillna(0.0)
+def _event_weight(event_type: str, event_value: float | None) -> float:
+    event_type = str(event_type).strip().lower()
+    value = None if event_value is None or pd.isna(event_value) else float(event_value)
 
-    rating_mask = work["event_type"] == "rating"
-    work.loc[rating_mask, "event_weight"] = (
-        work.loc[rating_mask, "event_value"].fillna(0.0) / 5.0
+    if event_type == "rating":
+        if value is None or value <= 0:
+            return 0.0
+        clipped = float(np.clip(value, 0.0, 10.0))
+        # Ratings are on a 1..10 scale in app; map to 0..2.
+        return clipped / 10.0 * 2.0
+
+    if event_type == "favorite_actor":
+        if value is not None and value <= 0:
+            return 0.0
+        if value is None:
+            return EVENT_WEIGHTS[event_type]
+        quality = float(np.clip(value, 0.0, 10.0)) / 10.0
+        return EVENT_WEIGHTS[event_type] * (0.75 + 0.25 * quality)
+
+    base = float(EVENT_WEIGHTS.get(event_type, 0.0))
+    if base <= 0:
+        return 0.0
+    # For binary events, event_value <= 0 means "disabled"/removed.
+    if value is not None and value <= 0:
+        return 0.0
+    return base
+
+
+def _recency_multiplier(ts: pd.Timestamp, now_ts: pd.Timestamp) -> float:
+    try:
+        age_days = max(0.0, float((now_ts - ts).total_seconds()) / 86400.0)
+    except Exception:
+        return 1.0
+    decay = float(np.exp(-age_days / RECENCY_HALF_LIFE_DAYS))
+    return float(
+        RECENCY_MIN_MULTIPLIER
+        + (RECENCY_MAX_MULTIPLIER - RECENCY_MIN_MULTIPLIER) * decay
     )
 
-    work = work[work["event_weight"] > 0]
+
+def _normalize_scores(df: pd.DataFrame) -> pd.DataFrame:
+    if df.empty:
+        return pd.DataFrame(columns=["user_id", "tmdb_id", "score"])
+
+    work = df.copy()
+    for column in ["user_id", "tmdb_id", "event_type", "event_value", "occurred_at"]:
+        if column not in work.columns:
+            work[column] = np.nan
+
+    work["user_id"] = pd.to_numeric(work["user_id"], errors="coerce")
+    work["tmdb_id"] = pd.to_numeric(work["tmdb_id"], errors="coerce")
+    work["event_value"] = pd.to_numeric(work["event_value"], errors="coerce")
+    work["event_type"] = work["event_type"].astype(str).str.strip().str.lower()
+    work = work.dropna(subset=["user_id", "tmdb_id", "event_type"])
+    if work.empty:
+        return pd.DataFrame(columns=["user_id", "tmdb_id", "score"])
+
+    work["user_id"] = work["user_id"].astype(np.int64)
+    work["tmdb_id"] = work["tmdb_id"].astype(np.int64)
+    now_ts = pd.Timestamp.now(tz="UTC")
+    work["occurred_at"] = pd.to_datetime(work["occurred_at"], errors="coerce", utc=True).fillna(now_ts)
+
+    # Keep only the latest state for each event type on each title.
+    work = work.sort_values(
+        ["user_id", "tmdb_id", "event_type", "occurred_at"],
+        kind="mergesort",
+    )
+    latest = work.groupby(["user_id", "tmdb_id", "event_type"], as_index=False).tail(1)
+
+    latest["event_weight"] = latest.apply(
+        lambda row: _event_weight(str(row["event_type"]), row["event_value"])
+        * _recency_multiplier(row["occurred_at"], now_ts),
+        axis=1,
+    )
+    latest = latest[latest["event_weight"] > 0]
+    if latest.empty:
+        return pd.DataFrame(columns=["user_id", "tmdb_id", "score"])
+
     grouped = (
-        work.groupby(["user_id", "tmdb_id"], as_index=False)["event_weight"]
+        latest.groupby(["user_id", "tmdb_id"], as_index=False)["event_weight"]
         .sum()
         .rename(columns={"event_weight": "score"})
     )
+    grouped["score"] = grouped["score"].clip(lower=0.0, upper=6.0)
     return grouped
 
 
@@ -86,7 +171,7 @@ def train_artifacts(interactions: pd.DataFrame, follows: pd.DataFrame | None = N
 
     normalized = _normalize_scores(interactions)
     if normalized.empty:
-        return train_artifacts(pd.DataFrame())
+        return train_artifacts(pd.DataFrame(), follows=follows)
 
     user_item = normalized.pivot_table(
         index="user_id",
@@ -151,20 +236,37 @@ def _knn_scores(art: RecoArtifacts, user_id: int, k_neighbors: int = 20) -> Dict
     distances, indices = art.knn.kneighbors(row, n_neighbors=k)
 
     scores: Dict[int, float] = {}
+    supports: Dict[int, float] = {}
     sims = 1.0 - distances[0]
     for neighbor_pos, neighbor_uidx in enumerate(indices[0]):
         if int(neighbor_uidx) == int(uidx):
             continue
         sim = float(sims[neighbor_pos])
-        if sim <= 0:
+        if sim <= 0.01:
             continue
         neighbor_vec = art.sparse_matrix[int(neighbor_uidx)].toarray().ravel()
+        if neighbor_vec.size == 0:
+            continue
+        neighbor_norm = float(np.linalg.norm(neighbor_vec))
+        if neighbor_norm <= 0:
+            continue
+        neighbor_density = max(0.8, float(np.log1p(np.count_nonzero(neighbor_vec))))
         for item_idx, value in enumerate(neighbor_vec):
             if value <= 0:
                 continue
             item_id = int(art.item_ids[item_idx])
-            scores[item_id] = scores.get(item_id, 0.0) + sim * float(value)
-    return scores
+            contribution = sim * (float(value) / neighbor_norm) * neighbor_density
+            scores[item_id] = scores.get(item_id, 0.0) + contribution
+            supports[item_id] = supports.get(item_id, 0.0) + sim
+
+    out: Dict[int, float] = {}
+    for item_id, raw in scores.items():
+        support = float(supports.get(item_id, 0.0))
+        if support <= 0:
+            continue
+        confidence = min(1.25, 0.55 + float(np.log1p(support)))
+        out[item_id] = float((raw / support) * confidence)
+    return out
 
 
 def _svd_scores(art: RecoArtifacts, user_id: int) -> Dict[int, float]:
@@ -196,11 +298,87 @@ def _item_knn_scores(art: RecoArtifacts, user_id: int, k_neighbors: int = 30) ->
         return {}
 
     scores: Dict[int, float] = {}
+    supports: Dict[int, float] = {}
     n_items = art.sparse_matrix.shape[1]
     k = max(2, min(k_neighbors, n_items))
+    seed_total_strength = float(sum(float(user_vec[idx]) for idx in seen_item_indices)) or 1.0
 
     for item_idx in seen_item_indices:
         base_strength = float(user_vec[item_idx])
+        if base_strength <= 0:
+            continue
+        normalized_base = base_strength / seed_total_strength
+        distances, indices = art.item_knn.kneighbors(
+            art.sparse_matrix.T[item_idx], n_neighbors=k
+        )
+        sims = 1.0 - distances[0]
+        for pos, neighbor_item_idx in enumerate(indices[0]):
+            if int(neighbor_item_idx) == int(item_idx):
+                continue
+            sim = float(sims[pos])
+            if sim <= 0.01:
+                continue
+            neighbor_item_id = int(art.item_ids[int(neighbor_item_idx)])
+            contribution = sim * normalized_base
+            scores[neighbor_item_id] = scores.get(neighbor_item_id, 0.0) + contribution
+            supports[neighbor_item_id] = supports.get(neighbor_item_id, 0.0) + contribution
+
+    out: Dict[int, float] = {}
+    for item_id, raw in scores.items():
+        support = float(supports.get(item_id, 0.0))
+        confidence = min(1.2, 0.6 + float(np.log1p(max(0.0, support))))
+        out[item_id] = float(raw * confidence)
+    return out
+
+
+def _profile_seed_indices(
+    art: RecoArtifacts, user_id: int, seed_count: int = PROFILE_SEED_COUNT
+) -> List[int]:
+    if user_id not in art.user_index:
+        return []
+
+    uidx = art.user_index[user_id]
+    user_vec = art.sparse_matrix[uidx].toarray().ravel()
+    ranked = [
+        (idx, float(value))
+        for idx, value in enumerate(user_vec)
+        if float(value) > 0
+    ]
+    if not ranked:
+        return []
+
+    ranked.sort(key=lambda row: row[1], reverse=True)
+    return [int(idx) for idx, _ in ranked[: max(1, seed_count)]]
+
+
+def _profile_similar_scores(
+    art: RecoArtifacts,
+    user_id: int,
+    seed_count: int = PROFILE_SEED_COUNT,
+    k_neighbors: int = PROFILE_NEIGHBOR_COUNT,
+) -> Dict[int, float]:
+    if art.item_knn is None or user_id not in art.user_index:
+        return {}
+
+    uidx = art.user_index[user_id]
+    user_vec = art.sparse_matrix[uidx].toarray().ravel()
+    seed_indices = _profile_seed_indices(art, user_id, seed_count=seed_count)
+    if not seed_indices:
+        return {}
+
+    scores: Dict[int, float] = {}
+    n_items = art.sparse_matrix.shape[1]
+    k = max(2, min(k_neighbors, n_items))
+    seed_total = max(1, len(seed_indices))
+    seed_total_strength = float(sum(float(user_vec[idx]) for idx in seed_indices)) or 1.0
+
+    for rank, item_idx in enumerate(seed_indices):
+        base_strength = float(user_vec[item_idx])
+        if base_strength <= 0:
+            continue
+        normalized_base = base_strength / seed_total_strength
+        # Stronger boost for top profile seeds (favorites/high ratings first).
+        rank_boost = 1.0 + ((seed_total - rank) / seed_total) * 0.6
         distances, indices = art.item_knn.kneighbors(
             art.sparse_matrix.T[item_idx], n_neighbors=k
         )
@@ -212,9 +390,34 @@ def _item_knn_scores(art: RecoArtifacts, user_id: int, k_neighbors: int = 30) ->
             if sim <= 0:
                 continue
             neighbor_item_id = int(art.item_ids[int(neighbor_item_idx)])
-            scores[neighbor_item_id] = scores.get(neighbor_item_id, 0.0) + sim * base_strength
+            scores[neighbor_item_id] = (
+                scores.get(neighbor_item_id, 0.0) + sim * normalized_base * rank_boost
+            )
 
     return scores
+
+
+def _merge_item_signals(
+    item_knn_scores: Dict[int, float],
+    profile_similar_scores: Dict[int, float],
+    profile_weight: float = PROFILE_ITEM_BLEND_WEIGHT,
+) -> Dict[int, float]:
+    if not item_knn_scores and not profile_similar_scores:
+        return {}
+
+    out: Dict[int, float] = {}
+    base_weight = max(0.0, 1.0 - profile_weight)
+    keys = set(item_knn_scores) | set(profile_similar_scores)
+    for item_id in keys:
+        i_score = float(item_knn_scores.get(item_id, 0.0))
+        p_score = float(profile_similar_scores.get(item_id, 0.0))
+        if i_score <= 0:
+            out[item_id] = p_score
+        elif p_score <= 0:
+            out[item_id] = i_score
+        else:
+            out[item_id] = base_weight * i_score + profile_weight * p_score
+    return out
 
 
 def _seen_items(art: RecoArtifacts, user_id: int) -> set[int]:
@@ -261,6 +464,53 @@ def _follow_scores(art: RecoArtifacts, user_id: int) -> Dict[int, float]:
     return scores
 
 
+def _effective_blend_weights(art: RecoArtifacts, user_id: int, seen_count: int) -> Dict[str, float]:
+    if seen_count >= 18:
+        base = {"user_knn": 0.37, "item_knn": 0.33, "svd": 0.20, "follow_taste": 0.08, "popularity": 0.02}
+    elif seen_count >= 8:
+        base = {"user_knn": 0.35, "item_knn": 0.31, "svd": 0.20, "follow_taste": 0.10, "popularity": 0.04}
+    elif seen_count >= 1:
+        base = {"user_knn": 0.28, "item_knn": 0.24, "svd": 0.18, "follow_taste": 0.10, "popularity": 0.20}
+    else:
+        base = {"user_knn": 0.08, "item_knn": 0.06, "svd": 0.06, "follow_taste": 0.05, "popularity": 0.75}
+
+    follow_count = len(art.follows_by_follower.get(user_id, set()))
+    if follow_count <= 0:
+        moved = base["follow_taste"]
+        base["follow_taste"] = 0.0
+        base["item_knn"] += moved * 0.50
+        base["svd"] += moved * 0.30
+        base["popularity"] += moved * 0.20
+    elif follow_count >= 5:
+        base["follow_taste"] = min(0.22, base["follow_taste"] + 0.03)
+        base["popularity"] = max(0.01, base["popularity"] - 0.02)
+
+    total = float(sum(base.values())) or 1.0
+    return {k: float(v / total) for k, v in base.items()}
+
+
+def _normalize_component_scores(scores: Dict[int, float], use_log: bool = False) -> Dict[int, float]:
+    if not scores:
+        return {}
+
+    keys = list(scores.keys())
+    values = np.array([float(scores[k]) for k in keys], dtype=np.float64)
+    values = np.maximum(values, 0.0)
+    if use_log:
+        values = np.log1p(values)
+
+    max_v = float(values.max())
+    min_v = float(values.min())
+    if max_v <= min_v + 1e-12:
+        return {int(k): (1.0 if max_v > 0 else 0.0) for k in keys}
+
+    out: Dict[int, float] = {}
+    scale = max_v - min_v
+    for idx, key in enumerate(keys):
+        out[int(key)] = float((values[idx] - min_v) / scale)
+    return out
+
+
 def recommend(
     art: RecoArtifacts,
     user_id: int,
@@ -271,38 +521,81 @@ def recommend(
 
     seen = _seen_items(art, user_id)
 
-    knn_scores = _knn_scores(art, user_id)
-    item_scores = _item_knn_scores(art, user_id)
-    svd_scores = _svd_scores(art, user_id)
-    follow_scores = _follow_scores(art, user_id)
+    knn_scores_raw = _knn_scores(art, user_id)
+    item_scores_raw = _item_knn_scores(art, user_id)
+    profile_scores_raw = _profile_similar_scores(art, user_id)
+    svd_scores_raw = _svd_scores(art, user_id)
+    follow_scores_raw = _follow_scores(art, user_id)
+    popularity_raw = {int(k): float(v) for k, v in art.popularity.items()}
+
+    knn_scores = _normalize_component_scores(knn_scores_raw)
+    item_scores = _normalize_component_scores(item_scores_raw)
+    profile_scores = _normalize_component_scores(profile_scores_raw)
+    item_profile_scores = _merge_item_signals(item_scores, profile_scores)
+    svd_scores = _normalize_component_scores(svd_scores_raw)
+    follow_scores = _normalize_component_scores(follow_scores_raw)
+    popularity_scores = _normalize_component_scores(popularity_raw, use_log=True)
 
     blended: Dict[int, float] = {}
+    seen_count = len(seen)
+    user_has_history = seen_count > 0
+    blend_weights = _effective_blend_weights(art, user_id, seen_count)
+    if seen_count >= 12:
+        min_personal_signal = MIN_PERSONAL_SIGNAL
+    elif seen_count >= 6:
+        min_personal_signal = MIN_PERSONAL_SIGNAL * 0.6
+    else:
+        min_personal_signal = 0.0
+
     candidates = (
         set(knn_scores)
-        | set(item_scores)
+        | set(item_profile_scores)
         | set(svd_scores)
         | set(follow_scores)
-        | set(art.popularity.index.to_list())
+        | set(popularity_scores)
     )
     for item_id in candidates:
         if item_id in seen:
             continue
         k_score = knn_scores.get(item_id, 0.0)
-        i_score = item_scores.get(item_id, 0.0)
+        i_score = item_profile_scores.get(item_id, 0.0)
         s_score = svd_scores.get(item_id, 0.0)
         f_score = follow_scores.get(item_id, 0.0)
-        p_score = float(art.popularity.get(item_id, 0.0))
-        blended[item_id] = 0.32 * k_score + 0.20 * i_score + 0.20 * s_score + 0.10 * p_score + 0.18 * f_score
+        p_score = popularity_scores.get(item_id, 0.0)
+        personal_strength = max(k_score, i_score, s_score, f_score)
+
+        if (
+            user_has_history
+            and personal_strength < min_personal_signal
+            and p_score < 0.82
+        ):
+            continue
+
+        score = (
+            blend_weights["user_knn"] * k_score
+            + blend_weights["item_knn"] * i_score
+            + blend_weights["svd"] * s_score
+            + blend_weights["follow_taste"] * f_score
+            + blend_weights["popularity"] * p_score
+        )
+        if score <= 0:
+            continue
+        blended[item_id] = float(score)
 
     ranked = sorted(blended.items(), key=lambda kv: kv[1], reverse=True)[:top_n]
     out: List[Tuple[int, float, str]] = []
     for item_id, score in ranked:
-        hit_knn = item_id in knn_scores
-        hit_item = item_id in item_scores
-        hit_svd = item_id in svd_scores
-        hit_follow = item_id in follow_scores
+        hit_knn = knn_scores.get(item_id, 0.0) > 0
+        hit_item = item_scores.get(item_id, 0.0) > 0
+        hit_profile = profile_scores.get(item_id, 0.0) > 0
+        hit_svd = svd_scores.get(item_id, 0.0) > 0
+        hit_follow = follow_scores.get(item_id, 0.0) > 0
         reason = "hybrid"
-        if hit_follow and hit_knn and hit_item and hit_svd:
+        if hit_profile and (hit_follow or hit_knn or hit_item or hit_svd):
+            reason = "profile+hybrid"
+        elif hit_profile:
+            reason = "profile_similar"
+        elif hit_follow and hit_knn and hit_item and hit_svd:
             reason = "follow+knn+item+svd"
         elif hit_follow and hit_knn and hit_item:
             reason = "follow+knn+item"
@@ -334,18 +627,24 @@ def recommend(
 
 def explain_recommendation(art: RecoArtifacts, user_id: int, tmdb_id: int) -> Dict[str, object]:
     seen = _seen_items(art, user_id)
-    knn_scores = _knn_scores(art, user_id)
-    item_scores = _item_knn_scores(art, user_id)
-    svd_scores = _svd_scores(art, user_id)
-    follow_scores = _follow_scores(art, user_id)
-    p_score = float(art.popularity.get(tmdb_id, 0.0))
+    blend_weights = _effective_blend_weights(art, user_id, len(seen))
+    knn_scores = _normalize_component_scores(_knn_scores(art, user_id))
+    item_scores = _normalize_component_scores(_item_knn_scores(art, user_id))
+    profile_scores = _normalize_component_scores(_profile_similar_scores(art, user_id))
+    item_profile_scores = _merge_item_signals(item_scores, profile_scores)
+    svd_scores = _normalize_component_scores(_svd_scores(art, user_id))
+    follow_scores = _normalize_component_scores(_follow_scores(art, user_id))
+    popularity_scores = _normalize_component_scores(
+        {int(k): float(v) for k, v in art.popularity.items()}, use_log=True
+    )
+    p_score = float(popularity_scores.get(tmdb_id, 0.0))
 
     score_parts = {
-        "user_knn": 0.32 * float(knn_scores.get(tmdb_id, 0.0)),
-        "item_knn": 0.20 * float(item_scores.get(tmdb_id, 0.0)),
-        "svd": 0.20 * float(svd_scores.get(tmdb_id, 0.0)),
-        "follow_taste": 0.18 * float(follow_scores.get(tmdb_id, 0.0)),
-        "popularity": 0.10 * p_score,
+        "user_knn": blend_weights["user_knn"] * float(knn_scores.get(tmdb_id, 0.0)),
+        "item_knn": blend_weights["item_knn"] * float(item_profile_scores.get(tmdb_id, 0.0)),
+        "svd": blend_weights["svd"] * float(svd_scores.get(tmdb_id, 0.0)),
+        "follow_taste": blend_weights["follow_taste"] * float(follow_scores.get(tmdb_id, 0.0)),
+        "popularity": blend_weights["popularity"] * p_score,
     }
     final_score = float(sum(score_parts.values()))
 
@@ -379,7 +678,12 @@ def explain_recommendation(art: RecoArtifacts, user_id: int, tmdb_id: int) -> Di
     if user_id in art.user_index and art.item_knn is not None and tmdb_id in art.item_index:
         uidx = art.user_index[user_id]
         user_vec = art.sparse_matrix[uidx].toarray().ravel()
-        seen_indices = [i for i, val in enumerate(user_vec) if float(val) > 0]
+        seed_indices = _profile_seed_indices(art, user_id, seed_count=PROFILE_SEED_COUNT)
+        seen_indices = (
+            seed_indices
+            if seed_indices
+            else [i for i, val in enumerate(user_vec) if float(val) > 0]
+        )
         target_idx = art.item_index[tmdb_id]
         for idx in seen_indices:
             if idx == target_idx:
