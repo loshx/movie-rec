@@ -51,6 +51,7 @@ import {
 import { getMlRecommendations, hasMlApi, syncMlFollowingGraph } from '@/lib/ml-recommendations';
 import { getFollowingProfiles } from '@/lib/social-backend';
 import { getSearchClickHistory, upsertSearchClickHistory } from '@/db/search-click-history';
+import { getCinemaEventMeta, type CinemaEventMeta } from '@/lib/cinema-event-meta';
 
 type FeaturedDisplay = {
   tmdb_id: number | null;
@@ -99,7 +100,7 @@ const GENRES = [
 ];
 
 const CINEMA_POLL_MS = 60 * 1000;
-const CINEMA_CLOCK_MS = 30 * 1000;
+const CINEMA_CLOCK_MS = 1000;
 const HOME_DETAIL_FETCH_LIMIT = 6;
 const HOME_DETAIL_FETCH_CONCURRENCY = 3;
 const ML_MIN_SIGNAL_INTERACTIONS = 10;
@@ -515,6 +516,7 @@ export default function HomeScreen() {
   const [cinemaEvent, setCinemaEvent] = useState<CinemaEvent | null>(null);
   const [cinemaNowIso, setCinemaNowIso] = useState(new Date().toISOString());
   const [cinemaNotifyArmed, setCinemaNotifyArmed] = useState(false);
+  const [cinemaMeta, setCinemaMeta] = useState<CinemaEventMeta | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroSlideWidth, setHeroSlideWidth] = useState(0);
   const heroScrollRef = useRef<ScrollView | null>(null);
@@ -1180,6 +1182,28 @@ export default function HomeScreen() {
     return () => clearInterval(t);
   }, [cinemaEventId]);
 
+  useEffect(() => {
+    let active = true;
+    const tmdbId = Number(cinemaEvent?.tmdb_id ?? 0);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+      setCinemaMeta(null);
+      return;
+    }
+    (async () => {
+      try {
+        const meta = await getCinemaEventMeta(tmdbId);
+        if (!active) return;
+        setCinemaMeta(meta);
+      } catch {
+        if (!active) return;
+        setCinemaMeta(null);
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [cinemaEvent?.tmdb_id]);
+
   const scrollY = useRef(new Animated.Value(0)).current;
   const categoriesX = useRef(new Animated.Value(-320)).current;
   const searchX = useRef(new Animated.Value(420)).current;
@@ -1431,18 +1455,7 @@ export default function HomeScreen() {
   const heroTopImage =
     cinemaPhase === 'none'
       ? heroPrimarySlide?.image || null
-      : cinemaEvent?.poster_url?.trim() || backdropUrl(featured?.backdrop_path, 'w780');
-  const heroTopTitle = cinemaPhase === 'none' ? '' : cinemaEvent?.title || featured?.title || '';
-  const heroSubtitle =
-    cinemaPhase === 'none'
-      ? ''
-      : cinemaPhase === 'upcoming'
-        ? 'Starts soon on Cinema'
-        : cinemaPhase === 'live'
-          ? 'Streaming now'
-          : cinemaPhase === 'ended'
-            ? 'Ended'
-            : '';
+      : cinemaEvent?.poster_url?.trim() || cinemaMeta?.backdrop || cinemaMeta?.poster || backdropUrl(featured?.backdrop_path, 'w780');
 
   const isWeb = Platform.OS === 'web';
   const heroCardGap = 0;
@@ -1451,6 +1464,18 @@ export default function HomeScreen() {
   const heroPosterHeight = isWeb ? 336 : Math.round(heroItemWidth * 1.48);
   const heroCarouselHeight = heroPosterHeight + 22;
   const heroStep = Math.max(1, heroSlideWidth || heroItemWidth || 1);
+  const openCinemaPosterDetails = useCallback(() => {
+    if (cinemaPhase === 'none') return;
+    const tmdbId = Number(cinemaEvent?.tmdb_id ?? 0);
+    if (Number.isFinite(tmdbId) && tmdbId > 0) {
+      router.push({
+        pathname: '/movie/[id]',
+        params: { id: String(tmdbId), type: cinemaMeta?.mediaType ?? 'movie' },
+      });
+      return;
+    }
+    router.push('/cinema');
+  }, [cinemaEvent?.tmdb_id, cinemaMeta?.mediaType, cinemaPhase]);
 
   const forYouSectionItems = useMemo<(Movie | TvShow)[]>(() => {
     const movieBase = forYouMovies.slice(0, 20);
@@ -1694,48 +1719,20 @@ export default function HomeScreen() {
                 )}
               </Animated.ScrollView>
             ) : heroTopImage ? (
-              <Image
-                source={{ uri: heroTopImage }}
-                style={styles.heroImage}
-                contentFit="cover"
-                contentPosition="center"
-                transition={140}
-                cachePolicy="memory-disk"
-              />
+              <Pressable style={styles.heroCinemaPosterTap} onPress={openCinemaPosterDetails}>
+                <Image
+                  source={{ uri: heroTopImage }}
+                  style={styles.heroImage}
+                  contentFit="cover"
+                  contentPosition="center"
+                  transition={140}
+                  cachePolicy="memory-disk"
+                />
+              </Pressable>
             ) : (
-              <View style={[styles.heroImage, { backgroundColor: theme.backgroundSelected }]} />
-            )}
-            {cinemaPhase !== 'none' && (
-              <View style={styles.heroOverlay}>
-                <View style={styles.heroOverlayGlass}>
-                  {heroTopTitle ? (
-                    <Text style={styles.heroTitle} numberOfLines={1}>
-                      {heroTopTitle}
-                    </Text>
-                  ) : null}
-                  {heroSubtitle ? (
-                    <Text style={styles.heroOverview} numberOfLines={1}>
-                      {heroSubtitle}
-                    </Text>
-                  ) : null}
-                  {cinemaPhase === 'upcoming' ? (
-                    <Pressable
-                      style={[styles.cinemaCta, cinemaNotifyArmed && styles.cinemaCtaArmed]}
-                      onPress={() => {
-                        setCinemaNotifyArmed(true);
-                        Alert.alert('Notifications enabled', 'You will be alerted when the live stream starts.');
-                      }}>
-                      <Text style={styles.cinemaCtaText}>Notify me</Text>
-                    </Pressable>
-                  ) : null}
-                  {cinemaPhase === 'live' ? (
-                    <Pressable style={styles.cinemaCta} onPress={() => router.push('/cinema')}>
-                      <Text style={styles.cinemaCtaText}>Go to live</Text>
-                    </Pressable>
-                  ) : null}
-                  {cinemaPhase === 'ended' ? <Text style={styles.cinemaEndedText}>Ended</Text> : null}
-                </View>
-              </View>
+              <Pressable style={styles.heroCinemaPosterTap} onPress={openCinemaPosterDetails}>
+                <View style={[styles.heroImage, { backgroundColor: theme.backgroundSelected }]} />
+              </Pressable>
             )}
             {cinemaPhase === 'none' && heroSlides.length > 1 ? (
               <View style={styles.heroDotsRow}>
@@ -1745,6 +1742,26 @@ export default function HomeScreen() {
               </View>
             ) : null}
           </View>
+          {cinemaPhase !== 'none' ? (
+            <View style={styles.cinemaHeroFooter}>
+              {cinemaPhase === 'upcoming' ? (
+                <Pressable
+                  style={[styles.cinemaHeroNotifyBtn, cinemaNotifyArmed && styles.cinemaHeroNotifyBtnArmed]}
+                  onPress={() => {
+                    setCinemaNotifyArmed(true);
+                    Alert.alert('Notifications enabled', 'You will be alerted when the live stream starts.');
+                  }}>
+                  <Ionicons name="notifications-outline" size={18} color="#fff" />
+                  <Text style={styles.cinemaHeroNotifyText}>Notify me</Text>
+                </Pressable>
+              ) : cinemaPhase === 'live' ? (
+                <Pressable style={styles.cinemaHeroNotifyBtn} onPress={() => router.push('/cinema')}>
+                  <Ionicons name="radio-outline" size={18} color="#fff" />
+                  <Text style={styles.cinemaHeroNotifyText}>Go to live</Text>
+                </Pressable>
+              ) : null}
+            </View>
+          ) : null}
         </View>
 
         {error ? (
@@ -2145,9 +2162,9 @@ const styles = StyleSheet.create({
   },
   heroCardFrame: {
     overflow: 'hidden',
-    backgroundColor: '#000000',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'transparent',
+    borderWidth: 0,
+    borderColor: 'transparent',
   },
   heroCardCarousel: {
     minHeight: 340,
@@ -2159,6 +2176,35 @@ const styles = StyleSheet.create({
   heroImage: {
     width: '100%',
     height: 336,
+  },
+  heroCinemaPosterTap: {
+    width: '100%',
+  },
+  cinemaHeroFooter: {
+    marginTop: 12,
+    alignItems: 'center',
+  },
+  cinemaHeroNotifyBtn: {
+    minWidth: 178,
+    borderRadius: 999,
+    paddingHorizontal: 20,
+    paddingVertical: 11,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: '#C1121F',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.25)',
+  },
+  cinemaHeroNotifyBtnArmed: {
+    backgroundColor: '#8F0D16',
+  },
+  cinemaHeroNotifyText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.4,
   },
   heroSlideTrack: {
     width: '100%',
@@ -2413,7 +2459,7 @@ const styles = StyleSheet.create({
   heroOverlayGlass: {
     borderRadius: 18,
     overflow: 'hidden',
-    minHeight: 118,
+    minHeight: 164,
     paddingHorizontal: Spacing.three,
     paddingVertical: Spacing.two,
     justifyContent: 'center',
@@ -2436,6 +2482,7 @@ const styles = StyleSheet.create({
   heroTitle: {
     fontSize: 20,
     fontFamily: Fonts.serif,
+    marginTop: 6,
     marginBottom: Spacing.one,
   },
   heroOverview: {
@@ -2443,8 +2490,67 @@ const styles = StyleSheet.create({
     fontSize: 12,
     color: 'rgba(255,255,255,0.85)',
   },
-  cinemaCta: {
+  heroCinemaKickerRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  heroCinemaBadge: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(253,230,138,0.6)',
+    backgroundColor: 'rgba(120,53,15,0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+  },
+  heroCinemaBadgeLive: {
+    borderColor: 'rgba(248,113,113,0.66)',
+    backgroundColor: 'rgba(153,27,27,0.45)',
+  },
+  heroCinemaBadgeText: {
+    color: '#fef3c7',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.5,
+  },
+  heroCinemaStartText: {
+    color: 'rgba(255,255,255,0.8)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+  },
+  heroCinemaCountdown: {
+    color: '#fb7185',
+    fontFamily: Fonts.mono,
+    fontSize: 18,
+    lineHeight: 22,
+    marginBottom: 1,
+  },
+  heroCinemaLoading: {
+    marginTop: 2,
+    alignSelf: 'flex-start',
+  },
+  heroCinemaDetail: {
+    color: 'rgba(255,255,255,0.84)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  heroCinemaGenres: {
+    color: 'rgba(191,219,254,0.92)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    lineHeight: 15,
+    marginTop: 2,
+  },
+  heroCinemaActions: {
     marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  cinemaCta: {
     alignSelf: 'flex-start',
     borderRadius: 999,
     backgroundColor: '#C1121F',
@@ -2455,6 +2561,9 @@ const styles = StyleSheet.create({
   },
   cinemaCtaArmed: {
     backgroundColor: '#8F0D16',
+  },
+  cinemaCtaSecondary: {
+    backgroundColor: 'rgba(15,23,42,0.82)',
   },
   cinemaCtaText: {
     color: '#fff',

@@ -31,6 +31,7 @@ import {
   type CinemaPoll,
 } from '@/db/cinema';
 import { useTheme } from '@/hooks/use-theme';
+import { getCinemaEventMeta, type CinemaEventMeta } from '@/lib/cinema-event-meta';
 
 type ChatMessage = {
   id: string;
@@ -85,6 +86,20 @@ function formatCountdown(ms: number) {
   const m = Math.floor((total % 3600) / 60);
   const s = total % 60;
   return `${d}d:${h}h:${m}m:${s}s`;
+}
+
+function formatCinemaStartTime(isoInput: string | null | undefined) {
+  const iso = String(isoInput ?? '').trim();
+  if (!iso) return '';
+  const date = new Date(iso);
+  if (!Number.isFinite(date.getTime())) return '';
+  return date.toLocaleString([], {
+    weekday: 'short',
+    month: 'short',
+    day: 'numeric',
+    hour: '2-digit',
+    minute: '2-digit',
+  });
 }
 
 function isSameCinemaEvent(a: CinemaEvent | null, b: CinemaEvent | null) {
@@ -188,6 +203,8 @@ export default function CinemaScreen() {
   const [pollLoading, setPollLoading] = useState(false);
   const [pollSubmittingId, setPollSubmittingId] = useState<string | null>(null);
   const [pollMessage, setPollMessage] = useState<string | null>(null);
+  const [eventMeta, setEventMeta] = useState<CinemaEventMeta | null>(null);
+  const [eventMetaLoading, setEventMetaLoading] = useState(false);
 
   const eventId = Number(event?.id ?? 0);
   const eventStartAt = String(event?.start_at ?? '');
@@ -240,6 +257,31 @@ export default function CinemaScreen() {
       clearInterval(refreshTimer);
     };
   }, []);
+
+  useEffect(() => {
+    let active = true;
+    const tmdbId = Number(event?.tmdb_id ?? 0);
+    if (!Number.isFinite(tmdbId) || tmdbId <= 0) {
+      setEventMeta(null);
+      setEventMetaLoading(false);
+      return;
+    }
+
+    (async () => {
+      setEventMetaLoading(true);
+      try {
+        const meta = await getCinemaEventMeta(tmdbId);
+        if (!active) return;
+        setEventMeta(meta);
+      } finally {
+        if (active) setEventMetaLoading(false);
+      }
+    })();
+
+    return () => {
+      active = false;
+    };
+  }, [event?.tmdb_id]);
 
   const refreshPoll = useCallback(async () => {
     try {
@@ -734,6 +776,15 @@ export default function CinemaScreen() {
           : 'OFFLINE';
 
   const chatStateColor = chatStatus === 'connected' ? '#22c55e' : chatStatus === 'connecting' ? '#f59e0b' : '#ef4444';
+  const cinemaStartLabel = formatCinemaStartTime(event?.start_at);
+  const cinemaDirectorLabel = eventMeta?.director ? `Director: ${eventMeta.director}` : null;
+  const cinemaCastLabel = eventMeta?.cast?.length ? `Cast: ${eventMeta.cast.join(', ')}` : null;
+  const cinemaGenresLabel = eventMeta?.genres?.length ? eventMeta.genres.join(' · ') : null;
+  const cinemaFactsRow = [eventMeta?.year, eventMeta?.runtimeLabel, eventMeta?.voteAverage ? `${eventMeta.voteAverage.toFixed(1)} / 10` : null]
+    .filter((item): item is string => !!item);
+  const phasePosterImage = String(event?.poster_url ?? '').trim() || eventMeta?.backdrop || eventMeta?.poster || '';
+  const phaseHeading = String(event?.title ?? '').trim() || eventMeta?.title || 'Cinema Event';
+  const phaseSummary = String(event?.description ?? '').trim() || eventMeta?.overview || 'Live stream will begin soon.';
 
   if (loading) {
     return (
@@ -783,25 +834,80 @@ export default function CinemaScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
+      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 4 : 0}>
       {phase === 'upcoming' ? (
         <View style={[styles.phaseShell, { paddingTop: Math.max(insets.top + 10, Spacing.three + 8) }]}>
           <View style={styles.phasePosterWrap}>
-            {event.poster_url ? (
-              <Image source={{ uri: event.poster_url }} style={styles.phasePoster} resizeMode="cover" />
+            {phasePosterImage ? (
+              <Image source={{ uri: phasePosterImage }} style={styles.phasePoster} resizeMode="cover" />
             ) : (
               <View style={styles.upcomingPosterFallback} />
             )}
-            <View style={styles.upcomingShade} />
+            <View style={styles.phasePosterTopRow}>
+              <View style={styles.phaseBadge}>
+                <Ionicons name="videocam" size={12} color="#fde68a" />
+                <Text style={styles.phaseBadgeText}>Upcoming Cinema</Text>
+              </View>
+              {cinemaStartLabel ? (
+                <View style={styles.phaseTimeChip}>
+                  <Ionicons name="calendar-outline" size={12} color="#fff" />
+                  <Text style={styles.phaseTimeChipText}>{cinemaStartLabel}</Text>
+                </View>
+              ) : null}
+            </View>
           </View>
-          <View style={styles.phaseInfoCard}>
-            <Text style={styles.phaseTitle}>{event.title}</Text>
-            <Text style={styles.phaseCountdown}>{countdownText ?? '0d:0h:0m:0s'}</Text>
-            <Text style={styles.phaseHint} numberOfLines={3}>
-              {event.description?.trim() || 'Live stream will begin soon.'}
+          <LinearGradient
+            colors={['rgba(9,14,26,0.95)', 'rgba(8,12,20,0.96)', 'rgba(6,10,16,0.98)']}
+            start={{ x: 0, y: 0 }}
+            end={{ x: 1, y: 1 }}
+            style={styles.phaseInfoCard}>
+            <Text style={styles.phaseTitle}>{phaseHeading}</Text>
+            <View style={styles.phaseCountdownBlock}>
+              <Text style={styles.phaseCountdownLabel}>Starts in</Text>
+              <Text style={styles.phaseCountdown}>{countdownText ?? '0d:0h:0m:0s'}</Text>
+            </View>
+            {cinemaFactsRow.length > 0 ? (
+              <View style={styles.phaseFactsRow}>
+                {cinemaFactsRow.map((entry) => (
+                  <View key={entry} style={styles.phaseFactChip}>
+                    <Text style={styles.phaseFactChipText}>{entry}</Text>
+                  </View>
+                ))}
+              </View>
+            ) : null}
+            {eventMetaLoading ? <ActivityIndicator color="#fff" /> : null}
+            {cinemaDirectorLabel ? (
+              <Text style={styles.phaseMetaLine} numberOfLines={1}>
+                {cinemaDirectorLabel}
+              </Text>
+            ) : null}
+            {cinemaCastLabel ? (
+              <Text style={styles.phaseMetaLine} numberOfLines={2}>
+                {cinemaCastLabel}
+              </Text>
+            ) : null}
+            {cinemaGenresLabel ? (
+              <Text style={styles.phaseGenresText} numberOfLines={1}>
+                {cinemaGenresLabel}
+              </Text>
+            ) : null}
+            <Text style={styles.phaseHint} numberOfLines={4}>
+              {phaseSummary}
             </Text>
-          </View>
+            {eventMeta?.tmdbId ? (
+              <Pressable
+                style={styles.phaseDetailsBtn}
+                onPress={() =>
+                  router.push({
+                    pathname: '/movie/[id]',
+                    params: { id: String(eventMeta.tmdbId), type: eventMeta.mediaType },
+                  })
+                }>
+                <Text style={styles.phaseDetailsBtnText}>Open full details</Text>
+              </Pressable>
+            ) : null}
+          </LinearGradient>
         </View>
       ) : null}
 
@@ -952,13 +1058,13 @@ const styles = StyleSheet.create({
   },
   phaseShell: {
     flex: 1,
-    gap: 12,
+    gap: 14,
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.three,
     paddingBottom: Spacing.three,
   },
   phasePosterWrap: {
-    flex: 1,
+    height: 360,
     borderRadius: 26,
     overflow: 'hidden',
     borderWidth: 1,
@@ -974,33 +1080,113 @@ const styles = StyleSheet.create({
     height: '100%',
     backgroundColor: '#111',
   },
-  upcomingShade: {
+  phasePosterTopRow: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 0,
-    height: 260,
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    top: 12,
+    left: 12,
+    right: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 8,
+  },
+  phaseBadge: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(253,230,138,0.48)',
+    backgroundColor: 'rgba(82,52,0,0.52)',
+  },
+  phaseBadgeText: {
+    color: '#fef3c7',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+  },
+  phaseTimeChip: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 6,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.26)',
+    backgroundColor: 'rgba(8,12,18,0.62)',
+  },
+  phaseTimeChipText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
   },
   phaseInfoCard: {
     borderRadius: 22,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
-    padding: 14,
-    gap: 6,
+    borderColor: 'rgba(255,255,255,0.2)',
+    padding: 16,
+    gap: 8,
   },
   phaseTitle: {
     color: '#fff',
     fontFamily: Fonts.serif,
-    fontSize: 20,
+    fontSize: 24,
+    lineHeight: 28,
+  },
+  phaseCountdownBlock: {
+    marginTop: 2,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(225,29,72,0.45)',
+    backgroundColor: 'rgba(127,29,29,0.18)',
+    paddingHorizontal: 12,
+    paddingVertical: 10,
+    gap: 4,
+  },
+  phaseCountdownLabel: {
+    color: 'rgba(255,255,255,0.78)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
   },
   phaseCountdown: {
-    color: '#E10613',
+    color: '#fb7185',
     fontFamily: Fonts.mono,
-    fontSize: 24,
-    letterSpacing: 0.5,
+    fontSize: 25,
+    letterSpacing: 0.3,
     fontWeight: '700',
+  },
+  phaseFactsRow: {
+    marginTop: 2,
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+  },
+  phaseFactChip: {
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.35)',
+    backgroundColor: 'rgba(3,23,37,0.45)',
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+  },
+  phaseFactChipText: {
+    color: '#dbeafe',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+  },
+  phaseMetaLine: {
+    color: 'rgba(255,255,255,0.86)',
+    fontFamily: Fonts.mono,
+    fontSize: 11.5,
+    lineHeight: 16,
+  },
+  phaseGenresText: {
+    color: 'rgba(191,219,254,0.94)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    lineHeight: 15,
   },
   phaseEnded: {
     color: 'rgba(255,255,255,0.92)',
@@ -1010,8 +1196,23 @@ const styles = StyleSheet.create({
   phaseHint: {
     color: 'rgba(255,255,255,0.78)',
     fontFamily: Fonts.serif,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 13.5,
+    lineHeight: 19,
+  },
+  phaseDetailsBtn: {
+    alignSelf: 'flex-start',
+    marginTop: 4,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.42)',
+    backgroundColor: 'rgba(3,23,37,0.46)',
+    paddingHorizontal: 12,
+    paddingVertical: 7,
+  },
+  phaseDetailsBtnText: {
+    color: '#dbeafe',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
   },
   pollLoadingWrap: {
     paddingVertical: 8,

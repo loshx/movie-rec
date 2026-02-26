@@ -1,4 +1,4 @@
-import React, { useCallback, useEffect, useMemo, useState } from 'react';
+import React, { useEffect, useMemo, useState } from 'react';
 import { Image as ExpoImage } from 'expo-image';
 import {
   Alert,
@@ -375,14 +375,11 @@ export default function GalleryScreen() {
     }, 0);
   };
 
-  const estimatedKeyboardHeight = Platform.OS === 'ios' ? 320 : 280;
-  const primeKeyboardOffset = useCallback(() => {
-    // Android does not emit keyboardWillShow, so we pre-shift on focus.
-    setKeyboardHeight((prev) => (prev > 0 ? prev : estimatedKeyboardHeight));
-  }, [estimatedKeyboardHeight]);
-
-  const commentsKeyboardOffset = Math.max(0, keyboardHeight - insets.bottom);
-  const commentsComposerBottom = Math.max(insets.bottom + 10, 14);
+  const commentsKeyboardOffset = Math.max(
+    0,
+    keyboardHeight - (Platform.OS === 'ios' ? insets.bottom : 0)
+  );
+  const commentsComposerBottom = Platform.OS === 'ios' ? Math.max(insets.bottom + 8, 12) : 8;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -608,7 +605,6 @@ export default function GalleryScreen() {
                 onChangeText={setCommentInput}
                 placeholder="Write a comment..."
                 placeholderTextColor="rgba(255,255,255,0.55)"
-                onFocus={primeKeyboardOffset}
                 returnKeyType="send"
                 onSubmitEditing={onSendComment}
                 blurOnSubmit={false}

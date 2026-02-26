@@ -598,8 +598,11 @@ export default function MovieDetailScreen() {
   const isWeb = Platform.OS === 'web';
   const activeActionColor = isWeb ? '#E5E7EB' : accentColor;
   const floatingBackTop = Math.max(insets.top + 8, 16);
-  const commentsKeyboardOffset = Math.max(0, keyboardHeight - insets.bottom);
-  const commentsComposerBottom = Math.max(insets.bottom + 10, 14);
+  const commentsKeyboardOffset = Math.max(
+    0,
+    keyboardHeight - (Platform.OS === 'ios' ? insets.bottom : 0)
+  );
+  const commentsComposerBottom = Platform.OS === 'ios' ? Math.max(insets.bottom + 8, 12) : 8;
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
