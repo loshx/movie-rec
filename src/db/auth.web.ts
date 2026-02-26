@@ -5,6 +5,7 @@ import type { BackendLocalAuthUser } from '@/lib/local-auth-backend';
 
 export type User = {
   id: number;
+  backend_user_id: number | null;
   name: string | null;
   nickname: string;
   email: string | null;
@@ -53,8 +54,15 @@ function loadState(): WebState {
     const raw = localStorage.getItem(STORAGE_KEY);
     if (!raw) return { users: [], sessionUserId: null, idSeq: 1, loginGuards: {} };
     const parsed = JSON.parse(raw) as WebState;
+    const users = (parsed.users ?? []).map((user) => ({
+      ...user,
+      backend_user_id:
+        Number.isFinite(Number((user as any)?.backend_user_id)) && Number((user as any)?.backend_user_id) > 0
+          ? Number((user as any)?.backend_user_id)
+          : null,
+    }));
     return {
-      users: parsed.users ?? [],
+      users,
       sessionUserId: parsed.sessionUserId ?? null,
       idSeq: parsed.idSeq ?? 1,
       loginGuards: parsed.loginGuards ?? {},
@@ -310,6 +318,10 @@ export async function ensureDefaultAdmin() {
   const adminPasswordHash = await hashPassword(ADMIN_LOCAL_PASSWORD);
   const createdAt = nowIso();
   if (existing) {
+    existing.backend_user_id =
+      Number.isFinite(Number(existing.backend_user_id)) && Number(existing.backend_user_id) > 0
+        ? Number(existing.backend_user_id)
+        : null;
     existing.nickname = ADMIN_LOCAL_LOGIN;
     existing.password_hash = adminPasswordHash;
     existing.auth_provider = 'local';
@@ -322,6 +334,7 @@ export async function ensureDefaultAdmin() {
 
   const user: WebUser = {
     id: webState.idSeq++,
+    backend_user_id: null,
     name: 'Admin',
     nickname: ADMIN_LOCAL_LOGIN,
     email: null,
@@ -365,6 +378,7 @@ export async function registerUser(payload: RegisterPayload): Promise<User> {
   const createdAt = nowIso();
   const user: WebUser = {
     id: webState.idSeq++,
+    backend_user_id: null,
     name: payload.name?.trim() || null,
     nickname,
     email: email || null,
@@ -432,6 +446,10 @@ export async function upsertLocalUserFromBackend(input: {
   password: string;
 }): Promise<User> {
   const remoteUser = input.user;
+  const backendUserId = Number(remoteUser?.user_id);
+  if (!Number.isFinite(backendUserId) || backendUserId <= 0) {
+    throw new Error('Invalid backend user id.');
+  }
   const nickname = String(remoteUser?.nickname || '').trim();
   if (!nickname) {
     throw new Error('Invalid backend user payload.');
@@ -442,9 +460,20 @@ export async function upsertLocalUserFromBackend(input: {
   const role: 'user' | 'admin' = remoteUser.role === 'admin' ? 'admin' : 'user';
   const authProvider: 'local' | 'google' | 'auth0' =
     remoteUser.auth_provider === 'auth0' ? 'auth0' : remoteUser.auth_provider === 'google' ? 'google' : 'local';
-  const existing = webState.users.find((u) => u.nickname.toLowerCase() === nickname.toLowerCase()) || null;
+  let existing =
+    webState.users.find((u) => Number(u.backend_user_id ?? 0) === backendUserId) || null;
+  if (!existing) {
+    existing =
+      webState.users.find(
+        (u) =>
+          u.nickname.toLowerCase() === nickname.toLowerCase() &&
+          (!Number.isFinite(Number(u.backend_user_id)) || Number(u.backend_user_id) <= 0)
+      ) || null;
+  }
   if (existing) {
+    existing.backend_user_id = backendUserId;
     existing.name = remoteUser.name?.trim() || null;
+    existing.nickname = nickname;
     existing.email = remoteUser.email?.trim() || null;
     existing.date_of_birth = remoteUser.date_of_birth?.trim() || null;
     existing.country = remoteUser.country?.trim() || null;
@@ -462,6 +491,7 @@ export async function upsertLocalUserFromBackend(input: {
 
   const user: WebUser = {
     id: webState.idSeq++,
+    backend_user_id: backendUserId,
     name: remoteUser.name?.trim() || null,
     nickname,
     email: remoteUser.email?.trim() || null,
@@ -492,6 +522,10 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
   const shouldBeAdmin = ADMIN_AUTH0_SUBS.has(sub) || (!!email && ADMIN_EMAILS.has(email.toLowerCase()));
   const targetRole: 'user' | 'admin' = shouldBeAdmin ? 'admin' : 'user';
   if (existing) {
+    existing.backend_user_id =
+      Number.isFinite(Number(existing.backend_user_id)) && Number(existing.backend_user_id) > 0
+        ? Number(existing.backend_user_id)
+        : null;
     existing.email = email;
     existing.name = name;
     existing.role = targetRole;
@@ -515,6 +549,7 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
 
   const user: WebUser = {
     id: webState.idSeq++,
+    backend_user_id: null,
     name,
     nickname,
     email,

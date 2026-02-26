@@ -27,10 +27,13 @@ import {
   backdropUrl,
   getMoviesByGenre,
   getMovieById,
+  getMovieRecommendations,
   getNewEpisodes,
   getNewMovies,
   getPopularMovies,
+  getPopularTv,
   getSimilarMovies,
+  getTvById,
   posterUrl,
   searchMulti,
   Movie,
@@ -62,12 +65,14 @@ type HomeSnapshot = {
   featured: FeaturedDisplay | null;
   popular: Movie[];
   newMovies: Movie[];
-  newMoviesTitle: string;
-  newMoviesSubtitle: string | null;
+  forYouSubtitle: string | null;
   forYouMovies: Movie[];
-  todayDramaMovies: Movie[];
-  trackedEpisodes: TvShow[];
+  forYouShows: TvShow[];
+  dailyGenreTitle: string;
+  dailyGenreMovies: Movie[];
   newEpisodes: TvShow[];
+  similarSeedTitle: string | null;
+  similarMovies: Movie[];
   watchedIds: number[];
   popularPage: number;
   popularTotalPages: number;
@@ -75,6 +80,7 @@ type HomeSnapshot = {
   newMoviesTotalPages: number;
   newEpisodesPage: number;
   newEpisodesTotalPages: number;
+  loadedAt: number;
 };
 
 let homeSnapshot: HomeSnapshot | null = null;
@@ -86,17 +92,34 @@ const GENRES = [
   { id: 28, name: 'Action' },
   { id: 18, name: 'Drama' },
   { id: 10749, name: 'Romance' },
-  { id: 878, name: 'Sciâ€‘Fi' },
+  { id: 878, name: 'Sci-Fi' },
   { id: 53, name: 'Thriller' },
   { id: 14, name: 'Fantasy' },
   { id: 99, name: 'Documentary' },
 ];
 
-const HOME_REFRESH_COOLDOWN_MS = 4 * 60 * 1000;
 const CINEMA_POLL_MS = 60 * 1000;
 const CINEMA_CLOCK_MS = 30 * 1000;
-const HOME_DETAIL_FETCH_LIMIT = 10;
-const HOME_DETAIL_FETCH_CONCURRENCY = 4;
+const HOME_DETAIL_FETCH_LIMIT = 6;
+const HOME_DETAIL_FETCH_CONCURRENCY = 3;
+const ML_MIN_SIGNAL_INTERACTIONS = 10;
+const FOR_YOU_MIN_VOTE_COUNT = 150;
+const FOR_YOU_STRICT_MIN_VOTE_COUNT = 250;
+const FOR_YOU_STRICT_MIN_VOTE_AVERAGE = 6.1;
+const HOME_SNAPSHOT_FRESH_MS = 90 * 1000;
+const HOME_ACTIVE_REFRESH_MIN_MS = 2 * 60 * 1000;
+const ML_GRAPH_SYNC_MIN_MS = 10 * 60 * 1000;
+const GENRE_ANIMATION = 16;
+const GENRE_FAMILY_MOVIE = 10751;
+const GENRE_KIDS_TV = 10762;
+
+type ForYouTastePolicy = {
+  allowAnimation: boolean;
+  allowKids: boolean;
+  allowTv: boolean;
+  minVoteCount: number;
+  minVoteAverage: number;
+};
 
 async function mapWithConcurrency<T, R>(
   items: T[],
@@ -130,12 +153,200 @@ function mapMovieToFeatured(movie: Movie): FeaturedDisplay {
   };
 }
 
-function hasListData(item: { poster_path: string | null; vote_average: number; overview: string }) {
-  return !!item.poster_path && (item.vote_average ?? 0) > 0 && !!item.overview?.trim();
+function hasListData(item: {
+  poster_path: string | null;
+  vote_average: number;
+  overview: string;
+  title?: string;
+  name?: string;
+}) {
+  const title = String((item as any)?.title ?? (item as any)?.name ?? '').trim();
+  return !!item.poster_path && title.length > 0;
 }
 
 function excludeWatched<T extends { id: number }>(items: T[], watchedIdSet: Set<number>) {
   return items.filter((item) => !watchedIdSet.has(item.id));
+}
+
+function getMediaGenreIds(item: Movie | TvShow | null | undefined): number[] {
+  const genres = (item as any)?.genres;
+  if (Array.isArray(genres) && genres.length > 0) {
+    return genres
+      .map((row: any) => Number(row?.id))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
+  }
+  const genreIds = (item as any)?.genre_ids;
+  if (Array.isArray(genreIds) && genreIds.length > 0) {
+    return genreIds
+      .map((id: any) => Number(id))
+      .filter((id: number) => Number.isFinite(id) && id > 0);
+  }
+  return [];
+}
+
+function buildSeedGenreWeights(seedMovies: (Movie | TvShow)[]) {
+  const weights = new Map<number, number>();
+  for (const movie of seedMovies) {
+    const genreIds = getMediaGenreIds(movie);
+    for (const genreId of genreIds) {
+      weights.set(genreId, (weights.get(genreId) ?? 0) + 1);
+    }
+  }
+  return weights;
+}
+
+function rankRecommendationCandidates(candidates: Movie[], seedGenreWeights: Map<number, number>) {
+  return [...candidates]
+    .map((movie, idx) => {
+      const voteAverage = Number(movie.vote_average ?? 0);
+      const voteCount = Number((movie as any).vote_count ?? 0);
+      const popularity = Number((movie as any).popularity ?? 0);
+      let score = voteAverage * 0.45 + Math.log1p(Math.max(0, voteCount)) * 0.42 + Math.log1p(Math.max(0, popularity)) * 0.13;
+      const genreIds = getMediaGenreIds(movie);
+      let overlapScore = 0;
+      for (const genreId of genreIds) {
+        overlapScore += seedGenreWeights.get(genreId) ?? 0;
+      }
+      if (overlapScore > 0) {
+        score += 1.1 + Math.min(4, overlapScore * 0.4);
+      } else if (seedGenreWeights.size > 0) {
+        score -= 0.6;
+      }
+      if (voteCount > 0 && voteCount < FOR_YOU_MIN_VOTE_COUNT) {
+        score -= 0.8;
+      }
+      return { movie, idx, score };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.idx - b.idx;
+    })
+    .map((row) => row.movie);
+}
+
+function rankTvRecommendationCandidates(candidates: TvShow[]) {
+  return [...candidates]
+    .map((show, idx) => {
+      const voteAverage = Number(show.vote_average ?? 0);
+      const voteCount = Number((show as any).vote_count ?? 0);
+      const popularity = Number((show as any).popularity ?? 0);
+      let score = voteAverage * 0.5 + Math.log1p(Math.max(0, voteCount)) * 0.35 + Math.log1p(Math.max(0, popularity)) * 0.15;
+      if (voteCount > 0 && voteCount < FOR_YOU_MIN_VOTE_COUNT) {
+        score -= 0.6;
+      }
+      return { show, idx, score };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.idx - b.idx;
+    })
+    .map((row) => row.show);
+}
+
+function filterForYouByPolicy<T extends Movie | TvShow>(items: T[], policy: ForYouTastePolicy): T[] {
+  if (items.length === 0) return items;
+  return items.filter((item) => {
+    const genreIds = getMediaGenreIds(item);
+    const voteCount = Number((item as any)?.vote_count ?? 0);
+    const voteAverage = Number((item as any)?.vote_average ?? 0);
+
+    if (!policy.allowAnimation && genreIds.includes(GENRE_ANIMATION)) return false;
+    if (!policy.allowKids && (genreIds.includes(GENRE_FAMILY_MOVIE) || genreIds.includes(GENRE_KIDS_TV))) {
+      return false;
+    }
+    if (voteCount > 0 && voteCount < policy.minVoteCount) return false;
+    if (voteAverage > 0 && voteAverage < policy.minVoteAverage) return false;
+    return true;
+  });
+}
+
+function buildFallbackForYouMovies(options: {
+  primary: Movie[];
+  secondary: Movie[];
+  tertiary?: Movie[];
+  watchedIdSet: Set<number>;
+  limit?: number;
+}) {
+  const { primary, secondary, tertiary = [], watchedIdSet, limit = 20 } = options;
+  const dedup = new Map<number, Movie>();
+  for (const item of [...primary, ...secondary, ...tertiary]) {
+    if (!item || watchedIdSet.has(item.id) || !hasListData(item)) continue;
+    if (!dedup.has(item.id)) dedup.set(item.id, item);
+  }
+  return rankRecommendationCandidates(Array.from(dedup.values()), new Map<number, number>()).slice(0, limit);
+}
+
+function buildFallbackForYouShows(options: {
+  primary: TvShow[];
+  secondary: TvShow[];
+  watchedIdSet: Set<number>;
+  limit?: number;
+}) {
+  const { primary, secondary, watchedIdSet, limit = 20 } = options;
+  const dedup = new Map<number, TvShow>();
+  for (const item of [...primary, ...secondary]) {
+    if (!item || watchedIdSet.has(item.id) || !hasListData(item)) continue;
+    if (!dedup.has(item.id)) dedup.set(item.id, item);
+  }
+  return rankTvRecommendationCandidates(Array.from(dedup.values())).slice(0, limit);
+}
+
+function shuffleItems<T>(items: T[]) {
+  const arr = [...items];
+  for (let i = arr.length - 1; i > 0; i -= 1) {
+    const j = Math.floor(Math.random() * (i + 1));
+    const tmp = arr[i];
+    arr[i] = arr[j];
+    arr[j] = tmp;
+  }
+  return arr;
+}
+
+function blendById<T extends { id: number }>(options: {
+  personalized: T[];
+  fallback: T[];
+  limit?: number;
+  minPersonalized?: number;
+}) {
+  const { personalized, fallback, limit = 20, minPersonalized = 6 } = options;
+
+  const uniquePersonalized = Array.from(new Map(personalized.map((x) => [x.id, x])).values());
+  const personalizedIds = new Set(uniquePersonalized.map((x) => x.id));
+  const uniqueFallback = Array.from(
+    new Map(fallback.filter((x) => !personalizedIds.has(x.id)).map((x) => [x.id, x])).values()
+  );
+
+  const personalPool = shuffleItems(uniquePersonalized);
+  const fallbackPool = shuffleItems(uniqueFallback);
+
+  const out: T[] = [];
+  const personalizedTarget = Math.min(
+    personalPool.length,
+    Math.max(minPersonalized, Math.ceil(limit * 0.55))
+  );
+
+  let p = 0;
+  let f = 0;
+  while (out.length < limit && (p < personalizedTarget || f < fallbackPool.length)) {
+    if (p < personalizedTarget) out.push(personalPool[p++]);
+    if (out.length >= limit) break;
+    if (f < fallbackPool.length) out.push(fallbackPool[f++]);
+  }
+  while (out.length < limit && p < personalPool.length) out.push(personalPool[p++]);
+  while (out.length < limit && f < fallbackPool.length) out.push(fallbackPool[f++]);
+  return out.slice(0, limit);
+}
+
+function getLocalDaySeed(date = new Date()) {
+  const localMidnight = new Date(date.getFullYear(), date.getMonth(), date.getDate());
+  return Math.floor(localMidnight.getTime() / 86400000);
+}
+
+function pickDailyItem<T>(items: T[], salt = 0): T | null {
+  if (!items.length) return null;
+  const daySeed = getLocalDaySeed();
+  const idx = Math.abs(daySeed + salt) % items.length;
+  return items[idx] ?? null;
 }
 
 function randomStartPage(max = 5) {
@@ -177,10 +388,54 @@ function isTvItem(item: SearchResultItem) {
   return 'name' in item && !('title' in item);
 }
 
+function isPersonItem(item: SearchResultItem): item is SearchMediaResult {
+  return 'media_type' in item && item.media_type === 'person';
+}
+
+function resolveSearchImagePath(item: SearchResultItem) {
+  if (isPersonItem(item)) {
+    return item.profile_path ?? item.poster_path ?? null;
+  }
+  return item.poster_path ?? null;
+}
+
+function resolvePersonRole(item: SearchResultItem): 'actor' | 'director' {
+  if (!isPersonItem(item)) return 'actor';
+  const department = String(item.known_for_department ?? '').trim().toLowerCase();
+  return department === 'directing' ? 'director' : 'actor';
+}
+
 function toTitle(item: SearchResultItem) {
   if ('title' in item && item.title) return item.title;
   if ('name' in item && item.name) return item.name;
   return '';
+}
+
+function hasSearchCardData(item: SearchResultItem) {
+  const title = toTitle(item).trim();
+  return !!resolveSearchImagePath(item) && title.length > 0;
+}
+
+function rankByQueryMatch(items: SearchResultItem[], query: string): SearchResultItem[] {
+  const q = query.trim().toLowerCase();
+  if (!q) return items;
+  return [...items]
+    .map((item, idx) => {
+      const title = toTitle(item).toLowerCase();
+      const voteAverage = Number((item as any).vote_average ?? 0);
+      const voteCount = Number((item as any).vote_count ?? 0);
+      let textScore = 0;
+      if (title === q) textScore = 3;
+      else if (title.startsWith(q)) textScore = 2;
+      else if (title.includes(q)) textScore = 1;
+      const qualityScore = voteAverage * 0.12 + Math.log1p(Math.max(0, voteCount)) * 0.08;
+      return { item, idx, score: textScore * 100 + qualityScore };
+    })
+    .sort((a, b) => {
+      if (b.score !== a.score) return b.score - a.score;
+      return a.idx - b.idx;
+    })
+    .map((x) => x.item);
 }
 
 function rankByTaste(items: SearchResultItem[], signals: SearchTasteSignals): SearchResultItem[] {
@@ -221,12 +476,14 @@ export default function HomeScreen() {
   const [featured, setFeatured] = useState<FeaturedDisplay | null>(null);
   const [popular, setPopular] = useState<Movie[]>([]);
   const [newMovies, setNewMovies] = useState<Movie[]>([]);
-  const [newMoviesTitle, setNewMoviesTitle] = useState('New Movies');
-  const [newMoviesSubtitle, setNewMoviesSubtitle] = useState<string | null>(null);
+  const [forYouSubtitle, setForYouSubtitle] = useState<string | null>(null);
   const [forYouMovies, setForYouMovies] = useState<Movie[]>([]);
-  const [todayDramaMovies, setTodayDramaMovies] = useState<Movie[]>([]);
-  const [trackedEpisodes, setTrackedEpisodes] = useState<TvShow[]>([]);
+  const [forYouShows, setForYouShows] = useState<TvShow[]>([]);
+  const [dailyGenreTitle, setDailyGenreTitle] = useState('Today Drama');
+  const [dailyGenreMovies, setDailyGenreMovies] = useState<Movie[]>([]);
   const [newEpisodes, setNewEpisodes] = useState<TvShow[]>([]);
+  const [similarSeedTitle, setSimilarSeedTitle] = useState<string | null>(null);
+  const [similarMovies, setSimilarMovies] = useState<Movie[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [minDelayDone, setMinDelayDone] = useState(false);
@@ -264,6 +521,7 @@ export default function HomeScreen() {
   const heroScrollX = useRef(new Animated.Value(0)).current;
   const refreshTokenRef = useRef(0);
   const lastHomeLoadAtRef = useRef(0);
+  const lastMlGraphSyncAtRef = useRef(0);
   const firstLoadDoneRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
   const shouldRefreshOnActiveRef = useRef(false);
@@ -319,45 +577,124 @@ export default function HomeScreen() {
       if (!silent) setLoading(true);
       setError(null);
       try {
-        const watchedRows = user ? await getUserWatched(user.id) : [];
-        const watchedIdSet = new Set(watchedRows.map((row) => row.tmdbId));
-        if (token !== refreshTokenRef.current) return;
-        setWatchedIds(Array.from(watchedIdSet));
-
         const popularStartPage = randomizePages ? randomStartPage(5) : 1;
         const newMoviesStartPage = randomizePages ? randomStartPage(5) : 1;
         const newEpisodesStartPage = randomizePages ? randomStartPage(5) : 1;
-        const todayDramaPage = randomizePages ? randomStartPage(4) : 1;
+        const dailyGenre = pickDailyItem(GENRES, 0) ?? GENRES[4];
+        const dailyGenrePage = randomizePages ? (Math.abs(getLocalDaySeed() + dailyGenre.id) % 4) + 1 : 1;
 
-        const [featuredDb, popularRes, newMovieRes, newEpisodeRes, todayDramaRes] = await Promise.all([
+        const [
+          watchedRows,
+          featuredDb,
+          popularRes,
+          popularTvRes,
+          newMovieRes,
+          newEpisodeRes,
+          dailyGenreRes,
+        ] = await Promise.all([
+          user ? getUserWatched(user.id) : Promise.resolve([]),
           getFeaturedMovie(),
           getPopularMovies(popularStartPage),
+          getPopularTv(popularStartPage),
           getNewMovies(newMoviesStartPage),
           getNewEpisodes(newEpisodesStartPage),
-          getMoviesByGenre(18, todayDramaPage),
+          getMoviesByGenre(dailyGenre.id, dailyGenrePage),
         ]);
 
         if (token !== refreshTokenRef.current) return;
+        const watchedIdSet = new Set(watchedRows.map((row) => row.tmdbId));
+        setWatchedIds(Array.from(watchedIdSet));
 
         const popularMovies = excludeWatched((popularRes.results ?? []).filter(hasListData), watchedIdSet);
+        const popularTvShows = excludeWatched((popularTvRes.results ?? []).filter(hasListData), watchedIdSet);
+        const freshNewMovies = excludeWatched((newMovieRes.results ?? []).filter(hasListData), watchedIdSet);
+        const cleanOnTheAir = excludeWatched((newEpisodeRes.results ?? []).filter(hasListData), watchedIdSet);
+        const nextDailyGenreMovies = excludeWatched((dailyGenreRes.results ?? []).filter(hasListData), watchedIdSet).slice(0, 20);
+        const quickFallbackForYou = buildFallbackForYouMovies({
+          primary: freshNewMovies,
+          secondary: popularMovies,
+          tertiary: nextDailyGenreMovies,
+          watchedIdSet,
+          limit: 20,
+        }).slice(0, 20);
+
+        const baseFeatured =
+          featuredDb && (featuredDb.title || featuredDb.backdrop_path)
+            ? !featuredDb.tmdb_id || !watchedIdSet.has(featuredDb.tmdb_id)
+              ? {
+                  tmdb_id: featuredDb.tmdb_id,
+                  title: featuredDb.title,
+                  overview: featuredDb.overview,
+                  backdrop_path: featuredDb.backdrop_path,
+                  poster_path: featuredDb.poster_path,
+                }
+              : popularMovies.length > 0
+                ? mapMovieToFeatured(popularMovies[0])
+                : null
+            : popularMovies.length > 0
+              ? mapMovieToFeatured(popularMovies[0])
+              : null;
+
+        // Show Home sections immediately; personalization keeps loading in background.
         setPopular(popularMovies);
+        setNewMovies(freshNewMovies);
+        setDailyGenreTitle(`Today ${dailyGenre.name}`);
+        setDailyGenreMovies(nextDailyGenreMovies);
+        setNewEpisodes(cleanOnTheAir);
         setPopularPage(popularStartPage);
         setPopularTotalPages(popularRes.total_pages ?? 1);
-        let nextNewMovies = excludeWatched((newMovieRes.results ?? []).filter(hasListData), watchedIdSet);
-        let nextNewMoviesTitle = 'New Movies';
-        let nextNewMoviesSubtitle: string | null = null;
-        let nextForYouMovies: Movie[] = [];
-        const nextTodayDramaMovies = excludeWatched(
-          (todayDramaRes.results ?? []).filter(hasListData),
-          watchedIdSet
-        ).slice(0, 20);
         setNewMoviesPage(newMoviesStartPage);
         setNewMoviesTotalPages(newMovieRes.total_pages ?? 1);
-        const cleanOnTheAir = excludeWatched((newEpisodeRes.results ?? []).filter(hasListData), watchedIdSet);
-        let nextTrackedEpisodes: TvShow[] = [];
-        setNewEpisodes(cleanOnTheAir);
         setNewEpisodesPage(newEpisodesStartPage);
         setNewEpisodesTotalPages(newEpisodeRes.total_pages ?? 1);
+        setFeatured(baseFeatured);
+        setForYouMovies((prev) => (prev.length > 0 ? prev : quickFallbackForYou));
+        if (!user) {
+          setForYouShows([]);
+          setForYouSubtitle('Popular and fresh picks for now');
+        } else {
+          setForYouSubtitle((prev) => prev ?? 'Building personalized picks...');
+        }
+
+        homeSnapshot = {
+          userId: user?.id ?? null,
+          featured: baseFeatured,
+          popular: popularMovies,
+          newMovies: freshNewMovies,
+          forYouSubtitle: user ? 'Building personalized picks...' : 'Popular and fresh picks for now',
+          forYouMovies: quickFallbackForYou,
+          forYouShows: [],
+          dailyGenreTitle: `Today ${dailyGenre.name}`,
+          dailyGenreMovies: nextDailyGenreMovies,
+          newEpisodes: cleanOnTheAir,
+          similarSeedTitle: null,
+          similarMovies: [],
+          watchedIds: Array.from(watchedIdSet),
+          popularPage: popularStartPage,
+          popularTotalPages: popularRes.total_pages ?? 1,
+          newMoviesPage: newMoviesStartPage,
+          newMoviesTotalPages: newMovieRes.total_pages ?? 1,
+          newEpisodesPage: newEpisodesStartPage,
+          newEpisodesTotalPages: newEpisodeRes.total_pages ?? 1,
+          loadedAt: Date.now(),
+        };
+        lastHomeLoadAtRef.current = Date.now();
+
+        let nextForYouMovies: Movie[] = [];
+        let nextForYouShows: TvShow[] = [];
+        let nextForYouSubtitle: string | null = null;
+        let nextSimilarSeedTitle: string | null = null;
+        let nextSimilarMovies: Movie[] = [];
+        let similarForYouPool: Movie[] = [];
+        let userMovieSignalCount = 0;
+        let userTvSignalCount = 0;
+        let forYouPolicy: ForYouTastePolicy = {
+          allowAnimation: false,
+          allowKids: false,
+          allowTv: false,
+          minVoteCount: FOR_YOU_STRICT_MIN_VOTE_COUNT,
+          minVoteAverage: FOR_YOU_STRICT_MIN_VOTE_AVERAGE,
+        };
 
         if (user) {
           try {
@@ -366,7 +703,23 @@ export default function HomeScreen() {
               getUserFavorites(user.id),
               getUserRatings(user.id),
             ]);
+
             const watchedIds = new Set(watchedRows.map((row) => row.tmdbId));
+            const movieSignalIds = new Set<number>([
+              ...watchlistRows.filter((row) => row.mediaType !== 'tv').map((row) => row.tmdbId),
+              ...favoriteRows.filter((row) => row.mediaType !== 'tv').map((row) => row.tmdbId),
+              ...watchedRows.filter((row) => row.mediaType !== 'tv').map((row) => row.tmdbId),
+              ...ratingRows.filter((row) => row.mediaType !== 'tv').map((row) => row.tmdbId),
+            ]);
+            userMovieSignalCount = movieSignalIds.size;
+            const tvSignalIds = new Set<number>([
+              ...watchlistRows.filter((row) => row.mediaType === 'tv').map((row) => row.tmdbId),
+              ...favoriteRows.filter((row) => row.mediaType === 'tv').map((row) => row.tmdbId),
+              ...watchedRows.filter((row) => row.mediaType === 'tv').map((row) => row.tmdbId),
+              ...ratingRows.filter((row) => row.mediaType === 'tv').map((row) => row.tmdbId),
+            ]);
+            userTvSignalCount = tvSignalIds.size;
+
             const seedMovieIds = Array.from(
               new Set([
                 ...ratingRows
@@ -378,83 +731,165 @@ export default function HomeScreen() {
                 ...watchedRows.filter((row) => row.mediaType !== 'tv').map((row) => row.tmdbId),
               ].filter((id) => Number.isFinite(id) && id > 0))
             );
-            const trackedTvIds = new Set<number>();
-            [...watchlistRows, ...favoriteRows].forEach((row) => {
-              if (row.mediaType === 'tv' && !watchedIds.has(row.tmdbId)) {
-                trackedTvIds.add(row.tmdbId);
+
+            const seedMovieDetails = await mapWithConcurrency(
+              seedMovieIds.slice(0, HOME_DETAIL_FETCH_LIMIT),
+              HOME_DETAIL_FETCH_CONCURRENCY,
+              async (tmdbId) => {
+                try {
+                  return await getMovieById(tmdbId);
+                } catch {
+                  return null;
+                }
               }
-            });
-            if (trackedTvIds.size > 0) {
-              nextTrackedEpisodes = cleanOnTheAir.filter((tv) => trackedTvIds.has(tv.id)).slice(0, 20);
-            }
-            const genreCount: Record<number, number> = {};
-            const candidateMovieIds = new Set<number>([
-              ...((popularRes.results ?? []).map((item) => item.id)),
-              ...((newMovieRes.results ?? []).map((item) => item.id)),
-            ]);
+            );
+            const seedTvDetails = await mapWithConcurrency(
+              Array.from(tvSignalIds).slice(0, HOME_DETAIL_FETCH_LIMIT),
+              HOME_DETAIL_FETCH_CONCURRENCY,
+              async (tmdbId) => {
+                try {
+                  return await getTvById(tmdbId);
+                } catch {
+                  return null;
+                }
+              }
+            );
+            const seedGenreWeights = buildSeedGenreWeights(
+              [
+                ...seedMovieDetails.filter((movie): movie is Movie => !!movie),
+                ...seedTvDetails.filter((show): show is TvShow => !!show),
+              ]
+            );
+            const animationTasteWeight = seedGenreWeights.get(GENRE_ANIMATION) ?? 0;
+            const kidsTasteWeight =
+              (seedGenreWeights.get(GENRE_FAMILY_MOVIE) ?? 0) +
+              (seedGenreWeights.get(GENRE_KIDS_TV) ?? 0);
+            const hasAnySignal = userMovieSignalCount + userTvSignalCount > 0;
+            forYouPolicy = {
+              allowAnimation: animationTasteWeight > 0,
+              allowKids: kidsTasteWeight > 0,
+              allowTv: userTvSignalCount > 0,
+              minVoteCount:
+                hasAnySignal && userMovieSignalCount >= ML_MIN_SIGNAL_INTERACTIONS
+                  ? FOR_YOU_MIN_VOTE_COUNT
+                  : FOR_YOU_STRICT_MIN_VOTE_COUNT,
+              minVoteAverage:
+                hasAnySignal && userMovieSignalCount >= ML_MIN_SIGNAL_INTERACTIONS
+                  ? 5.8
+                  : FOR_YOU_STRICT_MIN_VOTE_AVERAGE,
+            };
 
             if (hasMlApi()) {
               try {
                 const followingProfiles = await getFollowingProfiles(user.id);
-                await syncMlFollowingGraph(
-                  user.id,
-                  followingProfiles.map((p) => p.user_id)
-                );
-                const mlIds = await getMlRecommendations(user.id, {
-                  mediaType: 'movie',
-                  topN: HOME_DETAIL_FETCH_LIMIT * 2,
-                });
-                const limitedMlIds = mlIds.slice(0, HOME_DETAIL_FETCH_LIMIT);
-                if (limitedMlIds.length > 0) {
-                  const details = await mapWithConcurrency(
-                    limitedMlIds,
-                    HOME_DETAIL_FETCH_CONCURRENCY,
-                    async (row) => {
-                      try {
-                        return await getMovieById(row.tmdb_id);
-                      } catch {
-                        return null;
-                      }
-                    }
+                const now = Date.now();
+                if (now - lastMlGraphSyncAtRef.current > ML_GRAPH_SYNC_MIN_MS) {
+                  await syncMlFollowingGraph(
+                    user.id,
+                    followingProfiles.map((p) => p.user_id)
                   );
-                  const mlMovies = details
-                    .filter((item): item is Movie => !!item)
-                    .filter((item) => !watchedIds.has(item.id))
-                    .filter(hasListData);
-                  if (mlMovies.length > 0) {
-                    nextForYouMovies = mlMovies.slice(0, 20);
-                    nextNewMovies = mlMovies;
-                    nextNewMoviesTitle = 'For You (ML)';
-                    const seedMovieId = seedMovieIds[0] ?? null;
-                    if (seedMovieId) {
-                      try {
-                        const seedMovie = await getMovieById(seedMovieId);
-                        const recoTop = mlMovies[0];
-                        if (seedMovie?.title && recoTop?.title) {
-                          nextNewMoviesSubtitle = `You loved ${seedMovie.title}, we think you'll love ${recoTop.title}`;
+                  lastMlGraphSyncAtRef.current = now;
+                }
+                const shouldUseMlPrimary =
+                  movieSignalIds.size + tvSignalIds.size >= ML_MIN_SIGNAL_INTERACTIONS ||
+                  followingProfiles.length > 0;
+                if (shouldUseMlPrimary) {
+                  const [mlMovieIds, mlTvIds] = await Promise.all([
+                    getMlRecommendations(user.id, {
+                      mediaType: 'movie',
+                      topN: HOME_DETAIL_FETCH_LIMIT * 3,
+                    }),
+                    getMlRecommendations(user.id, {
+                      mediaType: 'tv',
+                      topN: HOME_DETAIL_FETCH_LIMIT * 3,
+                    }),
+                  ]);
+                  const limitedMlIds = mlMovieIds.slice(0, HOME_DETAIL_FETCH_LIMIT * 3);
+                  if (limitedMlIds.length > 0) {
+                    const details = await mapWithConcurrency(
+                      limitedMlIds,
+                      HOME_DETAIL_FETCH_CONCURRENCY,
+                      async (row) => {
+                        try {
+                          return await getMovieById(row.tmdb_id);
+                        } catch {
+                          return null;
                         }
-                      } catch {
+                      }
+                    );
+                    const mlReasonById = new Map<number, string>(
+                      limitedMlIds.map((row) => [
+                        Number(row.tmdb_id),
+                        String(row.reason ?? '').trim(),
+                      ])
+                    );
+                    const mlMovies = rankRecommendationCandidates(
+                      details
+                        .filter((item): item is Movie => !!item)
+                        .filter((item) => !watchedIds.has(item.id))
+                        .filter(hasListData),
+                      seedGenreWeights
+                    );
+                    const filteredMlMovies = filterForYouByPolicy(mlMovies, forYouPolicy);
+                    if (filteredMlMovies.length > 0) {
+                      nextForYouMovies = filteredMlMovies.slice(0, 20);
+                      const seedMovie = seedMovieDetails.find((movie): movie is Movie => !!movie) ?? null;
+                      const recoTop = filteredMlMovies[0] ?? null;
+                      if (seedMovie?.title && recoTop?.title) {
+                        nextForYouSubtitle = `You loved ${seedMovie.title}, we think you'll love ${recoTop.title}`;
+                      }
+                      if (!nextForYouSubtitle) {
+                        const topReason = recoTop ? mlReasonById.get(recoTop.id) : '';
+                        const reason = String(topReason ?? limitedMlIds[0]?.reason ?? '').trim();
+                        nextForYouSubtitle = reason || null;
                       }
                     }
-                    if (!nextNewMoviesSubtitle) {
-                      const reason = String(limitedMlIds[0]?.reason ?? '').trim();
-                      nextNewMoviesSubtitle = reason || null;
-                    }
+                  }
+                  const limitedMlTvIds = mlTvIds.slice(0, HOME_DETAIL_FETCH_LIMIT * 3);
+                  if (limitedMlTvIds.length > 0) {
+                    const tvDetails = await mapWithConcurrency(
+                      limitedMlTvIds,
+                      HOME_DETAIL_FETCH_CONCURRENCY,
+                      async (row) => {
+                        try {
+                          return await getTvById(row.tmdb_id);
+                        } catch {
+                          return null;
+                        }
+                      }
+                    );
+                    const rankedTv = rankTvRecommendationCandidates(
+                      tvDetails
+                        .filter((item): item is TvShow => !!item)
+                        .filter((item) => !watchedIds.has(item.id))
+                        .filter(hasListData)
+                    );
+                    nextForYouShows = filterForYouByPolicy(rankedTv, forYouPolicy).slice(0, 20);
                   }
                 }
               } catch {
               }
             }
 
-            if (nextForYouMovies.length === 0 && seedMovieIds.length > 0) {
+            if (seedMovieIds.length > 0) {
               try {
+                const prioritizedSeedIds = seedMovieIds.slice(0, 3);
                 const similarBatches = await Promise.all(
-                  seedMovieIds.slice(0, 4).map((tmdbId) => getSimilarMovies(tmdbId, 1).catch(() => ({ results: [] as Movie[] })))
+                  prioritizedSeedIds.map(async (tmdbId) => {
+                    const [similarRes, recRes] = await Promise.all([
+                      getSimilarMovies(tmdbId, 1).catch(() => ({ results: [] as Movie[] })),
+                      getMovieRecommendations(tmdbId, 1).catch(() => ({ results: [] as Movie[] })),
+                    ]);
+                    return {
+                      tmdbId,
+                      items: [...(similarRes.results ?? []), ...(recRes.results ?? [])],
+                    };
+                  })
                 );
                 const merged: Movie[] = [];
                 const seen = new Set<number>();
                 for (const batch of similarBatches) {
-                  for (const item of batch.results ?? []) {
+                  for (const item of batch.items ?? []) {
                     if (seen.has(item.id)) continue;
                     if (watchedIds.has(item.id)) continue;
                     if (!hasListData(item)) continue;
@@ -462,118 +897,150 @@ export default function HomeScreen() {
                     merged.push(item);
                   }
                 }
-                nextForYouMovies = merged.slice(0, 20);
+                similarForYouPool = filterForYouByPolicy(
+                  rankRecommendationCandidates(merged, seedGenreWeights),
+                  forYouPolicy
+                ).slice(0, 24);
+
+                if (similarForYouPool.length > 0) {
+                  const primarySeedId = prioritizedSeedIds[0] ?? null;
+                  const primarySeedTitle =
+                    (primarySeedId
+                      ? seedMovieDetails.find((movie): movie is Movie => !!movie && movie.id === primarySeedId)?.title
+                      : null) ?? null;
+                  if (!nextForYouSubtitle && primarySeedTitle) {
+                    nextForYouSubtitle = `Because you liked ${primarySeedTitle}`;
+                  }
+                }
               } catch {
               }
             }
 
-            if (nextNewMoviesTitle === 'For You (ML)') {
-              if (token !== refreshTokenRef.current) return;
-              setNewMovies(nextNewMovies);
-              setNewMoviesTitle(nextNewMoviesTitle);
-              setNewMoviesSubtitle(nextNewMoviesSubtitle);
-            }
+            const favoriteMovieRows = favoriteRows.filter(
+              (row) => row.mediaType !== 'tv' && Number.isFinite(Number(row.tmdbId)) && Number(row.tmdbId) > 0
+            );
+            const dailyFavoriteRow = pickDailyItem(
+              favoriteMovieRows,
+              Number(user.id || 0) * 17 + 9
+            );
 
-            const watchedCandidates = watchedRows
-              .slice(0, HOME_DETAIL_FETCH_LIMIT)
-              .filter((row) => candidateMovieIds.has(row.tmdbId));
-            await mapWithConcurrency(watchedCandidates, HOME_DETAIL_FETCH_CONCURRENCY, async (row) => {
+            if (dailyFavoriteRow) {
               try {
-                const detail = await getMovieById(row.tmdbId);
-                const genres = (detail as any)?.genres as { id: number }[] | undefined;
-                genres?.forEach((g) => {
-                  if (!g?.id) return;
-                  genreCount[g.id] = (genreCount[g.id] ?? 0) + 1;
-                });
+                const [seedMovie, similarRes, recRes] = await Promise.all([
+                  getMovieById(dailyFavoriteRow.tmdbId).catch(() => null),
+                  getSimilarMovies(dailyFavoriteRow.tmdbId, 1).catch(() => ({ results: [] as Movie[] })),
+                  getMovieRecommendations(dailyFavoriteRow.tmdbId, 1).catch(() => ({ results: [] as Movie[] })),
+                ]);
+                nextSimilarSeedTitle = seedMovie?.title ?? `TMDB #${dailyFavoriteRow.tmdbId}`;
+                const pool = [...(similarRes.results ?? []), ...(recRes.results ?? [])];
+                const dedup = new Map<number, Movie>();
+                for (const item of pool) {
+                  if (!item || watchedIds.has(item.id) || !hasListData(item)) continue;
+                  if (!dedup.has(item.id)) dedup.set(item.id, item);
+                }
+                nextSimilarMovies = rankRecommendationCandidates(
+                  Array.from(dedup.values()),
+                  seedGenreWeights
+                ).slice(0, 20);
               } catch {
-              }
-              return null;
-            });
-
-            const topGenreIds = Object.entries(genreCount)
-              .sort((a, b) => b[1] - a[1])
-              .slice(0, 2)
-              .map(([id]) => Number(id));
-
-            if (topGenreIds.length > 0 && nextNewMoviesTitle !== 'For You (ML)') {
-              const genrePage = randomizePages ? randomStartPage(3) : 1;
-              const genreBatches = await Promise.all(
-                topGenreIds.map((id) => getMoviesByGenre(id, genrePage))
-              );
-              const merged: Movie[] = [];
-              const seen = new Set<number>();
-              genreBatches.forEach((batch) => {
-                (batch.results ?? []).forEach((movie) => {
-                  if (seen.has(movie.id)) return;
-                  if (watchedIds.has(movie.id)) return;
-                  if (!hasListData(movie)) return;
-                  seen.add(movie.id);
-                  merged.push(movie);
-                });
-              });
-              if (merged.length > 0) {
-                nextNewMovies = merged;
-                nextNewMoviesTitle = 'For You';
               }
             }
           } catch {
           }
         }
 
+        const fallbackForYou = filterForYouByPolicy(
+          buildFallbackForYouMovies({
+            primary: freshNewMovies,
+            secondary: popularMovies,
+            tertiary: nextDailyGenreMovies,
+            watchedIdSet,
+            limit: 40,
+          }),
+          forYouPolicy
+        );
+        const fallbackForYouShows = forYouPolicy.allowTv
+          ? filterForYouByPolicy(
+              buildFallbackForYouShows({
+                primary: cleanOnTheAir,
+                secondary: popularTvShows,
+                watchedIdSet,
+                limit: 30,
+              }),
+              forYouPolicy
+            )
+          : [];
+
+        if (similarForYouPool.length > 0) {
+          if (nextForYouMovies.length === 0) {
+            nextForYouMovies = similarForYouPool.slice(0, 20);
+          } else {
+            nextForYouMovies = blendById({
+              personalized: similarForYouPool,
+              fallback: nextForYouMovies,
+              limit: 20,
+              minPersonalized: Math.max(8, Math.min(14, similarForYouPool.length)),
+            });
+          }
+        }
+
+        const shouldBlendFallback =
+          nextForYouMovies.length < 10 || userMovieSignalCount < ML_MIN_SIGNAL_INTERACTIONS;
+
+        if (nextForYouMovies.length === 0) {
+          nextForYouMovies = fallbackForYou.slice(0, 20);
+        } else if (shouldBlendFallback && similarForYouPool.length === 0) {
+          nextForYouMovies = blendById({
+            personalized: nextForYouMovies,
+            fallback: fallbackForYou,
+            limit: 20,
+            minPersonalized: Math.max(3, Math.min(10, userMovieSignalCount)),
+          });
+        } else {
+          nextForYouMovies = nextForYouMovies.slice(0, 20);
+        }
+
+        if (!forYouPolicy.allowTv) {
+          nextForYouShows = [];
+        } else if (nextForYouShows.length === 0) {
+          nextForYouShows = shuffleItems(fallbackForYouShows).slice(0, 20);
+        } else {
+          nextForYouShows = blendById({
+            personalized: nextForYouShows,
+            fallback: fallbackForYouShows,
+            limit: 20,
+            minPersonalized: 5,
+          });
+        }
+        nextForYouMovies = filterForYouByPolicy(nextForYouMovies, forYouPolicy).slice(0, 20);
+        nextForYouShows = forYouPolicy.allowTv
+          ? filterForYouByPolicy(nextForYouShows, forYouPolicy).slice(0, 20)
+          : [];
+
+        if (nextForYouMovies.length > 0 && !nextForYouSubtitle && userMovieSignalCount < ML_MIN_SIGNAL_INTERACTIONS) {
+          nextForYouSubtitle = 'Popular and fresh picks while we learn your taste';
+        }
+
         if (token !== refreshTokenRef.current) return;
         setForYouMovies(nextForYouMovies);
-        setTodayDramaMovies(nextTodayDramaMovies);
-        setTrackedEpisodes(nextTrackedEpisodes);
-        setNewMovies(nextNewMovies);
-        setNewMoviesTitle(nextNewMoviesTitle);
-        setNewMoviesSubtitle(nextNewMoviesSubtitle);
-
-        if (featuredDb && (featuredDb.title || featuredDb.backdrop_path)) {
-          if (!featuredDb.tmdb_id || !watchedIdSet.has(featuredDb.tmdb_id)) {
-            setFeatured({
-              tmdb_id: featuredDb.tmdb_id,
-              title: featuredDb.title,
-              overview: featuredDb.overview,
-              backdrop_path: featuredDb.backdrop_path,
-              poster_path: featuredDb.poster_path,
-            });
-          } else if (popularMovies.length > 0) {
-            setFeatured(mapMovieToFeatured(popularMovies[0]));
-          } else {
-            setFeatured(null);
-          }
-        } else if (popularMovies.length > 0) {
-          setFeatured(mapMovieToFeatured(popularMovies[0]));
-        } else {
-          setFeatured(null);
-        }
+        setForYouShows(nextForYouShows);
+        setForYouSubtitle(nextForYouSubtitle);
+        setSimilarSeedTitle(nextSimilarSeedTitle);
+        setSimilarMovies(nextSimilarMovies);
 
         homeSnapshot = {
           userId: user?.id ?? null,
-          featured:
-            featuredDb && (featuredDb.title || featuredDb.backdrop_path)
-              ? (!featuredDb.tmdb_id || !watchedIdSet.has(featuredDb.tmdb_id)
-                  ? {
-                      tmdb_id: featuredDb.tmdb_id,
-                      title: featuredDb.title,
-                      overview: featuredDb.overview,
-                      backdrop_path: featuredDb.backdrop_path,
-                      poster_path: featuredDb.poster_path,
-                    }
-                  : popularMovies.length > 0
-                    ? mapMovieToFeatured(popularMovies[0])
-                    : null)
-              : popularMovies.length > 0
-                ? mapMovieToFeatured(popularMovies[0])
-                : null,
+          featured: baseFeatured,
           popular: popularMovies,
-          newMovies: nextNewMovies,
-          newMoviesTitle: nextNewMoviesTitle,
-          newMoviesSubtitle: nextNewMoviesSubtitle,
+          newMovies: freshNewMovies,
+          forYouSubtitle: nextForYouSubtitle,
           forYouMovies: nextForYouMovies,
-          todayDramaMovies: nextTodayDramaMovies,
-          trackedEpisodes: nextTrackedEpisodes,
+          forYouShows: nextForYouShows,
+          dailyGenreTitle: `Today ${dailyGenre.name}`,
+          dailyGenreMovies: nextDailyGenreMovies,
           newEpisodes: cleanOnTheAir,
+          similarSeedTitle: nextSimilarSeedTitle,
+          similarMovies: nextSimilarMovies,
           watchedIds: Array.from(watchedIdSet),
           popularPage: popularStartPage,
           popularTotalPages: popularRes.total_pages ?? 1,
@@ -581,6 +1048,7 @@ export default function HomeScreen() {
           newMoviesTotalPages: newMovieRes.total_pages ?? 1,
           newEpisodesPage: newEpisodesStartPage,
           newEpisodesTotalPages: newEpisodeRes.total_pages ?? 1,
+          loadedAt: Date.now(),
         };
         lastHomeLoadAtRef.current = Date.now();
       } catch (err) {
@@ -597,12 +1065,14 @@ export default function HomeScreen() {
       setFeatured(homeSnapshot.featured);
       setPopular(homeSnapshot.popular);
       setNewMovies(homeSnapshot.newMovies);
-      setNewMoviesTitle(homeSnapshot.newMoviesTitle);
-      setNewMoviesSubtitle(homeSnapshot.newMoviesSubtitle);
+      setForYouSubtitle(homeSnapshot.forYouSubtitle);
       setForYouMovies(homeSnapshot.forYouMovies);
-      setTodayDramaMovies(homeSnapshot.todayDramaMovies);
-      setTrackedEpisodes(homeSnapshot.trackedEpisodes);
+      setForYouShows(homeSnapshot.forYouShows ?? []);
+      setDailyGenreTitle(homeSnapshot.dailyGenreTitle);
+      setDailyGenreMovies(homeSnapshot.dailyGenreMovies);
       setNewEpisodes(homeSnapshot.newEpisodes);
+      setSimilarSeedTitle(homeSnapshot.similarSeedTitle);
+      setSimilarMovies(homeSnapshot.similarMovies);
       setWatchedIds(homeSnapshot.watchedIds);
       setPopularPage(homeSnapshot.popularPage);
       setPopularTotalPages(homeSnapshot.popularTotalPages);
@@ -612,7 +1082,12 @@ export default function HomeScreen() {
       setNewEpisodesTotalPages(homeSnapshot.newEpisodesTotalPages);
       setLoading(false);
       firstLoadDoneRef.current = true;
-      lastHomeLoadAtRef.current = Date.now();
+      const snapshotLoadedAt = Number(homeSnapshot.loadedAt ?? Date.now());
+      const isSnapshotFresh = Date.now() - snapshotLoadedAt < HOME_SNAPSHOT_FRESH_MS;
+      lastHomeLoadAtRef.current = snapshotLoadedAt;
+      if (!isSnapshotFresh) {
+        void loadHome({ randomizePages: true, silent: true });
+      }
       return;
     }
     void loadHome({ randomizePages: true, silent: false }).finally(() => {
@@ -660,11 +1135,13 @@ export default function HomeScreen() {
         return;
       }
       if (nextState === 'active' && shouldRefreshOnActiveRef.current && firstLoadDoneRef.current) {
-        shouldRefreshOnActiveRef.current = false;
-        const now = Date.now();
-        if (now - lastHomeLoadAtRef.current >= HOME_REFRESH_COOLDOWN_MS) {
-          void loadHome({ randomizePages: true, silent: true });
+        const elapsed = Date.now() - Number(lastHomeLoadAtRef.current || 0);
+        if (elapsed < HOME_ACTIVE_REFRESH_MIN_MS) {
+          shouldRefreshOnActiveRef.current = false;
+          return;
         }
+        shouldRefreshOnActiveRef.current = false;
+        void loadHome({ randomizePages: true, silent: true });
       }
     });
     return () => sub.remove();
@@ -746,15 +1223,15 @@ export default function HomeScreen() {
         const res = q ? await searchMulti(q, 1) : await getPopularMovies(1);
         if (!cancelled) {
           const watchedIdSet = new Set(watchedIdsRef.current);
-          const cleaned = q
-            ? (res.results ?? []).filter(
-                (item) =>
-                  (item as SearchMediaResult).media_type === 'movie' ||
-                  ((item as SearchMediaResult).media_type === 'tv' && hasListData(item))
-              )
-            : (res.results ?? []).filter(hasListData);
-          const filtered = excludeWatched(cleaned.filter(hasListData), watchedIdSet);
-          setSearchResults(rankByTaste(filtered as SearchResultItem[], searchTasteSignalsRef.current));
+          if (q) {
+            const typed = (res.results ?? []) as SearchResultItem[];
+            const withPoster = typed.filter(hasSearchCardData);
+            setSearchResults(rankByQueryMatch(withPoster, q));
+          } else {
+            const cleaned = (res.results ?? []).filter(hasListData);
+            const filtered = excludeWatched(cleaned.filter(hasListData), watchedIdSet);
+            setSearchResults(rankByTaste(filtered as SearchResultItem[], searchTasteSignalsRef.current));
+          }
         }
       } catch {
         if (!cancelled) setSearchResults([]);
@@ -771,6 +1248,7 @@ export default function HomeScreen() {
   useEffect(() => {
     let active = true;
     (async () => {
+      if (!searchOpen) return;
       if (!user?.id) {
         if (active) {
           setSearchTasteSignals({
@@ -816,7 +1294,7 @@ export default function HomeScreen() {
     return () => {
       active = false;
     };
-  }, [user?.id]);
+  }, [searchOpen, user?.id]);
 
   const searchPopularItems = useMemo(
     () => rankByTaste(popular as SearchResultItem[], searchTasteSignals),
@@ -826,6 +1304,59 @@ export default function HomeScreen() {
     () => rankByTaste(newMovies as SearchResultItem[], searchTasteSignals),
     [newMovies, searchTasteSignals]
   );
+  const queryMovieResults = useMemo(
+    () => searchResults.filter((item) => !isPersonItem(item) && !isTvItem(item)).slice(0, 24),
+    [searchResults]
+  );
+  const querySeriesResults = useMemo(
+    () => searchResults.filter((item) => !isPersonItem(item) && isTvItem(item)).slice(0, 24),
+    [searchResults]
+  );
+  const queryActorResults = useMemo(
+    () =>
+      searchResults
+        .filter(
+          (item) =>
+            isPersonItem(item) &&
+            String(item.known_for_department ?? '')
+              .trim()
+              .toLowerCase() === 'acting'
+        )
+        .slice(0, 24),
+    [searchResults]
+  );
+  const queryDirectorResults = useMemo(
+    () =>
+      searchResults
+        .filter(
+          (item) =>
+            isPersonItem(item) &&
+            String(item.known_for_department ?? '')
+              .trim()
+              .toLowerCase() === 'directing'
+        )
+        .slice(0, 24),
+    [searchResults]
+  );
+  const queryPeopleOtherResults = useMemo(
+    () =>
+      searchResults
+        .filter((item) => {
+          if (!isPersonItem(item)) return false;
+          const dept = String(item.known_for_department ?? '')
+            .trim()
+            .toLowerCase();
+          return dept !== 'acting' && dept !== 'directing';
+        })
+        .slice(0, 24),
+    [searchResults]
+  );
+  const hasQuerySections =
+    queryMovieResults.length > 0 ||
+    querySeriesResults.length > 0 ||
+    queryActorResults.length > 0 ||
+    queryDirectorResults.length > 0 ||
+    queryPeopleOtherResults.length > 0;
   const cinemaPhase = useMemo<'upcoming' | 'live' | 'ended' | 'none'>(() => {
     if (!cinemaEvent) return 'none';
     const now = Date.parse(cinemaNowIso);
@@ -856,9 +1387,9 @@ export default function HomeScreen() {
       ...(featured ? [featured] : []),
       ...forYouMovies.slice(0, 16),
       ...newMovies.slice(0, 24),
-      ...todayDramaMovies.slice(0, 16),
+      ...dailyGenreMovies.slice(0, 16),
       ...popular.slice(0, 24),
-    ] as Array<FeaturedDisplay | Movie>;
+    ] as (FeaturedDisplay | Movie)[];
 
     const mapped = candidates.map((item) => {
       const tmdbId = Number((item as any).tmdb_id ?? (item as any).id ?? 0) || null;
@@ -882,13 +1413,9 @@ export default function HomeScreen() {
       if (!dedup.has(it.id)) dedup.set(it.id, it);
     }
 
-    const shuffled = Array.from(dedup.values());
-    for (let i = shuffled.length - 1; i > 0; i -= 1) {
-      const j = Math.floor(Math.random() * (i + 1));
-      [shuffled[i], shuffled[j]] = [shuffled[j], shuffled[i]];
-    }
-    return shuffled.slice(0, 8);
-  }, [featured, forYouMovies, newMovies, todayDramaMovies, popular]);
+    // Keep top carousel stable when sections append data via "Load more".
+    return Array.from(dedup.values()).slice(0, 8);
+  }, [featured, forYouMovies, newMovies, dailyGenreMovies, popular]);
 
   const heroSlidesKey = useMemo(() => heroSlides.map((slide) => slide.id).join('|'), [heroSlides]);
 
@@ -925,10 +1452,24 @@ export default function HomeScreen() {
   const heroCarouselHeight = heroPosterHeight + 22;
   const heroStep = Math.max(1, heroSlideWidth || heroItemWidth || 1);
 
-  const dailyForYouMovies = useMemo(() => {
-    if (forYouMovies.length > 0) return forYouMovies.slice(0, 5);
-    return newMovies.slice(0, 5);
-  }, [forYouMovies, newMovies]);
+  const forYouSectionItems = useMemo<(Movie | TvShow)[]>(() => {
+    const movieBase = forYouMovies.slice(0, 20);
+    const tvBase = forYouShows.slice(0, 20);
+
+    const mixed: (Movie | TvShow)[] = [];
+    let i = 0;
+    let j = 0;
+    while (mixed.length < 20 && (i < movieBase.length || j < tvBase.length)) {
+      if (i < movieBase.length) mixed.push(movieBase[i++]);
+      if (mixed.length >= 20) break;
+      if (j < tvBase.length) mixed.push(tvBase[j++]);
+    }
+    return mixed;
+  }, [forYouMovies, forYouShows]);
+
+  const similarSectionTitle = similarSeedTitle
+    ? `We saw that you like ${similarSeedTitle}`
+    : 'Similar Movies';
 
   const hasData = popular.length > 0 || newMovies.length > 0 || newEpisodes.length > 0;
   if ((loading && !hasData) || !minDelayDone) {
@@ -1211,11 +1752,12 @@ export default function HomeScreen() {
         ) : null}
 
         <Section
-          title="Popular Movies"
-          items={popular}
-          onLoadMore={loadMorePopular}
-          hasMore={popularPage < popularTotalPages}
-          loadingMore={loadingMore === 'popular'}
+          title="New Movies"
+          subtitle="Now playing and fresh releases"
+          items={newMovies}
+          onLoadMore={loadMoreNewMovies}
+          hasMore={newMoviesPage < newMoviesTotalPages}
+          loadingMore={loadingMore === 'newMovies'}
         />
         <Section
           title="New Episodes"
@@ -1225,36 +1767,35 @@ export default function HomeScreen() {
           hasMore={newEpisodesPage < newEpisodesTotalPages}
           loadingMore={loadingMore === 'newEpisodes'}
         />
-        {dailyForYouMovies.length > 0 ? (
+        {dailyGenreMovies.length > 0 ? (
+          <Section
+            title={dailyGenreTitle}
+            subtitle="Daily category spotlight"
+            items={dailyGenreMovies}
+          />
+        ) : null}
+        {forYouSectionItems.length > 0 ? (
           <Section
             title="For You"
-            subtitle={newMoviesSubtitle ?? "Based on your favorites and watch history"}
-            items={dailyForYouMovies}
-          />
-        ) : null}
-        {trackedEpisodes.length > 0 ? (
-          <Section
-            title="From your shows"
-            subtitle="New episodes from titles you interact with"
-            items={trackedEpisodes}
-            isTv
-          />
-        ) : null}
-        {todayDramaMovies.length > 0 ? (
-          <Section
-            title="Today Drama"
-            subtitle="Daily drama picks"
-            items={todayDramaMovies}
+            subtitle={forYouSubtitle ?? 'Based on your favorites, watched, ratings, and series taste'}
+            items={forYouSectionItems}
           />
         ) : null}
         <Section
-          title={newMoviesTitle}
-          subtitle={forYouMovies.length > 0 ? undefined : newMoviesSubtitle ?? undefined}
-          items={newMovies}
-          onLoadMore={loadMoreNewMovies}
-          hasMore={newMoviesPage < newMoviesTotalPages}
-          loadingMore={loadingMore === 'newMovies'}
+          title="Popular Movies"
+          subtitle="Top picks regardless of release year"
+          items={popular}
+          onLoadMore={loadMorePopular}
+          hasMore={popularPage < popularTotalPages}
+          loadingMore={loadingMore === 'popular'}
         />
+        {similarMovies.length > 0 ? (
+          <Section
+            title={similarSectionTitle}
+            subtitle="Similar picks based on one of your favorites"
+            items={similarMovies}
+          />
+        ) : null}
       </Animated.ScrollView>
 
       <Animated.View
@@ -1316,7 +1857,7 @@ export default function HomeScreen() {
         <TextInput
           value={searchQuery}
           onChangeText={setSearchQuery}
-          placeholder="Search movies or series..."
+          placeholder="Search movies, series, actors, directors..."
           placeholderTextColor="rgba(255,255,255,0.6)"
           style={styles.searchInput}
         />
@@ -1327,11 +1868,18 @@ export default function HomeScreen() {
         ) : (
           <ScrollView showsVerticalScrollIndicator={false} contentContainerStyle={styles.searchResults}>
             {searchQuery.trim() ? (
-              <SearchSection
-                title="Results"
-                items={searchResults}
-                onItemPress={rememberClickedSearchItem}
-              />
+              <>
+                <SearchSection title="Movies" items={queryMovieResults} onItemPress={rememberClickedSearchItem} />
+                <SearchSection title="Series" items={querySeriesResults} onItemPress={rememberClickedSearchItem} />
+                <SearchSection title="Actors" items={queryActorResults} onItemPress={rememberClickedSearchItem} />
+                <SearchSection title="Directors" items={queryDirectorResults} onItemPress={rememberClickedSearchItem} />
+                <SearchSection title="People" items={queryPeopleOtherResults} onItemPress={rememberClickedSearchItem} />
+                {!hasQuerySections ? (
+                  <View style={styles.searchSection}>
+                    <Text style={styles.historyEmpty}>No results found for this query.</Text>
+                  </View>
+                ) : null}
+              </>
             ) : (
               <>
                 <SearchSection
@@ -1377,7 +1925,7 @@ function Section({
 }: {
   title: string;
   subtitle?: string;
-  items: Movie[] | TvShow[];
+  items: (Movie | TvShow)[];
   isTv?: boolean;
   onLoadMore?: () => void;
   hasMore?: boolean;
@@ -1385,9 +1933,8 @@ function Section({
 }) {
   const theme = useTheme();
   const safeItems = useMemo(() => items.filter((item) => hasListData(item)), [items]);
-  const renderItems = safeItems.slice(0, 20);
   const listData = useMemo<SectionRowItem[]>(() => {
-    const base: SectionRowItem[] = renderItems.map((item, idx) => ({
+    const base: SectionRowItem[] = safeItems.map((item, idx) => ({
       kind: 'media',
       key: `${item.id}-${idx}`,
       item,
@@ -1396,7 +1943,7 @@ function Section({
       base.push({ kind: 'loadMore', key: 'load-more' });
     }
     return base;
-  }, [hasMore, renderItems]);
+  }, [hasMore, safeItems]);
 
   return (
     <View style={styles.section}>
@@ -1436,12 +1983,16 @@ function Section({
           return (
             <Pressable
               style={styles.card}
-              onPress={() =>
+              onPress={() => {
+                const mediaType =
+                  typeof isTv === 'boolean'
+                    ? (isTv ? 'tv' : 'movie')
+                    : ('name' in (entry.item as any) && !('title' in (entry.item as any)) ? 'tv' : 'movie');
                 router.push({
                   pathname: '/movie/[id]',
-                  params: { id: String(entry.item.id), type: isTv ? 'tv' : 'movie' },
-                })
-              }>
+                  params: { id: String(entry.item.id), type: mediaType },
+                });
+              }}>
               <Image
                 source={{ uri: posterUrl(entry.item.poster_path, 'w342') ?? undefined }}
                 style={styles.cardImage}
@@ -1466,7 +2017,7 @@ function SearchSection({
   items: SearchResultItem[];
   onItemPress?: (item: SearchResultItem) => void;
 }) {
-  const safeItems = useMemo(() => items.filter((item) => !!item.poster_path).slice(0, 24), [items]);
+  const safeItems = useMemo(() => items.filter(hasSearchCardData).slice(0, 24), [items]);
   if (safeItems.length === 0) return null;
   return (
     <View style={styles.searchSection}>
@@ -1486,6 +2037,13 @@ function SearchSection({
           <Pressable
             style={styles.searchCard}
             onPress={() => {
+              if (isPersonItem(item)) {
+                router.push({
+                  pathname: '/person/[id]',
+                  params: { id: String(item.id), role: resolvePersonRole(item) },
+                });
+                return;
+              }
               onItemPress?.(item);
               router.push({
                 pathname: '/movie/[id]',
@@ -1493,7 +2051,7 @@ function SearchSection({
               });
             }}>
             <Image
-              source={{ uri: posterUrl(item.poster_path, 'w185') ?? undefined }}
+              source={{ uri: posterUrl(resolveSearchImagePath(item), 'w185') ?? undefined }}
               style={styles.searchCardImage}
               contentFit="cover"
               transition={100}

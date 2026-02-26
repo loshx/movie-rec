@@ -165,6 +165,7 @@ export default function ProfileEditScreen() {
         getUserFavoriteActors(user.id),
         getUserFavoriteDirectors(user.id),
       ]);
+      const tastePublic = !!privacy.watchlist && !!privacy.favorites && !!privacy.watched && !!privacy.rated;
 
       await syncPublicProfile({
         user_id: user.id,
@@ -177,8 +178,8 @@ export default function ProfileEditScreen() {
           favorites: privacy.favorites,
           watched: privacy.watched,
           rated: privacy.rated,
-          favorite_actors: true,
-          favorite_directors: true,
+          favorite_actors: tastePublic,
+          favorite_directors: tastePublic,
         },
         watchlist,
         favorites,

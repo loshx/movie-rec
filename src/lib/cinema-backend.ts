@@ -1,5 +1,5 @@
 import Constants from 'expo-constants';
-import { getBackendUserTokenForUser, setBackendUserSession } from './backend-session';
+import { getBackendUserTokenForUser, resolveBackendUserId, setBackendUserSession } from './backend-session';
 
 export type BackendCinemaEvent = {
   id: number;
@@ -44,6 +44,7 @@ export type BackendCinemaPoll = {
   options: BackendCinemaPollOption[];
   created_at: string;
   updated_at: string;
+  expires_at: string;
 };
 
 export type BackendCloudinarySignature = {
@@ -56,14 +57,16 @@ export type BackendCloudinarySignature = {
   public_id: string;
   folder: string;
   session_token?: string | null;
+  canonical_user_id?: number | null;
 };
 
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_BACKEND_URL?: string;
 };
+const BACKEND_REQUEST_TIMEOUT_MS = 6000;
 
 function backendBaseUrl() {
-  const raw = (extra.EXPO_PUBLIC_BACKEND_URL ?? '').trim();
+  const raw = (process.env.EXPO_PUBLIC_BACKEND_URL ?? extra.EXPO_PUBLIC_BACKEND_URL ?? '').trim();
   if (!raw) return null;
   return raw.replace(/\/+$/, '');
 }
@@ -95,7 +98,24 @@ function rethrowIfMissingCinemaPollRoute(error: unknown): never | void {
 }
 
 async function requestJson<T>(url: string, init?: RequestInit): Promise<T> {
-  const res = await fetch(url, init);
+  const controller = init?.signal ? null : new AbortController();
+  const timeout = controller
+    ? setTimeout(() => controller.abort(), BACKEND_REQUEST_TIMEOUT_MS)
+    : null;
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      ...(init ?? {}),
+      signal: init?.signal ?? controller?.signal,
+    });
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError') {
+      throw new Error('Backend request timeout.');
+    }
+    throw err;
+  } finally {
+    if (timeout) clearTimeout(timeout);
+  }
   if (!res.ok) {
     let message = `Backend error ${res.status}`;
     try {
@@ -134,7 +154,7 @@ export async function backendGetLatestCinemaEvent() {
 
 export async function backendGetCurrentCinemaPoll(userId?: number | null) {
   const search = new URLSearchParams();
-  const cleanUserId = Number(userId ?? 0);
+  const cleanUserId = Number(resolveBackendUserId(userId ?? null) ?? 0);
   if (Number.isFinite(cleanUserId) && cleanUserId > 0) {
     search.set('user_id', String(cleanUserId));
   }
@@ -187,7 +207,7 @@ export async function backendCreateCinemaPoll(
 
 export async function backendVoteCinemaPoll(pollId: number, userId: number, optionId: string) {
   const cleanPollId = Number(pollId);
-  const cleanUserId = Number(userId);
+  const cleanUserId = Number(resolveBackendUserId(userId) ?? userId);
   const cleanOptionId = String(optionId || '').trim();
   if (!Number.isFinite(cleanPollId) || cleanPollId <= 0) throw new Error('Invalid poll id.');
   if (!Number.isFinite(cleanUserId) || cleanUserId <= 0) throw new Error('Invalid user id.');
@@ -267,7 +287,11 @@ export async function backendCreateCinemaEvent(
   return payload.event;
 }
 
-export async function backendResetAllData(options?: { adminKey?: string | null }) {
+export async function backendResetAllData(options?: {
+  adminKey?: string | null;
+  keepAdminUserId?: number | null;
+  keepAdminNickname?: string | null;
+}) {
   const url = getBackendApiUrl('/api/admin/reset-all');
   if (!url) return;
   const headers: Record<string, string> = {
@@ -279,7 +303,13 @@ export async function backendResetAllData(options?: { adminKey?: string | null }
   await requestJson<{ ok: boolean }>(url, {
     method: 'POST',
     headers,
-    body: JSON.stringify({}),
+    body: JSON.stringify({
+      keep_admin_user_id:
+        Number.isFinite(Number(options?.keepAdminUserId)) && Number(options?.keepAdminUserId) > 0
+          ? Number(options?.keepAdminUserId)
+          : null,
+      keep_admin_nickname: String(options?.keepAdminNickname ?? '').trim() || null,
+    }),
   });
 }
 
@@ -307,13 +337,14 @@ export async function backendDeleteCloudinaryImage(
 export async function backendDeleteOwnCloudinaryImage(imageUrl: string, userId: number) {
   const url = getBackendApiUrl('/api/media/cloudinary/delete-image');
   if (!url) return;
-  const headers = withUserTokenHeader({ 'Content-Type': 'application/json' }, userId);
+  const routeUserId = Number(resolveBackendUserId(userId) ?? userId);
+  const headers = withUserTokenHeader({ 'Content-Type': 'application/json' }, routeUserId);
   await requestJson<{ ok: boolean }>(url, {
     method: 'POST',
     headers,
     body: JSON.stringify({
       image_url: imageUrl,
-      user_id: userId,
+      user_id: routeUserId,
     }),
   });
 }
@@ -326,9 +357,15 @@ export async function backendGetCloudinaryUploadSignature(
   if (!url) {
     throw new Error('Backend URL missing. Set EXPO_PUBLIC_BACKEND_URL.');
   }
+  const routeUserId =
+    Number(resolveBackendUserId(options?.userId ?? null) ?? 0) > 0
+      ? Number(resolveBackendUserId(options?.userId ?? null) ?? 0)
+      : Number(options?.userId ?? 0) > 0
+        ? Number(options?.userId ?? 0)
+        : null;
   const requestSignature = async () => {
     const headers: Record<string, string> = { 'Content-Type': 'application/json' };
-    withUserTokenHeader(headers, options?.userId ?? null);
+    withUserTokenHeader(headers, routeUserId);
     const adminKey = normalizeAdminKey(options?.adminKey);
     if (adminKey) headers['x-admin-key'] = adminKey;
     const res = await requestJson<BackendCloudinarySignature>(url, {
@@ -336,17 +373,21 @@ export async function backendGetCloudinaryUploadSignature(
       headers,
       body: JSON.stringify({
         resource_type: resourceType,
-        user_id: options?.userId ?? null,
+        user_id: routeUserId,
         folder: options?.folder ?? null,
       }),
     });
-    if (res?.session_token && Number.isFinite(Number(options?.userId)) && Number(options?.userId) > 0) {
-      setBackendUserSession({ userId: Number(options?.userId), token: String(res.session_token) });
+    if (res?.session_token && routeUserId && routeUserId > 0) {
+      const canonicalUserId =
+        Number.isFinite(Number(res.canonical_user_id)) && Number(res.canonical_user_id) > 0
+          ? Number(res.canonical_user_id)
+          : routeUserId;
+      setBackendUserSession({ userId: canonicalUserId, token: String(res.session_token) });
     }
     return res;
   };
   const bootstrapSessionIfPossible = async () => {
-    const userId = Number(options?.userId ?? 0);
+    const userId = Number(routeUserId ?? 0);
     if (!Number.isFinite(userId) || userId <= 0) return false;
     const bootstrapUrl = getBackendApiUrl('/api/users/session/bootstrap');
     if (!bootstrapUrl) return false;
@@ -370,7 +411,7 @@ export async function backendGetCloudinaryUploadSignature(
     }
     for (const nickname of nicknames) {
       try {
-        const payload = await requestJson<{ session_token?: string | null }>(bootstrapUrl, {
+        const payload = await requestJson<{ session_token?: string | null; canonical_user_id?: number | null }>(bootstrapUrl, {
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
@@ -379,7 +420,11 @@ export async function backendGetCloudinaryUploadSignature(
           }),
         });
         if (payload?.session_token) {
-          setBackendUserSession({ userId, token: String(payload.session_token) });
+          const canonicalUserId =
+            Number.isFinite(Number(payload.canonical_user_id)) && Number(payload.canonical_user_id) > 0
+              ? Number(payload.canonical_user_id)
+              : userId;
+          setBackendUserSession({ userId: canonicalUserId, token: String(payload.session_token) });
           return true;
         }
       } catch {

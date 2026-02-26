@@ -29,7 +29,6 @@ import Animated, {
   withTiming,
 } from 'react-native-reanimated';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
-import ImageColors from 'react-native-image-colors';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
@@ -69,6 +68,17 @@ import {
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 import YoutubePlayer from 'react-native-youtube-iframe';
+
+function getImageColorsModule():
+  | { getColors: (uri: string, options?: Record<string, unknown>) => Promise<any> }
+  | null {
+  try {
+    const mod = require('react-native-image-colors');
+    return mod?.default ?? mod;
+  } catch {
+    return null;
+  }
+}
 
 function normalizeCommentAvatarUri(input?: string | null) {
   const value = String(input ?? '').trim();
@@ -185,6 +195,8 @@ export default function MovieDetailScreen() {
   useEffect(() => {
     if (!movie) return;
     if (Platform.OS === 'web') return;
+    const imageColors = getImageColorsModule();
+    if (!imageColors?.getColors) return;
     const imageForColor =
       posterUrl(movie.poster_path, 'w185') ||
       backdropUrl(movie.backdrop_path, 'w780');
@@ -192,7 +204,7 @@ export default function MovieDetailScreen() {
     let canceled = false;
     (async () => {
       try {
-        const result = await ImageColors.getColors(imageForColor, {
+        const result = await imageColors.getColors(imageForColor, {
           fallback: accent,
           cache: true,
           key: imageForColor,
@@ -345,7 +357,7 @@ export default function MovieDetailScreen() {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-    }, [tmdbId, mediaType])
+    }, [])
   );
 
   const sheetStyle = useAnimatedStyle(() => ({

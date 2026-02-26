@@ -85,12 +85,8 @@ function nowIso() {
 
 export async function createCinemaEvent(input: CinemaEventInput, options?: { adminKey?: string | null }) {
   if (hasBackendApi()) {
-    try {
-      await backendCreateCinemaEvent(input, { adminKey: options?.adminKey ?? null });
-      return;
-    } catch {
-      // Fallback to local storage if backend is down.
-    }
+    await backendCreateCinemaEvent(input, { adminKey: options?.adminKey ?? null });
+    return;
   }
 
   const now = nowIso();
@@ -116,7 +112,7 @@ export async function getLatestCinemaEvent(): Promise<CinemaEvent | null> {
     try {
       return await backendGetLatestCinemaEvent();
     } catch {
-      // Fallback to local storage if backend is down.
+      return null;
     }
   }
 
@@ -129,7 +125,7 @@ export async function getCinemaEventByStatusNow(nowIsoValue = new Date().toISOSt
     try {
       return await backendGetCurrentCinemaEvent(nowIsoValue);
     } catch {
-      // Fallback to local storage if backend is down.
+      return null;
     }
   }
 

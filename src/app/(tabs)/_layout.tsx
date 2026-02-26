@@ -1,6 +1,5 @@
 import React, { useCallback, useMemo } from 'react';
-import { Stack } from 'expo-router';
-import { usePathname, useRouter } from 'expo-router';
+import { Stack, usePathname, useRouter } from 'expo-router';
 import { StyleSheet, View } from 'react-native';
 import { Gesture, GestureDetector } from 'react-native-gesture-handler';
 import { runOnJS } from 'react-native-reanimated';

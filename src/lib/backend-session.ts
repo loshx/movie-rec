@@ -25,11 +25,23 @@ export function clearBackendUserSession() {
   userSession = null;
 }
 
+export function getBackendUserSession() {
+  if (!userSession) return null;
+  return { ...userSession };
+}
+
 export function getBackendUserTokenForUser(userId?: number | null) {
   if (!userSession) return null;
-  if (Number.isFinite(Number(userId)) && Number(userId) > 0 && Number(userId) !== userSession.userId) {
-    return null;
-  }
+  void userId;
   return userSession.token;
 }
 
+export function resolveBackendUserId(userId?: number | null) {
+  if (userSession?.userId && Number.isFinite(Number(userSession.userId)) && Number(userSession.userId) > 0) {
+    return Number(userSession.userId);
+  }
+  if (Number.isFinite(Number(userId)) && Number(userId) > 0) {
+    return Number(userId);
+  }
+  return null;
+}

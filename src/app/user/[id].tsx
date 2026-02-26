@@ -1,137 +1,149 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import {
-  ActivityIndicator,
-  Animated,
-  Image,
-  Modal,
-  PanResponder,
-  Pressable,
-  ScrollView,
-  StyleSheet,
-  Text,
-  View,
-} from 'react-native';
+import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
+import { LinearGradient } from 'expo-linear-gradient';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { Fonts, Spacing } from '@/constants/theme';
-import { followTaste, getFollowingProfiles, getPublicProfile, type PublicProfile, unfollowTaste } from '@/lib/social-backend';
+import {
+  followTaste,
+  getFollowingProfiles,
+  getPublicProfile,
+  type PublicProfile,
+  unfollowTaste,
+} from '@/lib/social-backend';
 import { hasMlApi, syncMlFollowingGraph } from '@/lib/ml-recommendations';
-import { GlassView } from '@/components/glass-view';
 
 type PublicSectionKey = 'watchlist' | 'favorites' | 'actors' | 'directors' | 'watched' | 'rated';
 
+const PUBLIC_SECTION_ORDER: PublicSectionKey[] = [
+  'favorites',
+  'watchlist',
+  'watched',
+  'rated',
+  'actors',
+  'directors',
+];
+
 export default function PublicUserProfileScreen() {
   const { user } = useAuth();
-  const params = useLocalSearchParams();
+  const params = useLocalSearchParams<{ id?: string }>();
   const targetId = Number(params.id ?? 0);
+  const scrollRef = useRef<ScrollView | null>(null);
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
   const [following, setFollowing] = useState(false);
   const [saving, setSaving] = useState(false);
-  const [activeSection, setActiveSection] = useState<PublicSectionKey>('favorites');
-  const [panelVisible, setPanelVisible] = useState(false);
-  const sheetTranslateY = useRef(new Animated.Value(420)).current;
-  const scrollRef = useRef<ScrollView | null>(null);
-
-  useEffect(() => {
-    let mounted = true;
-    (async () => {
-      try {
-        setLoading(true);
-        const [p, mineFollowing] = await Promise.all([
-          getPublicProfile(targetId),
-          user ? getFollowingProfiles(user.id) : Promise.resolve([]),
-        ]);
-        if (!mounted) return;
-        setProfile(p);
-        if (user) {
-          setFollowing(mineFollowing.some((x) => x.user_id === targetId));
-        }
-      } finally {
-        if (mounted) setLoading(false);
-      }
-    })();
-    return () => {
-      mounted = false;
-    };
-  }, [targetId, user]);
-
-  const title = useMemo(() => {
-    if (!profile) return 'User profile';
-    return profile.name || profile.nickname;
-  }, [profile]);
 
   const currentUserId = Number((user as any)?.id ?? (user as any)?.user_id ?? 0);
+  const isOwnProfile = currentUserId > 0 && currentUserId === targetId;
+  const canFollow = currentUserId > 0 && !isOwnProfile;
 
-  const closePanel = useCallback(() => {
-    Animated.timing(sheetTranslateY, {
-      toValue: 420,
-      duration: 180,
-      useNativeDriver: true,
-    }).start(() => setPanelVisible(false));
-  }, [sheetTranslateY]);
+  const sectionMeta = useMemo(() => {
+    const watchlistCount = (profile?.watchlist ?? []).length;
+    const favoritesCount = (profile?.favorites ?? []).length;
+    const watchedCount = (profile?.watched ?? []).length;
+    const ratedCount = (profile?.rated ?? []).length;
+    const actorsCount = (profile?.favorite_actors ?? []).length;
+    const directorsCount = (profile?.favorite_directors ?? []).length;
+    return {
+      watchlist: { title: 'Watchlist', count: watchlistCount, icon: 'bookmark' as const },
+      favorites: { title: 'Favorites', count: favoritesCount, icon: 'heart' as const },
+      actors: { title: 'Actors', count: actorsCount, icon: 'people' as const },
+      directors: { title: 'Directors', count: directorsCount, icon: 'film' as const },
+      watched: { title: 'Watched', count: watchedCount, icon: 'checkmark-circle' as const },
+      rated: { title: 'Rated', count: ratedCount, icon: 'star' as const },
+    };
+  }, [profile?.favorite_actors, profile?.favorite_directors, profile?.favorites, profile?.rated, profile?.watchlist, profile?.watched]);
 
-  const onSelectSection = useCallback((key: PublicSectionKey) => {
-    setActiveSection(key);
-    setPanelVisible(true);
-  }, []);
+  const loadProfile = useCallback(async () => {
+    if (!Number.isFinite(targetId) || targetId <= 0) {
+      setProfile(null);
+      setLoading(false);
+      return;
+    }
+
+    setLoading(true);
+    try {
+      const [publicProfile, mineFollowing] = await Promise.all([
+        getPublicProfile(targetId),
+        currentUserId > 0 ? getFollowingProfiles(currentUserId) : Promise.resolve([]),
+      ]);
+      setProfile(publicProfile);
+      if (currentUserId > 0) {
+        setFollowing(mineFollowing.some((x) => x.user_id === targetId));
+      } else {
+        setFollowing(false);
+      }
+    } finally {
+      setLoading(false);
+    }
+  }, [currentUserId, targetId]);
 
   useEffect(() => {
-    if (!panelVisible) return;
-    sheetTranslateY.setValue(420);
-    Animated.spring(sheetTranslateY, {
-      toValue: 0,
-      useNativeDriver: true,
-      damping: 16,
-      stiffness: 180,
-    }).start();
-  }, [panelVisible, sheetTranslateY]);
+    void loadProfile();
+  }, [loadProfile]);
 
   useFocusEffect(
     useCallback(() => {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-    }, [targetId])
+    }, [])
   );
 
-  const sheetPanResponder = useRef(
-    PanResponder.create({
-      onMoveShouldSetPanResponder: (_, gesture) =>
-        gesture.dy > 5 && Math.abs(gesture.dy) > Math.abs(gesture.dx),
-      onPanResponderMove: (_, gesture) => {
-        sheetTranslateY.setValue(Math.max(0, gesture.dy));
-      },
-      onPanResponderRelease: (_, gesture) => {
-        if (gesture.dy > 120 || gesture.vy > 1.1) {
-          closePanel();
-        } else {
-          Animated.spring(sheetTranslateY, {
-            toValue: 0,
-            useNativeDriver: true,
-            damping: 16,
-            stiffness: 180,
-          }).start();
-        }
-      },
-      onPanResponderTerminate: () => {
-        Animated.spring(sheetTranslateY, {
-          toValue: 0,
-          useNativeDriver: true,
-          damping: 16,
-          stiffness: 180,
-        }).start();
-      },
-    })
-  ).current;
+  const openPublicSection = useCallback(
+    (key: PublicSectionKey) => {
+      router.push({
+        pathname: '/profile-lists' as any,
+        params: {
+          section: key,
+          userId: String(targetId),
+        },
+      });
+    },
+    [targetId]
+  );
+
+  const handleFollowToggle = useCallback(async () => {
+    if (!canFollow || saving || !profile) return;
+    setSaving(true);
+    try {
+      if (following) {
+        await unfollowTaste(currentUserId, targetId);
+        setFollowing(false);
+        setProfile((prev) =>
+          prev ? { ...prev, followers: Math.max(0, Number(prev.followers ?? 0) - 1) } : prev
+        );
+      } else {
+        await followTaste(currentUserId, targetId);
+        setFollowing(true);
+        setProfile((prev) => (prev ? { ...prev, followers: Number(prev.followers ?? 0) + 1 } : prev));
+      }
+      if (hasMlApi()) {
+        const nextFollowing = await getFollowingProfiles(currentUserId);
+        await syncMlFollowingGraph(
+          currentUserId,
+          nextFollowing.map((p) => p.user_id)
+        );
+      }
+    } finally {
+      setSaving(false);
+    }
+  }, [canFollow, currentUserId, following, profile, saving, targetId]);
 
   if (loading) {
     return (
       <View style={styles.loader}>
+        <LinearGradient
+          colors={['#040507', '#06080D', '#08080A']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.screenGradient}
+        />
         <ActivityIndicator color="#fff" />
       </View>
     );
@@ -140,434 +152,351 @@ export default function PublicUserProfileScreen() {
   if (!profile) {
     return (
       <View style={styles.loader}>
-        <Text style={styles.empty}>User not found.</Text>
+        <LinearGradient
+          colors={['#040507', '#06080D', '#08080A']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.screenGradient}
+        />
+        <Text style={styles.emptyStateText}>User not found.</Text>
+        <Pressable style={styles.emptyBackBtn} onPress={() => router.back()}>
+          <Text style={styles.emptyBackText}>Back</Text>
+        </Pressable>
       </View>
     );
   }
 
-  const isOwnProfile =
-    currentUserId > 0 && currentUserId === targetId;
-  const canFollow = currentUserId > 0 && !isOwnProfile;
+  const title = profile.name || profile.nickname;
+  const bio = String(profile.bio ?? '').trim();
+  const avatarUrl = String(profile.avatar_url ?? '').trim();
+  const hasAvatar = avatarUrl.length > 0;
+  const allListsEmpty =
+    (profile.favorites ?? []).length === 0 &&
+    (profile.watchlist ?? []).length === 0 &&
+    (profile.watched ?? []).length === 0 &&
+    (profile.rated ?? []).length === 0 &&
+    (profile.favorite_actors ?? []).length === 0 &&
+    (profile.favorite_directors ?? []).length === 0;
 
   return (
-    <ScrollView ref={scrollRef} style={styles.root} contentContainerStyle={styles.scroll}>
-      <Pressable style={styles.backBtn} onPress={() => router.back()}>
-        <Ionicons name="arrow-back" size={18} color="#fff" />
-        <Text style={styles.backText}>Back</Text>
-      </Pressable>
+    <View style={styles.root}>
+      <LinearGradient
+        colors={['#040507', '#06080D', '#08080A']}
+        start={{ x: 0, y: 0 }}
+        end={{ x: 1, y: 1 }}
+        style={styles.screenGradient}
+      />
 
-      <View style={styles.hero}>
-        {profile.avatar_url ? (
-          <Image source={{ uri: profile.avatar_url }} style={styles.avatar} />
-        ) : (
-          <View style={styles.avatarFallback}>
-            <Text style={styles.avatarFallbackText}>?</Text>
+      <ScrollView
+        ref={scrollRef}
+        contentContainerStyle={styles.scroll}
+        showsVerticalScrollIndicator={false}>
+        <View style={styles.heroStage}>
+          <View style={styles.heroImage}>
+            {hasAvatar ? (
+              <Image source={{ uri: avatarUrl }} style={styles.heroImageInner} />
+            ) : (
+              <View style={styles.heroPlaceholder}>
+                <Text style={styles.heroPlaceholderText}>?</Text>
+              </View>
+            )}
+            <LinearGradient
+              colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.42)', 'rgba(5,5,5,0.94)']}
+              locations={[0, 0.52, 1]}
+              style={styles.heroImageOverlay}
+            />
+
+            <View style={styles.heroTopActions}>
+              <Pressable onPress={() => router.back()} style={styles.backIconBtn}>
+                <Ionicons name="chevron-back" size={18} color="#fff" />
+              </Pressable>
+            </View>
+
+            <View style={styles.heroBottomContent}>
+              <Text style={styles.name}>{title}</Text>
+              <Text style={styles.nickname}>@{profile.nickname}</Text>
+              <Text style={styles.bio} numberOfLines={2}>
+                {bio || 'This user has not added a bio yet.'}
+              </Text>
+              <View style={styles.statsRow}>
+                <Pressable onPress={() => openPublicSection('favorites')} style={styles.statCard}>
+                  <Text style={styles.statValue}>{(profile.favorites ?? []).length}</Text>
+                  <Text style={styles.statLabel}>Favorites</Text>
+                </Pressable>
+                <Pressable onPress={() => openPublicSection('watched')} style={styles.statCard}>
+                  <Text style={styles.statValue}>{(profile.watched ?? []).length}</Text>
+                  <Text style={styles.statLabel}>Watched</Text>
+                </Pressable>
+                <View style={styles.statCard}>
+                  <Text style={styles.statValue}>{Number(profile.followers ?? 0)}</Text>
+                  <Text style={styles.statLabel}>Followers</Text>
+                </View>
+              </View>
+              {canFollow ? (
+                <Pressable
+                  onPress={() => void handleFollowToggle()}
+                  disabled={saving}
+                  style={[
+                    styles.followPillLarge,
+                    following ? styles.followPillLargeActive : null,
+                    saving ? styles.followPillLargeDisabled : null,
+                  ]}>
+                  <Text style={styles.followPillLargeText}>
+                    {saving ? 'Saving...' : following ? 'Following' : 'Follow'}
+                  </Text>
+                </Pressable>
+              ) : !user ? (
+                <Text style={styles.followHint}>Sign in to follow taste.</Text>
+              ) : null}
+            </View>
           </View>
-        )}
-        <Text style={styles.name}>{title}</Text>
-        <Text style={styles.nick}>@{profile.nickname}</Text>
-        <Text style={styles.bio}>{profile.bio || 'No bio yet.'}</Text>
-        <Text style={styles.stats}>{profile.followers} followers • {profile.following} following</Text>
-
-        {canFollow ? (
-          <Pressable
-            style={styles.followBtn}
-            disabled={saving}
-            onPress={async () => {
-              if (!user) return;
-              setSaving(true);
-              try {
-                if (following) {
-                  await unfollowTaste(currentUserId, targetId);
-                  setFollowing(false);
-                  setProfile((prev) => (prev ? { ...prev, followers: Math.max(0, (prev.followers ?? 0) - 1) } : prev));
-                } else {
-                  await followTaste(currentUserId, targetId);
-                  setFollowing(true);
-                  setProfile((prev) => (prev ? { ...prev, followers: (prev.followers ?? 0) + 1 } : prev));
-                }
-                if (hasMlApi()) {
-                  const nextFollowing = await getFollowingProfiles(currentUserId);
-                  await syncMlFollowingGraph(
-                    currentUserId,
-                    nextFollowing.map((p) => p.user_id)
-                  );
-                }
-              } finally {
-                setSaving(false);
-              }
-            }}>
-            <Text style={styles.followText}>{following ? 'Unfollow' : 'Follow'}</Text>
-          </Pressable>
-        ) : user ? null : (
-          <Text style={styles.followHint}>Sign in to follow taste.</Text>
-        )}
-      </View>
-
-      <View style={styles.compactGrid}>
-        <CompactTile
-          title="Watchlist"
-          count={(profile.watchlist ?? []).length}
-          icon="bookmark"
-          active={activeSection === 'watchlist'}
-          onPress={() => onSelectSection('watchlist')}
-        />
-        <CompactTile
-          title="Favorites"
-          count={(profile.favorites ?? []).length}
-          icon="heart"
-          active={activeSection === 'favorites'}
-          onPress={() => onSelectSection('favorites')}
-        />
-        <CompactTile
-          title="Actors"
-          count={(profile.favorite_actors ?? []).length}
-          icon="people"
-          active={activeSection === 'actors'}
-          onPress={() => onSelectSection('actors')}
-        />
-        <CompactTile
-          title="Directors"
-          count={((profile as any).favorite_directors ?? []).length}
-          icon="film"
-          active={activeSection === 'directors'}
-          onPress={() => onSelectSection('directors')}
-        />
-        <CompactTile
-          title="Watched"
-          count={(profile.watched ?? []).length}
-          icon="checkmark-circle"
-          active={activeSection === 'watched'}
-          onPress={() => onSelectSection('watched')}
-        />
-        <CompactTile
-          title="Rated"
-          count={(profile.rated ?? []).length}
-          icon="star"
-          active={activeSection === 'rated'}
-          onPress={() => onSelectSection('rated')}
-        />
-      </View>
-
-      <Modal visible={panelVisible} transparent animationType="fade" onRequestClose={closePanel}>
-        <View style={styles.sheetBackdrop}>
-          <Pressable style={styles.sheetBackdropPress} onPress={closePanel} />
-          <Animated.View
-            style={[styles.sheet, { transform: [{ translateY: sheetTranslateY }] }]}
-            {...sheetPanResponder.panHandlers}>
-            <View style={styles.sheetHandle} />
-            {activeSection === 'watchlist' ? <PanelMovieSection title="Watchlist" items={profile.watchlist ?? []} /> : null}
-            {activeSection === 'favorites' ? <PanelMovieSection title="Favorites" items={profile.favorites ?? []} /> : null}
-            {activeSection === 'actors' ? (
-              <PanelPeopleSection title="Favorite Actors" items={profile.favorite_actors ?? []} role="actor" />
-            ) : null}
-            {activeSection === 'directors' ? (
-              <PanelPeopleSection
-                title="Favorite Directors"
-                items={(profile as any).favorite_directors ?? []}
-                role="director"
-              />
-            ) : null}
-            {activeSection === 'watched' ? <PanelMovieSection title="Watched" items={profile.watched ?? []} /> : null}
-            {activeSection === 'rated' ? <PanelMovieSection title="Rated" items={profile.rated ?? []} /> : null}
-          </Animated.View>
         </View>
-      </Modal>
-    </ScrollView>
-  );
-}
 
-function CompactTile({
-  title,
-  count,
-  icon,
-  active,
-  onPress,
-}: {
-  title: string;
-  count: number;
-  icon: keyof typeof Ionicons.glyphMap;
-  active: boolean;
-  onPress: () => void;
-}) {
-  return (
-    <Pressable onPress={onPress} style={styles.tilePressable}>
-      <GlassView
-        intensity={24}
-        tint="dark"
-        style={active ? { ...styles.compactTile, ...styles.compactTileActive } : styles.compactTile}>
-        <View style={styles.compactTileHeader}>
-          <Ionicons name={icon} size={16} color={active ? '#FFFFFF' : 'rgba(255,255,255,0.84)'} />
+        <View style={styles.sectionRailWrap}>
+          <Text style={styles.sectionRailTitle}>Public Lists</Text>
+          <View style={styles.sectionGrid}>
+            {PUBLIC_SECTION_ORDER.map((key) => (
+              <Pressable
+                key={key}
+                onPress={() => openPublicSection(key)}
+                style={styles.sectionTile}>
+                <View style={styles.sectionTileLeft}>
+                  <Ionicons name={sectionMeta[key].icon} size={15} color="rgba(255,255,255,0.8)" />
+                  <Text style={styles.sectionTileTitle}>{sectionMeta[key].title}</Text>
+                </View>
+                <Text style={styles.sectionTileCount}>{sectionMeta[key].count}</Text>
+              </Pressable>
+            ))}
+          </View>
+          {allListsEmpty ? <Text style={styles.sectionEmptyHint}>No public items yet.</Text> : null}
         </View>
-        <Text style={styles.compactTileTitle} numberOfLines={1}>
-          {title}
-        </Text>
-        <Text style={styles.compactTileCount}>{count}</Text>
-      </GlassView>
-    </Pressable>
-  );
-}
-
-function PanelMovieSection({ title, items }: { title: string; items: any[] }) {
-  const list = (items ?? []).slice(0, 40);
-
-  return (
-    <GlassView intensity={24} tint="dark" style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {list.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-          {list.map((item, idx) => {
-            const tmdbId = Number(item.tmdbId ?? item.tmdb_id ?? 0);
-            const mediaType = item.mediaType === 'tv' ? 'tv' : 'movie';
-            const poster = String(item.poster ?? item.poster_path ?? '').trim();
-            const ratingText =
-              typeof item.rating === 'number' && Number.isFinite(item.rating)
-                ? `${item.rating}/10`
-                : null;
-
-            return (
-              <Pressable
-                key={`${title}-${idx}-${tmdbId}`}
-                style={styles.card}
-                onPress={() => {
-                  if (!tmdbId) return;
-                  router.push({
-                    pathname: '/movie/[id]',
-                    params: { id: String(tmdbId), type: mediaType },
-                  });
-                }}>
-                {poster ? (
-                  <Image source={{ uri: poster }} style={styles.poster} />
-                ) : (
-                  <View style={styles.posterFallback} />
-                )}
-                <Text style={styles.cardTitle} numberOfLines={1}>
-                  {item.title ?? `TMDB #${tmdbId || idx}`}
-                </Text>
-                {ratingText ? <Text style={styles.cardMeta}>{ratingText}</Text> : null}
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : (
-        <Text style={styles.empty}>Private or empty.</Text>
-      )}
-    </GlassView>
-  );
-}
-
-function PanelPeopleSection({
-  title,
-  items,
-  role,
-}: {
-  title: string;
-  items: any[];
-  role: 'actor' | 'director';
-}) {
-  const list = (items ?? []).slice(0, 40);
-  return (
-    <GlassView intensity={24} tint="dark" style={styles.section}>
-      <Text style={styles.sectionTitle}>{title}</Text>
-      {list.length ? (
-        <ScrollView horizontal showsHorizontalScrollIndicator={false} contentContainerStyle={styles.row}>
-          {list.map((item, idx) => {
-            const personId = Number(item.personId ?? item.person_id ?? 0);
-            const avatar = String(item.profile ?? item.avatar_url ?? item.poster ?? '').trim();
-            return (
-              <Pressable
-                key={`${title}-${idx}-${personId}`}
-                style={styles.personCard}
-                onPress={() => {
-                  if (!personId) return;
-                  router.push({ pathname: '/person/[id]', params: { id: String(personId), role } });
-                }}>
-                {avatar ? <Image source={{ uri: avatar }} style={styles.personAvatar} /> : <View style={styles.personAvatarFallback} />}
-                <Text style={styles.cardTitle} numberOfLines={1}>
-                  {item.name ?? `Person #${personId || idx}`}
-                </Text>
-                <Text style={styles.cardMeta}>{role === 'director' ? 'Director' : 'Actor'}</Text>
-              </Pressable>
-            );
-          })}
-        </ScrollView>
-      ) : (
-        <Text style={styles.empty}>Private or empty.</Text>
-      )}
-    </GlassView>
+      </ScrollView>
+    </View>
   );
 }
 
 const styles = StyleSheet.create({
-  root: { flex: 1, backgroundColor: '#050505' },
-  scroll: { padding: Spacing.four, paddingBottom: 100, gap: 12 },
-  loader: { flex: 1, alignItems: 'center', justifyContent: 'center', backgroundColor: '#050505' },
-  backBtn: {
-    flexDirection: 'row',
+  root: {
+    flex: 1,
+    backgroundColor: '#050505',
+  },
+  screenGradient: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  loader: {
+    flex: 1,
+    backgroundColor: '#050505',
     alignItems: 'center',
-    gap: 8,
-    alignSelf: 'flex-start',
-    marginBottom: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
+    justifyContent: 'center',
+    gap: 10,
+  },
+  emptyStateText: {
+    color: 'rgba(255,255,255,0.78)',
+    fontFamily: Fonts.serif,
+    fontSize: 14,
+  },
+  emptyBackBtn: {
     borderRadius: 999,
-    paddingHorizontal: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.3)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
     paddingVertical: 7,
   },
-  backText: { color: '#fff', fontFamily: Fonts.mono, fontSize: 11 },
-  hero: {
-    borderRadius: 16,
+  emptyBackText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  scroll: {
+    paddingHorizontal: Spacing.three,
+    paddingTop: Spacing.three,
+    paddingBottom: 132,
+  },
+  heroStage: {
+    marginBottom: Spacing.four,
+  },
+  heroImage: {
+    height: 420,
+    borderRadius: 28,
+    width: '100%',
+    overflow: 'hidden',
+    backgroundColor: '#1B1B1B',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: Spacing.three,
-    alignItems: 'center',
   },
-  avatar: { width: 90, height: 90, borderRadius: 45, backgroundColor: 'rgba(255,255,255,0.08)' },
-  avatarFallback: {
-    width: 90,
-    height: 90,
-    borderRadius: 45,
-    backgroundColor: 'rgba(255,255,255,0.1)',
+  heroImageInner: {
+    ...StyleSheet.absoluteFillObject,
+    resizeMode: 'cover',
+  },
+  heroPlaceholder: {
+    ...StyleSheet.absoluteFillObject,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#111111',
+  },
+  heroPlaceholderText: {
+    color: 'rgba(255,255,255,0.9)',
+    fontFamily: Fonts.serif,
+    fontSize: 92,
+    lineHeight: 96,
+  },
+  heroImageOverlay: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroTopActions: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'flex-start',
+    paddingHorizontal: 14,
+  },
+  backIconBtn: {
+    width: 38,
+    height: 38,
+    borderRadius: 19,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.34)',
+    backgroundColor: 'rgba(8,12,19,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
   },
-  avatarFallbackText: { color: '#fff', fontFamily: Fonts.serif, fontSize: 44 },
-  name: { marginTop: 10, color: '#fff', fontFamily: Fonts.serif, fontSize: 22 },
-  nick: { marginTop: 2, color: 'rgba(255,255,255,0.7)', fontFamily: Fonts.mono, fontSize: 12 },
-  bio: { marginTop: 8, color: 'rgba(255,255,255,0.82)', fontFamily: Fonts.serif, fontSize: 13, textAlign: 'center' },
-  stats: { marginTop: 8, color: 'rgba(255,255,255,0.78)', fontFamily: Fonts.mono, fontSize: 11 },
-  followBtn: {
+  followPillLarge: {
     marginTop: 10,
-    borderRadius: 999,
-    paddingVertical: 8,
-    paddingHorizontal: 14,
-    backgroundColor: '#C1121F',
+    minHeight: 44,
+    borderRadius: 12,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.34)',
+    backgroundColor: 'rgba(8,12,19,0.78)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    width: '100%',
   },
-  followText: { color: '#fff', fontFamily: Fonts.mono, fontSize: 11 },
+  followPillLargeActive: {
+    borderColor: 'rgba(78,212,145,0.64)',
+    backgroundColor: 'rgba(36,111,79,0.62)',
+  },
+  followPillLargeDisabled: {
+    opacity: 0.75,
+  },
+  followPillLargeText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 13,
+  },
+  heroBottomContent: {
+    position: 'absolute',
+    left: 18,
+    right: 18,
+    bottom: 18,
+  },
+  name: {
+    fontFamily: Fonts.serif,
+    fontSize: 34,
+    lineHeight: 36,
+    color: '#FFFFFF',
+  },
+  nickname: {
+    marginTop: 7,
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.74)',
+  },
+  bio: {
+    marginTop: 10,
+    fontFamily: Fonts.serif,
+    fontSize: 13,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.82)',
+  },
+  statsRow: {
+    flexDirection: 'row',
+    gap: 8,
+    marginTop: 12,
+  },
+  statCard: {
+    flex: 1,
+    borderRadius: 11,
+    paddingVertical: 9,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(8,10,15,0.64)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  statValue: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 16,
+  },
+  statLabel: {
+    marginTop: 1,
+    color: 'rgba(255,255,255,0.75)',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+  },
   followHint: {
     marginTop: 10,
     color: 'rgba(255,255,255,0.7)',
     fontFamily: Fonts.mono,
     fontSize: 11,
+    textAlign: 'center',
   },
-  compactGrid: {
+  sectionRailWrap: {
+    marginBottom: 12,
+  },
+  sectionRailTitle: {
+    marginBottom: 10,
+    color: 'rgba(255,255,255,0.88)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  sectionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: Spacing.two,
+    gap: 8,
   },
-  tilePressable: {
-    width: '48%',
-  },
-  compactTile: {
-    borderRadius: 14,
-    padding: Spacing.two,
-    minHeight: 90,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-  },
-  compactTileActive: {
-    borderColor: 'rgba(255,255,255,0.42)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  compactTileHeader: {
+  sectionTile: {
+    width: '48.5%',
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    marginBottom: 6,
-  },
-  compactTileTitle: {
-    color: '#fff',
-    fontFamily: Fonts.serif,
-    fontSize: 13,
-  },
-  compactTileCount: {
-    marginTop: 6,
-    color: 'rgba(255,255,255,0.85)',
-    fontFamily: Fonts.mono,
-    fontSize: 12,
-  },
-  section: {
-    borderRadius: 14,
+    borderRadius: 13,
+    paddingVertical: 10,
+    paddingHorizontal: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
-    padding: Spacing.three,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(11,14,19,0.72)',
   },
-  sectionTitle: { color: '#fff', fontFamily: Fonts.serif, fontSize: 17, marginBottom: 6 },
-  row: {
-    gap: 10,
-    paddingRight: 4,
-  },
-  card: {
-    width: 86,
-  },
-  personCard: {
-    width: 86,
+  sectionTileLeft: {
+    flexDirection: 'row',
     alignItems: 'center',
+    gap: 6,
+    flex: 1,
   },
-  personAvatar: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  personAvatarFallback: {
-    width: 64,
-    height: 64,
-    borderRadius: 32,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  poster: {
-    width: '100%',
-    aspectRatio: 2 / 3,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.08)',
-  },
-  posterFallback: {
-    width: '100%',
-    aspectRatio: 2 / 3,
-    borderRadius: 8,
-    backgroundColor: 'rgba(255,255,255,0.1)',
-  },
-  cardTitle: {
-    marginTop: 4,
+  sectionTileTitle: {
     color: '#fff',
-    fontFamily: Fonts.serif,
-    fontSize: 11,
-  },
-  cardMeta: {
-    marginTop: 1,
-    color: 'rgba(255,255,255,0.72)',
     fontFamily: Fonts.mono,
-    fontSize: 9,
+    fontSize: 10.8,
   },
-  empty: { color: 'rgba(255,255,255,0.6)', fontFamily: Fonts.serif, fontSize: 12 },
-  sheetBackdrop: {
-    flex: 1,
-    justifyContent: 'flex-end',
-    backgroundColor: 'rgba(0,0,0,0.5)',
-  },
-  sheetBackdropPress: {
-    flex: 1,
-  },
-  sheet: {
-    maxHeight: '62%',
-    paddingHorizontal: Spacing.three,
-    paddingBottom: Spacing.four,
-    paddingTop: Spacing.two,
-    backgroundColor: 'rgba(8,8,8,0.98)',
-    borderTopLeftRadius: 18,
-    borderTopRightRadius: 18,
-    borderTopWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-  },
-  sheetHandle: {
-    alignSelf: 'center',
-    width: 42,
-    height: 4,
+  sectionTileCount: {
+    color: 'rgba(255,255,255,0.84)',
+    fontFamily: Fonts.mono,
+    fontSize: 9.5,
+    backgroundColor: 'rgba(255,255,255,0.12)',
     borderRadius: 999,
-    marginBottom: Spacing.two,
-    backgroundColor: 'rgba(255,255,255,0.35)',
+    paddingHorizontal: 6,
+    paddingVertical: 2,
+  },
+  sectionEmptyHint: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.66)',
+    fontFamily: Fonts.serif,
+    fontSize: 12.5,
   },
 });

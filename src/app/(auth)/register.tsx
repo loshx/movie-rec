@@ -235,6 +235,22 @@ export default function RegisterScreen() {
     }
   }, [nicknameStatus]);
 
+  const emailStatusMeta = useMemo(() => {
+    if (step !== 2) return null;
+    const clean = email.trim();
+    if (!clean) return null;
+    if (!EMAIL_RE.test(clean)) {
+      return {
+        text: 'Email invalid.',
+        style: styles.emailInvalid,
+      };
+    }
+    return {
+      text: 'Email valid.',
+      style: styles.emailValid,
+    };
+  }, [email, step]);
+
   const validateStep = () => {
     if (step === 0 && !name.trim()) return 'Name is required.';
     if (step === 1) {
@@ -371,6 +387,8 @@ export default function RegisterScreen() {
                   <TextInput
                     style={styles.input}
                     autoCapitalize="none"
+                    autoCorrect={false}
+                    keyboardType="email-address"
                     value={email}
                     onChangeText={(v) => {
                       clearError();
@@ -380,6 +398,9 @@ export default function RegisterScreen() {
                     placeholder="email"
                     placeholderTextColor="rgba(255,255,255,0.5)"
                   />
+                  {emailStatusMeta ? (
+                    <Text style={[styles.emailStatus, emailStatusMeta.style]}>{emailStatusMeta.text}</Text>
+                  ) : null}
                 </>
               )}
 
@@ -574,6 +595,18 @@ const styles = StyleSheet.create({
   },
   nicknameTaken: {
     color: '#ffb4b4',
+  },
+  emailStatus: {
+    marginTop: -8,
+    marginBottom: Spacing.two,
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  emailInvalid: {
+    color: '#ffb4b4',
+  },
+  emailValid: {
+    color: '#8AF5B1',
   },
   navRow: {
     flexDirection: 'row',

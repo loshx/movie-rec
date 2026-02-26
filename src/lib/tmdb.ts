@@ -20,6 +20,7 @@ const TMDB_API_KEY = (
 
 const BASE_URL = 'https://api.themoviedb.org/3';
 const IMAGE_BASE = 'https://image.tmdb.org/t/p';
+const TMDB_REQUEST_TIMEOUT_MS = 9000;
 
 async function tmdbFetch<T>(path: string): Promise<T> {
   if (!TMDB_TOKEN && !TMDB_API_KEY) {
@@ -30,16 +31,29 @@ async function tmdbFetch<T>(path: string): Promise<T> {
     ? `${BASE_URL}${path}`
     : `${BASE_URL}${path}${path.includes('?') ? '&' : '?'}api_key=${TMDB_API_KEY}`;
 
-  const res = await fetch(url, {
-    headers: TMDB_TOKEN
-      ? {
-          Authorization: `Bearer ${TMDB_TOKEN}`,
-          'Content-Type': 'application/json;charset=utf-8',
-        }
-      : {
-          'Content-Type': 'application/json;charset=utf-8',
-        },
-  });
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), TMDB_REQUEST_TIMEOUT_MS);
+  let res: Response;
+  try {
+    res = await fetch(url, {
+      headers: TMDB_TOKEN
+        ? {
+            Authorization: `Bearer ${TMDB_TOKEN}`,
+            'Content-Type': 'application/json;charset=utf-8',
+          }
+        : {
+            'Content-Type': 'application/json;charset=utf-8',
+          },
+      signal: controller.signal,
+    });
+  } catch (err) {
+    if ((err as any)?.name === 'AbortError') {
+      throw new Error('TMDB request timeout.');
+    }
+    throw err;
+  } finally {
+    clearTimeout(timeout);
+  }
 
   if (!res.ok) {
     throw new Error(`TMDB error: ${res.status}`);
@@ -180,7 +194,9 @@ export type SearchMediaResult = {
   name?: string;
   overview: string;
   poster_path: string | null;
+  profile_path?: string | null;
   backdrop_path: string | null;
+  known_for_department?: string;
   vote_average: number;
   release_date?: string;
   first_air_date?: string;
@@ -192,10 +208,26 @@ export async function searchMulti(query: string, page = 1) {
   );
 }
 
-export async function getMoviesByGenre(genreId: number, page = 1) {
-  return tmdbFetch<{ results: Movie[]; total_pages: number }>(
-    `/discover/movie?language=en-US&sort_by=popularity.desc&with_genres=${genreId}&page=${page}`
-  );
+export type GenreDiscoverOptions = {
+  sortBy?:
+    | 'popularity.desc'
+    | 'vote_average.desc'
+    | 'primary_release_date.desc'
+    | 'primary_release_date.asc';
+  year?: number | null;
+};
+
+export async function getMoviesByGenre(genreId: number, page = 1, options: GenreDiscoverOptions = {}) {
+  const params = new URLSearchParams();
+  params.set('language', 'en-US');
+  params.set('sort_by', options.sortBy ?? 'popularity.desc');
+  params.set('with_genres', String(genreId));
+  params.set('page', String(Math.max(1, Number(page) || 1)));
+  const year = Number(options.year ?? 0);
+  if (Number.isFinite(year) && year >= 1900 && year <= 2100) {
+    params.set('primary_release_year', String(Math.trunc(year)));
+  }
+  return tmdbFetch<{ results: Movie[]; total_pages: number }>(`/discover/movie?${params.toString()}`);
 }
 
 export type Movie = {

@@ -140,9 +140,11 @@ export default function GalleryScreen() {
   }, [query, userId]);
 
   const selectedItem = useMemo(() => items.find((x) => x.id === selectedId) ?? null, [items, selectedId]);
+  const selectedImageUri = String(selectedItem?.image ?? '').trim();
+  const selectedImageFallbackRatio = selectedItem ? getItemAspectFallback(selectedItem) : 4 / 3;
 
   useEffect(() => {
-    if (!selectedItem) return;
+    if (!selectedId) return;
     modalOpacity.setValue(0);
     modalTranslateY.setValue(16);
     Animated.parallel([
@@ -157,28 +159,27 @@ export default function GalleryScreen() {
         useNativeDriver: true,
       }),
     ]).start();
-  }, [modalOpacity, modalTranslateY, selectedItem]);
+  }, [modalOpacity, modalTranslateY, selectedId]);
 
   useEffect(() => {
-    if (!selectedItem) return;
-    const fallback = getItemAspectFallback(selectedItem);
-    setSelectedAspectRatio(fallback);
+    if (!selectedId || !selectedImageUri) return;
+    setSelectedAspectRatio(selectedImageFallbackRatio);
     let active = true;
     RNImage.getSize(
-      selectedItem.image,
+      selectedImageUri,
       (w, h) => {
         if (!active || !w || !h) return;
         setSelectedAspectRatio(w / h);
       },
       () => {
         if (!active) return;
-        setSelectedAspectRatio(fallback);
+        setSelectedAspectRatio(selectedImageFallbackRatio);
       }
     );
     return () => {
       active = false;
     };
-  }, [selectedItem]);
+  }, [selectedId, selectedImageUri, selectedImageFallbackRatio]);
 
   useEffect(() => {
     const id = Number(selectedId ?? 0);
@@ -458,13 +459,15 @@ export default function GalleryScreen() {
             keyboardDismissMode="interactive"
             keyboardShouldPersistTaps="handled">
             {selectedItem ? (
-              <ExpoImage
-                source={{ uri: selectedItem.image }}
-                style={[styles.heroImage, { aspectRatio: selectedAspectRatio }]}
-                contentFit="contain"
-                transition={120}
-                cachePolicy="memory-disk"
-              />
+              <View style={styles.heroImageWrap}>
+                <ExpoImage
+                  source={{ uri: selectedItem.image }}
+                  style={[styles.heroImage, { aspectRatio: selectedAspectRatio }]}
+                  contentFit="contain"
+                  transition={120}
+                  cachePolicy="memory-disk"
+                />
+              </View>
             ) : null}
 
             {selectedItem?.paletteHex?.length ? (
@@ -791,8 +794,11 @@ const styles = StyleSheet.create({
   },
   heroImage: {
     width: '100%',
-    borderRadius: 14,
+    borderRadius: 16,
     backgroundColor: '#111',
+  },
+  heroImageWrap: {
+    marginHorizontal: -10,
   },
   paletteContainer: {
     flexDirection: 'row',

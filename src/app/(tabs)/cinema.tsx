@@ -23,7 +23,13 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fonts, Spacing } from '@/constants/theme';
 import { useAuth } from '@/contexts/AuthContext';
-import { getCinemaEventByStatusNow, type CinemaEvent } from '@/db/cinema';
+import {
+  getCinemaEventByStatusNow,
+  getCurrentCinemaPoll,
+  voteCinemaPoll,
+  type CinemaEvent,
+  type CinemaPoll,
+} from '@/db/cinema';
 import { useTheme } from '@/hooks/use-theme';
 
 type ChatMessage = {
@@ -48,13 +54,29 @@ const MAX_CHAT_MESSAGES = 160;
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_CINEMA_WS_URL?: string;
   EXPO_PUBLIC_BACKEND_URL?: string;
+  EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL?: string;
 };
 
+const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL ?? extra.EXPO_PUBLIC_BACKEND_URL ?? '').trim();
+const EXPLICIT_WS_URL = (process.env.EXPO_PUBLIC_CINEMA_WS_URL ?? extra.EXPO_PUBLIC_CINEMA_WS_URL ?? '').trim();
+
 const WS_URL =
-  extra.EXPO_PUBLIC_CINEMA_WS_URL?.trim() ||
-  (extra.EXPO_PUBLIC_BACKEND_URL?.trim()
-    ? extra.EXPO_PUBLIC_BACKEND_URL.trim().replace(/^http/i, 'ws').replace(/\/+$/, '') + '/ws'
+  EXPLICIT_WS_URL ||
+  (BACKEND_URL
+    ? BACKEND_URL.replace(/^http/i, 'ws').replace(/\/+$/, '') + '/ws'
     : '');
+const LOCAL_EMPTY_CINEMA_IMAGE = require('../../../assets/images/no-cinema.png');
+
+function normalizeCinemaEmptyImageUrl(input: unknown): string | null {
+  const value = String(input ?? '').trim();
+  if (!value) return null;
+  if (/^https?:\/\//i.test(value)) return value;
+  return null;
+}
+
+const EMPTY_CINEMA_IMAGE_URL = normalizeCinemaEmptyImageUrl(
+  process.env.EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL ?? extra.EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL
+);
 
 function formatCountdown(ms: number) {
   const total = Math.max(0, Math.floor(ms / 1000));
@@ -104,12 +126,23 @@ function normalizeIncomingMessage(input: Partial<ChatMessage> & Record<string, u
   };
 }
 
+function messageFingerprint(message: ChatMessage) {
+  const ts = Date.parse(String(message?.createdAt || ''));
+  const bucketSec = Number.isFinite(ts) ? Math.floor(ts / 1000) : String(message?.createdAt || '');
+  return `${Number(message?.userId ?? 0)}|${String(message?.nickname || '').trim()}|${String(message?.text || '').trim()}|${bucketSec}`;
+}
+
 function dedupeMessages(messages: ChatMessage[]) {
-  const seen = new Set<string>();
+  const seenIds = new Set<string>();
+  const seenFingerprints = new Set<string>();
   const output: ChatMessage[] = [];
   for (const message of messages) {
-    if (!message?.id || seen.has(message.id)) continue;
-    seen.add(message.id);
+    if (!message?.id) continue;
+    if (seenIds.has(message.id)) continue;
+    const fp = messageFingerprint(message);
+    if (seenFingerprints.has(fp)) continue;
+    seenIds.add(message.id);
+    seenFingerprints.add(fp);
     output.push(message);
   }
   return output;
@@ -132,6 +165,8 @@ export default function CinemaScreen() {
   const shouldAutoscrollRef = useRef(true);
   const lastLiveSyncMsRef = useRef(0);
   const lastSentRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const phaseGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const wsConnectMetaRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
   const userSnapshotRef = useRef<{ userId: number | null; nickname: string; avatarUrl: string | null }>({
     userId: null,
     nickname: 'guest',
@@ -149,6 +184,10 @@ export default function CinemaScreen() {
   const [likedByMe, setLikedByMe] = useState(false);
   const [failedAvatarUris, setFailedAvatarUris] = useState<Record<string, true>>({});
   const [isFullscreen, setIsFullscreen] = useState(false);
+  const [poll, setPoll] = useState<CinemaPoll | null>(null);
+  const [pollLoading, setPollLoading] = useState(false);
+  const [pollSubmittingId, setPollSubmittingId] = useState<string | null>(null);
+  const [pollMessage, setPollMessage] = useState<string | null>(null);
 
   const eventId = Number(event?.id ?? 0);
   const eventStartAt = String(event?.start_at ?? '');
@@ -202,13 +241,48 @@ export default function CinemaScreen() {
     };
   }, []);
 
+  const refreshPoll = useCallback(async () => {
+    try {
+      setPollLoading(true);
+      const next = await getCurrentCinemaPoll(currentUserId > 0 ? currentUserId : null);
+      const visiblePoll = next && next.status === 'open' ? next : null;
+      setPoll(visiblePoll);
+      if (visiblePoll || next) setPollMessage(null);
+    } catch (err) {
+      const message = err instanceof Error ? err.message : 'Could not load poll.';
+      if (/endpoint is missing on backend/i.test(message)) {
+        setPoll(null);
+        return;
+      }
+      setPollMessage(message);
+    } finally {
+      setPollLoading(false);
+    }
+  }, [currentUserId]);
+
+  useEffect(() => {
+    let mounted = true;
+    const run = async () => {
+      await refreshPoll();
+      if (!mounted) return;
+    };
+    void run();
+    const timer = setInterval(() => {
+      void refreshPoll();
+    }, 12000);
+    return () => {
+      mounted = false;
+      clearInterval(timer);
+    };
+  }, [refreshPoll]);
+
   useEffect(() => {
     if (!eventId) return;
     const timer = setInterval(() => setNowIso(new Date().toISOString()), 1000);
     return () => clearInterval(timer);
   }, [eventId]);
 
-  const phase = useMemo<'upcoming' | 'live' | 'ended' | 'none'>(() => {
+  const rawPhase = useMemo<'upcoming' | 'live' | 'ended' | 'none'>(() => {
     if (!event) return 'none';
     const now = Date.parse(nowIso);
     const start = Date.parse(event.start_at);
@@ -217,6 +291,34 @@ export default function CinemaScreen() {
     if (now <= end) return 'live';
     return 'ended';
   }, [event, nowIso]);
+
+  const [phase, setPhase] = useState<'upcoming' | 'live' | 'ended' | 'none'>(rawPhase);
+
+  useEffect(() => {
+    if (phaseGuardTimerRef.current) {
+      clearTimeout(phaseGuardTimerRef.current);
+      phaseGuardTimerRef.current = null;
+    }
+    if (phase === rawPhase) return;
+
+    const liveBoundaryFlip =
+      (phase === 'upcoming' && rawPhase === 'live') || (phase === 'live' && rawPhase === 'upcoming');
+    const delayMs = liveBoundaryFlip ? 1400 : 0;
+    if (delayMs <= 0) {
+      setPhase(rawPhase);
+      return;
+    }
+    phaseGuardTimerRef.current = setTimeout(() => {
+      setPhase(rawPhase);
+      phaseGuardTimerRef.current = null;
+    }, delayMs);
+    return () => {
+      if (phaseGuardTimerRef.current) {
+        clearTimeout(phaseGuardTimerRef.current);
+        phaseGuardTimerRef.current = null;
+      }
+    };
+  }, [phase, rawPhase]);
 
   const countdownText = useMemo(() => {
     if (!event || phase !== 'upcoming') return null;
@@ -288,9 +390,13 @@ export default function CinemaScreen() {
   useEffect(() => {
     if (!eventId || phase !== 'live' || !WS_URL) {
       if (wsRef.current) {
-        wsRef.current.close();
+        try {
+          wsRef.current.close();
+        } catch {
+        }
         wsRef.current = null;
       }
+      wsConnectMetaRef.current = { key: '', at: 0 };
       setChatStatus(WS_URL ? 'idle' : 'error');
       setMessages([]);
       setViewers(0);
@@ -300,6 +406,24 @@ export default function CinemaScreen() {
     }
 
     const room = `cinema:${eventId}`;
+    const connectionKey = `${room}:${APP_CINEMA_CLIENT_ID}`;
+    const now = Date.now();
+    if (
+      wsConnectMetaRef.current.key === connectionKey &&
+      now - wsConnectMetaRef.current.at < 1400
+    ) {
+      return;
+    }
+    wsConnectMetaRef.current = { key: connectionKey, at: now };
+
+    if (wsRef.current) {
+      try {
+        wsRef.current.close();
+      } catch {
+      }
+      wsRef.current = null;
+    }
+
     const ws = new WebSocket(WS_URL);
     wsRef.current = ws;
     setChatStatus('connecting');
@@ -364,7 +488,10 @@ export default function CinemaScreen() {
     };
 
     return () => {
-      ws.close();
+      try {
+        ws.close();
+      } catch {
+      }
       if (wsRef.current === ws) {
         wsRef.current = null;
       }
@@ -474,6 +601,106 @@ export default function CinemaScreen() {
     [currentUserId, markAvatarFailed, resolveAvatarUri]
   );
 
+  const onVotePollOption = useCallback(
+    async (optionId: string) => {
+      if (!poll || poll.status !== 'open') return;
+      if (!(currentUserId > 0)) {
+        setPollMessage('Sign in to vote.');
+        return;
+      }
+      try {
+        setPollSubmittingId(optionId);
+        setPollMessage(null);
+        const updated = await voteCinemaPoll(poll.id, currentUserId, optionId);
+        const visiblePoll = updated && updated.status === 'open' ? updated : null;
+        setPoll(visiblePoll);
+        setPollMessage(visiblePoll ? 'Vote saved.' : null);
+      } catch (err) {
+        setPollMessage(err instanceof Error ? err.message : 'Could not submit vote.');
+      } finally {
+        setPollSubmittingId(null);
+      }
+    },
+    [poll, currentUserId]
+  );
+
+  const renderPollCard = useCallback(() => {
+    if (!poll || poll.status !== 'open') return null;
+    const isClosed = poll.status !== 'open';
+    const userHasVoted = !!poll.user_vote_option_id;
+    const revealResults = isClosed || userHasVoted;
+    return (
+      <View style={styles.pollCard}>
+        <View style={styles.pollHeader}>
+          <Text style={styles.pollTitle}>Cinema Poll</Text>
+          <Text style={[styles.pollStatus, isClosed ? styles.pollStatusClosed : styles.pollStatusOpen]}>
+            {isClosed ? 'Closed' : 'Open'}
+          </Text>
+        </View>
+        <Text style={styles.pollQuestion}>{poll.question || 'Choose next movie'}</Text>
+        <View style={styles.pollOptionsWrap}>
+          {poll.options.map((option, idx) => {
+            const selected = poll.user_vote_option_id === option.id;
+            const disabled = isClosed || !!pollSubmittingId;
+            const isLast = idx === poll.options.length - 1;
+            return (
+              <Pressable
+                key={option.id}
+                onPress={() => void onVotePollOption(option.id)}
+                disabled={disabled}
+                style={[
+                  styles.pollOption,
+                  selected ? styles.pollOptionSelected : null,
+                  isLast ? styles.pollOptionLast : null,
+                  disabled ? styles.pollOptionDisabled : null,
+                ]}>
+                {option.poster_url ? (
+                  <Image source={{ uri: option.poster_url }} style={styles.pollPoster} resizeMode="cover" />
+                ) : (
+                  <View style={styles.pollPosterFallback} />
+                )}
+                <View style={styles.pollMeta}>
+                  <Text style={styles.pollOptionTitle} numberOfLines={1}>
+                    {option.title}
+                  </Text>
+                  {revealResults ? (
+                    <>
+                      <Text style={styles.pollOptionStats}>
+                        {Number(option.votes || 0)} votes - {Math.round(Number(option.percent || 0))}%
+                      </Text>
+                      <View style={styles.pollProgressTrack}>
+                        <View
+                          style={[
+                            styles.pollProgressFill,
+                            {
+                              width: `${Math.max(
+                                selected ? 4 : 0,
+                                Math.min(100, Math.round(Number(option.percent || 0)))
+                              )}%`,
+                            },
+                          ]}
+                        />
+                      </View>
+                    </>
+                  ) : (
+                    <Text style={styles.pollOptionHint}>Tap to vote and unlock results</Text>
+                  )}
+                </View>
+                {selected ? <Ionicons name="checkmark-circle" size={18} color="#22c55e" /> : null}
+              </Pressable>
+            );
+          })}
+        </View>
+        <Text style={styles.pollFooter}>
+          {revealResults
+            ? `Total votes: ${Number(poll.total_votes || 0)}`
+            : 'Results will appear after your vote'}
+        </Text>
+        {pollMessage ? <Text style={styles.pollMessage}>{pollMessage}</Text> : null}
+      </View>
+    );
+  }, [poll, pollSubmittingId, pollMessage, onVotePollOption]);
+
   const chatStateLabel =
     chatStatus === 'connected'
       ? 'ONLINE'
@@ -493,10 +720,28 @@ export default function CinemaScreen() {
     );
   }
 
-  if (!event) {
+  if (!event || phase === 'ended') {
+    const showNoCinemaArtwork = !poll && !pollLoading;
     return (
-      <View style={[styles.loader, { backgroundColor: theme.background }]}>
-        <Text style={styles.emptyText}>No cinema session scheduled yet.</Text>
+      <View style={[styles.emptyRoot, poll ? styles.emptyRootWithPoll : null, { backgroundColor: theme.background }]}>
+        <View style={[styles.emptyContent, poll ? styles.emptyContentWithPoll : null, { paddingBottom: Math.max(insets.bottom + 44, 64) }]}>
+          {showNoCinemaArtwork ? (
+            <>
+              {EMPTY_CINEMA_IMAGE_URL ? (
+                <Image source={{ uri: EMPTY_CINEMA_IMAGE_URL }} style={styles.emptyImage} resizeMode="contain" />
+              ) : (
+                <Image source={LOCAL_EMPTY_CINEMA_IMAGE} style={styles.emptyImage} resizeMode="contain" />
+              )}
+              <Text style={styles.emptyTitle}>NO CINEMA YET</Text>
+            </>
+          ) : null}
+          {pollLoading && !poll ? (
+            <View style={styles.pollLoadingWrap}>
+              <ActivityIndicator color="#fff" />
+            </View>
+          ) : null}
+          {renderPollCard()}
+        </View>
       </View>
     );
   }
@@ -521,22 +766,6 @@ export default function CinemaScreen() {
             <Text style={styles.phaseCountdown}>{countdownText ?? '0d:0h:0m:0s'}</Text>
             <Text style={styles.phaseHint} numberOfLines={3}>
               {event.description?.trim() || 'Live stream will begin soon.'}
-            </Text>
-          </View>
-        </View>
-      ) : null}
-
-      {phase === 'ended' ? (
-        <View style={styles.phaseShell}>
-          <View style={styles.phasePosterWrap}>
-            {event.poster_url ? <Image source={{ uri: event.poster_url }} style={styles.phasePoster} resizeMode="cover" /> : null}
-            <View style={styles.upcomingShade} />
-          </View>
-          <View style={styles.phaseInfoCard}>
-            <Text style={styles.phaseTitle}>{event.title}</Text>
-            <Text style={styles.phaseEnded}>Ended</Text>
-            <Text style={styles.phaseHint} numberOfLines={3}>
-              Thanks for watching. Next cinema event will appear automatically.
             </Text>
           </View>
         </View>
@@ -643,18 +872,56 @@ export default function CinemaScreen() {
 const styles = StyleSheet.create({
   root: {
     flex: 1,
-    padding: Spacing.four,
-    paddingBottom: 10,
-    gap: 10,
   },
   loader: {
     flex: 1,
     alignItems: 'center',
     justifyContent: 'center',
   },
+  emptyRoot: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: Spacing.four,
+    overflow: 'hidden',
+  },
+  emptyRootWithPoll: {
+    justifyContent: 'flex-start',
+    paddingTop: Spacing.three,
+  },
+  emptyContent: {
+    width: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  emptyContentWithPoll: {
+    gap: 8,
+  },
+  emptyImage: {
+    width: '94%',
+    maxWidth: 500,
+    height: 440,
+  },
+  emptyTitle: {
+    marginTop: 14,
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 28,
+    fontWeight: '700',
+    letterSpacing: 1.1,
+    borderBottomWidth: 2,
+    borderBottomColor: '#E10613',
+    paddingBottom: 1,
+    textShadowColor: 'rgba(0,0,0,0.9)',
+    textShadowOffset: { width: 0, height: 2 },
+    textShadowRadius: 6,
+  },
   phaseShell: {
     flex: 1,
     gap: 12,
+    paddingHorizontal: Spacing.four,
+    paddingTop: Spacing.three,
+    paddingBottom: Spacing.three,
   },
   phasePosterWrap: {
     flex: 1,
@@ -712,12 +979,152 @@ const styles = StyleSheet.create({
     fontSize: 13,
     lineHeight: 18,
   },
+  pollLoadingWrap: {
+    paddingVertical: 8,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pollCard: {
+    width: '100%',
+    alignSelf: 'stretch',
+    borderRadius: 0,
+    borderWidth: 0,
+    borderColor: 'transparent',
+    backgroundColor: 'transparent',
+    padding: 0,
+    gap: 10,
+    marginTop: 6,
+    shadowColor: 'transparent',
+    shadowOpacity: 0,
+    shadowRadius: 0,
+    shadowOffset: { width: 0, height: 0 },
+    elevation: 0,
+  },
+  pollHeader: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    paddingHorizontal: 2,
+  },
+  pollTitle: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 15,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    fontWeight: '700',
+  },
+  pollStatus: {
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    borderWidth: 1,
+    borderRadius: 6,
+    paddingHorizontal: 10,
+    paddingVertical: 4,
+    overflow: 'hidden',
+  },
+  pollStatusOpen: {
+    color: '#22c55e',
+    borderColor: 'rgba(34,197,94,0.5)',
+    backgroundColor: 'rgba(34,197,94,0.15)',
+  },
+  pollStatusClosed: {
+    color: '#fca5a5',
+    borderColor: 'rgba(239,68,68,0.5)',
+    backgroundColor: 'rgba(239,68,68,0.14)',
+  },
+  pollQuestion: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 17,
+    lineHeight: 23,
+    paddingHorizontal: 2,
+  },
+  pollOptionsWrap: {
+    gap: 0,
+    borderTopWidth: 1,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  pollOption: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 10,
+    borderWidth: 0,
+    borderBottomWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 0,
+    paddingHorizontal: 2,
+    paddingVertical: 11,
+    backgroundColor: 'transparent',
+  },
+  pollOptionSelected: {
+    borderColor: 'rgba(34,197,94,0.72)',
+    backgroundColor: 'rgba(34,197,94,0.12)',
+  },
+  pollOptionDisabled: {
+    opacity: 0.82,
+  },
+  pollOptionLast: {
+    borderBottomWidth: 0,
+  },
+  pollPoster: {
+    width: 52,
+    height: 74,
+    borderRadius: 4,
+    backgroundColor: '#111',
+  },
+  pollPosterFallback: {
+    width: 52,
+    height: 74,
+    borderRadius: 4,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+  },
+  pollMeta: {
+    flex: 1,
+    gap: 4,
+  },
+  pollOptionTitle: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 16,
+  },
+  pollOptionStats: {
+    color: 'rgba(255,255,255,0.84)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  pollOptionHint: {
+    color: 'rgba(255,255,255,0.66)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  pollProgressTrack: {
+    marginTop: 1,
+    height: 4,
+    borderRadius: 0,
+    backgroundColor: 'rgba(255,255,255,0.16)',
+    overflow: 'hidden',
+  },
+  pollProgressFill: {
+    height: '100%',
+    borderRadius: 0,
+    backgroundColor: '#22c55e',
+  },
+  pollFooter: {
+    color: 'rgba(255,255,255,0.78)',
+    fontFamily: Fonts.mono,
+    fontSize: 11.5,
+    paddingHorizontal: 2,
+  },
+  pollMessage: {
+    color: '#d1d5db',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
   liveShell: {
     flex: 1,
-    borderRadius: 28,
     overflow: 'hidden',
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
     backgroundColor: '#0a0f1c',
     minHeight: 0,
   },
@@ -748,12 +1155,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 6,
-    borderRadius: 999,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(225,6,19,0.85)',
     backgroundColor: 'rgba(8,8,8,0.8)',
-    paddingHorizontal: 10,
-    paddingVertical: 5,
+    paddingHorizontal: 11,
+    paddingVertical: 6,
   },
   liveBadgeDot: {
     width: 8,
@@ -769,7 +1176,7 @@ const styles = StyleSheet.create({
   fullscreenBtn: {
     width: 36,
     height: 36,
-    borderRadius: 18,
+    borderRadius: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.35)',
     backgroundColor: 'rgba(0,0,0,0.55)',
@@ -781,38 +1188,43 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
-    paddingHorizontal: 10,
+    paddingHorizontal: 12,
     paddingVertical: 10,
-    borderBottomWidth: 1,
-    borderBottomColor: 'rgba(255,255,255,0.1)',
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderBottomWidth: 0,
+    backgroundColor: 'rgba(0,0,0,0.18)',
   },
   statPill: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1,
     gap: 6,
-    borderRadius: 999,
+    minHeight: 42,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(0,0,0,0.32)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   statText: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 12,
+    fontSize: 12.5,
   },
   chatStatePill: {
     flexDirection: 'row',
     alignItems: 'center',
+    justifyContent: 'center',
+    flex: 1.25,
     gap: 6,
-    borderRadius: 999,
+    minHeight: 42,
+    borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(0,0,0,0.32)',
-    paddingHorizontal: 10,
-    paddingVertical: 6,
+    borderColor: 'rgba(255,255,255,0.24)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
   },
   chatStateDot: {
     width: 8,
@@ -955,8 +1367,11 @@ const styles = StyleSheet.create({
     opacity: 0.5,
   },
   emptyText: {
-    color: 'rgba(255,255,255,0.66)',
+    color: 'rgba(255,255,255,0.76)',
     fontFamily: Fonts.serif,
-    fontSize: 12,
+    fontSize: 13,
+    lineHeight: 18,
   },
 });
+
+

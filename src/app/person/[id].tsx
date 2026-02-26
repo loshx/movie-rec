@@ -82,7 +82,7 @@ export default function PersonDetailsScreen() {
       requestAnimationFrame(() => {
         scrollRef.current?.scrollTo({ y: 0, animated: false });
       });
-    }, [personId])
+    }, [])
   );
 
   useEffect(() => {

@@ -50,7 +50,17 @@
                                          "android":  {
                                                          "image":  "./assets/images/logo-dark.png",
                                                          "imageWidth":  120
-                                                     }
+                                         }
+                                     }
+                                 ],
+                                 [
+                                     "expo-font",
+                                     {
+                                         "fonts":  [
+                                                       "./assets/fonts/Nexa-ExtraLight.ttf",
+                                                       "./assets/fonts/Nexa-Heavy.ttf",
+                                                       "./assets/fonts/Ionicons.ttf"
+                                                   ]
                                      }
                                  ],
                                  "expo-sqlite",
@@ -72,13 +82,13 @@
                                              "clientId":  "gDmyTowdSaKu5Tt6yKK0WC5oRyhI520X",
                                              "audience":  ""
                                          },
-                               "EXPO_PUBLIC_TMDB_API_KEY":  "04a84f059c48456c2026488620fc742f",
-                               "EXPO_PUBLIC_ML_API_URL":  "",
+                               "EXPO_PUBLIC_TMDB_API_KEY":  "",
+                               "EXPO_PUBLIC_ML_API_URL":  "http://192.168.21.69:8008",
                                "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME":  "dgbciucw7",
                                "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET":  "MOVIE1",
-                               "EXPO_PUBLIC_BACKEND_URL":  "http://localhost:8787",
-                               "EXPO_PUBLIC_CINEMA_WS_URL":  "ws://localhost:8787/ws",
-                               "EXPO_PUBLIC_ADMIN_API_KEY":  "change-me-admin-key",
+                               "EXPO_PUBLIC_BACKEND_URL":  "https://movie-rec-sbf1.onrender.com",
+                               "EXPO_PUBLIC_CINEMA_WS_URL":  "wss://movie-rec-sbf1.onrender.com/ws",
+                               "EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL":  "",
                                "EXPO_PUBLIC_ADMIN_AUTH0_SUBS":  "",
                                "EXPO_PUBLIC_ADMIN_EMAILS":  "",
                                "EXPO_PUBLIC_TMDB_TOKEN":  "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwNGE4NGYwNTljNDg0NTZjMjAyNjQ4ODYyMGZjNzQyZiIsIm5iZiI6MTc2MzIyMDE5MS4wNDE5OTk4LCJzdWIiOiI2OTE4OWFkZmJkZmUyMmE3ZDg4NzcwMjQiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.2jT49H22QOVKkrMcvrSv30WRguEvXRNF4Aqhv12SFXQ"
