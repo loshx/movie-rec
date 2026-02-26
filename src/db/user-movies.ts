@@ -1,6 +1,7 @@
 import { getDb } from './database';
 import { ingestMlInteraction } from '@/lib/ml-recommendations';
 import { getBackendApiUrl, hasBackendApi } from '@/lib/cinema-backend';
+import { getBackendUserTokenForUser, resolveBackendUserId } from '@/lib/backend-session';
 
 function nowIso() {
   return new Date().toISOString();
@@ -134,7 +135,11 @@ function mapRemotePersonFavorites(rows: RemotePersonFavoriteEntry[] | undefined)
   return Array.from(unique.values());
 }
 
-async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function requestBackendJson<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { userIdForToken?: number | null }
+): Promise<T | null> {
   if (!hasBackendApi()) return null;
   const url = getBackendApiUrl(path);
   if (!url) return null;
@@ -143,6 +148,8 @@ async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<
       'Content-Type': 'application/json',
       ...(init?.headers as Record<string, string> | undefined),
     };
+    const token = getBackendUserTokenForUser(options?.userIdForToken ?? null);
+    if (token) headers['x-user-token'] = token;
     const res = await fetch(url, { ...init, headers });
     if (!res.ok) return null;
     return (await res.json()) as T;
@@ -151,10 +158,41 @@ async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<
   }
 }
 
+function resolveUserRouteId(userId: number): number | null {
+  if (hasBackendApi()) {
+    const sessionUserId = resolveBackendUserId();
+    if (Number.isFinite(Number(sessionUserId)) && Number(sessionUserId) > 0) {
+      return Number(sessionUserId);
+    }
+    return null;
+  }
+  const localUserId = Number(userId);
+  if (Number.isFinite(localUserId) && localUserId > 0) {
+    return localUserId;
+  }
+  return null;
+}
+
+async function requestUserBackendJson<T>(
+  userId: number,
+  pathFactory: (resolvedUserId: number) => string,
+  init?: RequestInit
+) {
+  const routeUserId = resolveUserRouteId(userId);
+  if (!routeUserId) return null;
+  return requestBackendJson<T>(pathFactory(routeUserId), init, { userIdForToken: routeUserId });
+}
+
 export async function getUserListPrivacy(userId: number): Promise<UserListPrivacy> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state`
+  );
   if (remote?.state?.privacy) {
     return normalizePrivacy(remote.state.privacy);
+  }
+  if (hasBackendApi()) {
+    return { ...DEFAULT_PRIVACY };
   }
 
   const db = await getDb();
@@ -177,14 +215,16 @@ export async function getUserListPrivacy(userId: number): Promise<UserListPrivac
 }
 
 export async function setUserListPrivacy(userId: number, privacy: UserListPrivacy) {
-  const remote = await requestBackendJson<{ privacy?: UserListPrivacy }>(
-    `/api/users/${userId}/movie-state/privacy`,
+  const remote = await requestUserBackendJson<{ privacy?: UserListPrivacy }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/privacy`,
     {
       method: 'POST',
       body: JSON.stringify({ privacy }),
     }
   );
   if (remote?.privacy) return;
+  if (hasBackendApi()) return;
 
   const db = await getDb();
   const now = nowIso();
@@ -210,8 +250,10 @@ export async function setUserListPrivacy(userId: number, privacy: UserListPrivac
 }
 
 export async function getMovieState(userId: number, tmdbId: number): Promise<MovieState> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(
-    `/api/users/${userId}/movie-state?tmdb_id=${encodeURIComponent(String(tmdbId))}`
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) =>
+      `/api/users/${resolvedUserId}/movie-state?tmdb_id=${encodeURIComponent(String(tmdbId))}`
   );
   if (remote?.item_state) {
     return {
@@ -222,6 +264,14 @@ export async function getMovieState(userId: number, tmdbId: number): Promise<Mov
         typeof remote.item_state.rating === 'number' && Number.isFinite(remote.item_state.rating)
           ? remote.item_state.rating
           : null,
+    };
+  }
+  if (hasBackendApi()) {
+    return {
+      inWatchlist: false,
+      inFavorites: false,
+      watched: false,
+      rating: null,
     };
   }
 
@@ -256,10 +306,14 @@ export async function getMovieState(userId: number, tmdbId: number): Promise<Mov
 }
 
 export async function getUserWatchlist(userId: number): Promise<UserListItem[]> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state`
+  );
   if (remote?.state?.watchlist) {
     return mapRemoteList(remote.state.watchlist);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ tmdb_id: number; created_at: string; media_type?: string }>(
@@ -274,10 +328,14 @@ export async function getUserWatchlist(userId: number): Promise<UserListItem[]> 
 }
 
 export async function getUserFavorites(userId: number): Promise<UserListItem[]> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state`
+  );
   if (remote?.state?.favorites) {
     return mapRemoteList(remote.state.favorites);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ tmdb_id: number; created_at: string; media_type?: string }>(
@@ -292,10 +350,14 @@ export async function getUserFavorites(userId: number): Promise<UserListItem[]> 
 }
 
 export async function getUserRatings(userId: number): Promise<UserListItem[]> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state`
+  );
   if (remote?.state?.ratings) {
     return mapRemoteRatings(remote.state.ratings);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ tmdb_id: number; rating: number; updated_at: string; media_type?: string }>(
@@ -311,10 +373,14 @@ export async function getUserRatings(userId: number): Promise<UserListItem[]> {
 }
 
 export async function getUserWatched(userId: number): Promise<UserListItem[]> {
-  const remote = await requestBackendJson<RemoteMovieStatePayload>(`/api/users/${userId}/movie-state`);
+  const remote = await requestUserBackendJson<RemoteMovieStatePayload>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state`
+  );
   if (remote?.state?.watched) {
     return mapRemoteList(remote.state.watched);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ tmdb_id: number; created_at: string; media_type?: string }>(
@@ -370,10 +436,14 @@ export async function getMovieEngagementCounts(
 }
 
 export async function getUserFavoriteActors(userId: number): Promise<UserActorListItem[]> {
-  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(`/api/users/${userId}/favorite-actors`);
+  const remote = await requestUserBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-actors`
+  );
   if (Array.isArray(remote?.items)) {
     return mapRemotePersonFavorites(remote.items);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ person_id: number; created_at: string }>(
@@ -387,12 +457,14 @@ export async function getUserFavoriteActors(userId: number): Promise<UserActorLi
 }
 
 export async function getUserFavoriteDirectors(userId: number): Promise<UserActorListItem[]> {
-  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
-    `/api/users/${userId}/favorite-directors`
+  const remote = await requestUserBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-directors`
   );
   if (Array.isArray(remote?.items)) {
     return mapRemotePersonFavorites(remote.items);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{ person_id: number; created_at: string }>(
@@ -406,10 +478,14 @@ export async function getUserFavoriteDirectors(userId: number): Promise<UserActo
 }
 
 export async function isFavoriteActor(userId: number, personId: number): Promise<boolean> {
-  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(`/api/users/${userId}/favorite-actors`);
+  const remote = await requestUserBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-actors`
+  );
   if (Array.isArray(remote?.items)) {
     return mapRemotePersonFavorites(remote.items).some((entry) => entry.personId === personId);
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const row = await db.getFirstAsync<{ ok: number }>(
@@ -421,13 +497,18 @@ export async function isFavoriteActor(userId: number, personId: number): Promise
 }
 
 export async function toggleFavoriteActor(userId: number, personId: number) {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/favorite-actors/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({ person_id: personId }),
-  });
+  const remote = await requestUserBackendJson<{ active?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-actors/toggle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ person_id: personId }),
+    }
+  );
   if (typeof remote?.active === 'boolean') {
     return remote.active;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
@@ -449,12 +530,14 @@ export async function toggleFavoriteActor(userId: number, personId: number) {
 }
 
 export async function isFavoriteDirector(userId: number, personId: number): Promise<boolean> {
-  const remote = await requestBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
-    `/api/users/${userId}/favorite-directors`
+  const remote = await requestUserBackendJson<{ items?: RemotePersonFavoriteEntry[] }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-directors`
   );
   if (Array.isArray(remote?.items)) {
     return mapRemotePersonFavorites(remote.items).some((entry) => entry.personId === personId);
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const row = await db.getFirstAsync<{ ok: number }>(
@@ -466,13 +549,18 @@ export async function isFavoriteDirector(userId: number, personId: number): Prom
 }
 
 export async function toggleFavoriteDirector(userId: number, personId: number) {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/favorite-directors/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({ person_id: personId }),
-  });
+  const remote = await requestUserBackendJson<{ active?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/favorite-directors/toggle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ person_id: personId }),
+    }
+  );
   if (typeof remote?.active === 'boolean') {
     return remote.active;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
@@ -494,14 +582,18 @@ export async function toggleFavoriteDirector(userId: number, personId: number) {
 }
 
 export async function toggleWatchlist(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({
-      list: 'watchlist',
-      tmdb_id: tmdbId,
-      media_type: mediaType,
-    }),
-  });
+  const remote = await requestUserBackendJson<{ active?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/toggle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        list: 'watchlist',
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+      }),
+    }
+  );
   if (typeof remote?.active === 'boolean') {
     if (remote.active) {
       void ingestMlInteraction({
@@ -515,6 +607,7 @@ export async function toggleWatchlist(userId: number, tmdbId: number, mediaType:
     }
     return remote.active;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
@@ -545,14 +638,18 @@ export async function toggleWatchlist(userId: number, tmdbId: number, mediaType:
 }
 
 export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({
-      list: 'favorites',
-      tmdb_id: tmdbId,
-      media_type: mediaType,
-    }),
-  });
+  const remote = await requestUserBackendJson<{ active?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/toggle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        list: 'favorites',
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+      }),
+    }
+  );
   if (typeof remote?.active === 'boolean') {
     if (remote.active) {
       void ingestMlInteraction({
@@ -566,6 +663,7 @@ export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 
     }
     return remote.active;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
@@ -596,14 +694,18 @@ export async function toggleFavorite(userId: number, tmdbId: number, mediaType: 
 }
 
 export async function toggleWatched(userId: number, tmdbId: number, mediaType: 'movie' | 'tv' = 'movie') {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/users/${userId}/movie-state/toggle`, {
-    method: 'POST',
-    body: JSON.stringify({
-      list: 'watched',
-      tmdb_id: tmdbId,
-      media_type: mediaType,
-    }),
-  });
+  const remote = await requestUserBackendJson<{ active?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/toggle`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        list: 'watched',
+        tmdb_id: tmdbId,
+        media_type: mediaType,
+      }),
+    }
+  );
   if (typeof remote?.active === 'boolean') {
     if (remote.active) {
       void ingestMlInteraction({
@@ -617,6 +719,7 @@ export async function toggleWatched(userId: number, tmdbId: number, mediaType: '
     }
     return remote.active;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const existing = await db.getFirstAsync<{ ok: number }>(
@@ -652,14 +755,18 @@ export async function setWatched(
   watched: boolean,
   mediaType: 'movie' | 'tv' = 'movie'
 ) {
-  const remote = await requestBackendJson<{ watched?: boolean }>(`/api/users/${userId}/movie-state/watched`, {
-    method: 'POST',
-    body: JSON.stringify({
-      tmdb_id: tmdbId,
-      watched,
-      media_type: mediaType,
-    }),
-  });
+  const remote = await requestUserBackendJson<{ watched?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/watched`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        tmdb_id: tmdbId,
+        watched,
+        media_type: mediaType,
+      }),
+    }
+  );
   if (typeof remote?.watched === 'boolean') {
     if (remote.watched) {
       void ingestMlInteraction({
@@ -673,6 +780,7 @@ export async function setWatched(
     }
     return remote.watched;
   }
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   if (!watched) {
@@ -703,14 +811,18 @@ export async function setRating(
   rating: number,
   mediaType: 'movie' | 'tv' = 'movie'
 ) {
-  const remote = await requestBackendJson<{ ok?: boolean }>(`/api/users/${userId}/movie-state/rating`, {
-    method: 'POST',
-    body: JSON.stringify({
-      tmdb_id: tmdbId,
-      rating,
-      media_type: mediaType,
-    }),
-  });
+  const remote = await requestUserBackendJson<{ ok?: boolean }>(
+    userId,
+    (resolvedUserId) => `/api/users/${resolvedUserId}/movie-state/rating`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        tmdb_id: tmdbId,
+        rating,
+        media_type: mediaType,
+      }),
+    }
+  );
   if (remote?.ok) {
     void ingestMlInteraction({
       user_id: userId,
@@ -722,6 +834,7 @@ export async function setRating(
     }).catch(() => {});
     return;
   }
+  if (hasBackendApi()) return;
 
   const db = await getDb();
   const now = nowIso();
@@ -757,6 +870,7 @@ export async function addComment(
   nickname?: string,
   avatarUrl?: string | null
 ) {
+  const routeUserId = resolveUserRouteId(userId);
   if (hasBackendApi()) {
     const url = getBackendApiUrl('/api/comments');
     if (url) {
@@ -765,7 +879,7 @@ export async function addComment(
           method: 'POST',
           headers: { 'Content-Type': 'application/json' },
           body: JSON.stringify({
-            user_id: userId,
+            user_id: routeUserId,
             tmdb_id: tmdbId,
             text,
             parent_id: parentId ?? null,
@@ -777,6 +891,7 @@ export async function addComment(
       } catch {
       }
     }
+    return;
   }
 
   const db = await getDb();
@@ -784,7 +899,7 @@ export async function addComment(
   if (!clean) return;
   await db.runAsync(
     `INSERT INTO user_comments (user_id, tmdb_id, text, parent_id, created_at) VALUES (?, ?, ?, ?, ?)`,
-    userId,
+    routeUserId,
     tmdbId,
     clean,
     parentId ?? null,
@@ -805,6 +920,7 @@ export async function getComments(tmdbId: number): Promise<MovieComment[]> {
       } catch {
       }
     }
+    return [];
   }
 
   const db = await getDb();

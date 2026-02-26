@@ -1,5 +1,6 @@
 import React, { createContext, useContext, useEffect, useMemo, useState } from 'react';
 
+import { ADMIN_LOCAL_LOGIN } from '@/constants/auth';
 import { initDb } from '@/db/database';
 import {
   getCurrentUser,
@@ -16,7 +17,7 @@ import {
   upsertLocalUserFromBackend,
 } from '@/db/auth';
 import { syncUserHistoryToMl } from '@/lib/ml-sync';
-import { clearBackendUserSession } from '@/lib/backend-session';
+import { clearBackendUserSession, getBackendUserSession, resolveBackendUserId } from '@/lib/backend-session';
 import { bootstrapBackendUserSession, deletePublicAccount } from '@/lib/social-backend';
 import {
   BackendLocalAuthError,
@@ -25,6 +26,7 @@ import {
   backendLocalRegister,
   backendLocalSyncCredentials,
 } from '@/lib/local-auth-backend';
+import { hasBackendApi } from '@/lib/cinema-backend';
 
 type AuthContextValue = {
   user: User | null;
@@ -76,9 +78,21 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       try {
         await initDb();
         await ensureDefaultAdmin();
-        const current = await getCurrentUser();
+        let current = await getCurrentUser();
+        const backendEnabled = hasBackendApi();
         if (current?.id && current?.nickname) {
-          void bootstrapBackendUserSession(current.id, current.nickname).catch(() => {});
+          const bootstrapUserId = Number(current.backend_user_id ?? current.id);
+          await bootstrapBackendUserSession(bootstrapUserId, current.nickname).catch(() => null);
+          if (backendEnabled && current.role !== 'admin') {
+            const session = getBackendUserSession();
+            if (!session?.token) {
+              await logoutUser();
+              current = null;
+              if (mounted) {
+                setError('Backend session missing. Sign in again.');
+              }
+            }
+          }
         }
         if (mounted) setUser(current ?? null);
       } catch (err) {
@@ -103,6 +117,10 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         clearBackendUserSession();
         const cleanNickname = String(nickname || '').trim();
         const cleanPassword = String(password || '');
+        const backendEnabled = hasBackendApi();
+        const isAdminLogin =
+          cleanNickname.toLowerCase() === ADMIN_LOCAL_LOGIN.toLowerCase() ||
+          cleanNickname.toLowerCase() === 'admin';
         let u: User | null = null;
         let usedLocalFallback = false;
         let remoteNotFoundError: BackendLocalAuthError | null = null;
@@ -114,6 +132,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
           if (remote?.user) {
             u = await upsertLocalUserFromBackend({ user: remote.user, password: cleanPassword });
+          } else if (backendEnabled && !isAdminLogin) {
+            throw new Error('Cannot reach backend login right now. Check backend/server and try again.');
           }
         } catch (err) {
           if (!(err instanceof BackendLocalAuthError) || err.status !== 404) {
@@ -123,6 +143,12 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (!u) {
+          if (backendEnabled && !isAdminLogin) {
+            throw new Error(
+              remoteNotFoundError?.message ||
+                'Account not found on backend. Use your existing nickname or register from backend-connected device.'
+            );
+          }
           usedLocalFallback = true;
           try {
             u = await loginUser(cleanNickname, cleanPassword);
@@ -134,8 +160,17 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           }
         }
 
+        const bootstrapUserId = Number(u.backend_user_id ?? u.id);
+        await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
+        if (backendEnabled && u.role !== 'admin') {
+          const session = getBackendUserSession();
+          if (!session?.token) {
+            await logoutUser();
+            clearBackendUserSession();
+            throw new Error('Backend session could not be established. Check server and retry login.');
+          }
+        }
         setUser(u);
-        await bootstrapBackendUserSession(u.id, u.nickname).catch(() => null);
         if (usedLocalFallback && u.role !== 'admin') {
           await backendLocalSyncCredentials({
             userId: u.id,
@@ -143,13 +178,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             password: cleanPassword,
           }).catch(() => null);
         }
-        void syncUserHistoryToMl(u.id).catch(() => {});
+        void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       register: async (input) => {
         setError(null);
         clearBackendUserSession();
         const cleanNickname = String(input.nickname || '').trim();
         const cleanPassword = String(input.password || '');
+        const backendEnabled = hasBackendApi();
         let u: User | null = null;
         let usedLocalFallback = false;
 
@@ -161,6 +197,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
           });
           if (remote?.user) {
             u = await upsertLocalUserFromBackend({ user: remote.user, password: cleanPassword });
+          } else if (backendEnabled) {
+            throw new Error('Cannot reach backend register right now. Check backend/server and try again.');
           }
         } catch (err) {
           if (err instanceof BackendLocalAuthError) {
@@ -170,12 +208,24 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
 
         if (!u) {
+          if (backendEnabled) {
+            throw new Error('Registration needs backend connection to keep accounts synced across devices.');
+          }
           usedLocalFallback = true;
           u = await registerUser(input);
         }
 
+        const bootstrapUserId = Number(u.backend_user_id ?? u.id);
+        await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
+        if (backendEnabled && u.role !== 'admin') {
+          const session = getBackendUserSession();
+          if (!session?.token) {
+            await logoutUser();
+            clearBackendUserSession();
+            throw new Error('Backend session could not be established. Check server and retry register.');
+          }
+        }
         setUser(u);
-        await bootstrapBackendUserSession(u.id, u.nickname).catch(() => null);
         if (usedLocalFallback && u.role !== 'admin') {
           await backendLocalSyncCredentials({
             userId: u.id,
@@ -183,21 +233,40 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
             password: cleanPassword,
           }).catch(() => null);
         }
-        void syncUserHistoryToMl(u.id).catch(() => {});
+        void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       loginWithAuth0: async (profile) => {
         setError(null);
         clearBackendUserSession();
         const u = await upsertAuth0User(profile);
+        const backendEnabled = hasBackendApi();
+        const bootstrapUserId = Number(u.backend_user_id ?? u.id);
+        await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
+        if (backendEnabled && u.role !== 'admin') {
+          const session = getBackendUserSession();
+          if (!session?.token) {
+            await logoutUser();
+            clearBackendUserSession();
+            throw new Error('Backend session could not be established for Auth0 login.');
+          }
+        }
         setUser(u);
-        void bootstrapBackendUserSession(u.id, u.nickname).catch(() => {});
-        void syncUserHistoryToMl(u.id).catch(() => {});
+        void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
         setError(null);
-        const remoteAvailable = await backendLocalNicknameAvailable(nickname, excludeUserId ?? null);
+        const backendEnabled = hasBackendApi();
+        const canonicalExcludeUserId =
+          resolveBackendUserId() ??
+          (Number.isFinite(Number(excludeUserId)) && Number(excludeUserId) > 0
+            ? Number(excludeUserId)
+            : null);
+        const remoteAvailable = await backendLocalNicknameAvailable(nickname, canonicalExcludeUserId);
         if (typeof remoteAvailable === 'boolean') {
           return remoteAvailable;
+        }
+        if (backendEnabled) {
+          return false;
         }
         return isNicknameAvailable(nickname, excludeUserId);
       },
@@ -213,8 +282,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         if (user.role === 'admin') {
           throw new Error('Admin account cannot be deleted.');
         }
-        await bootstrapBackendUserSession(user.id, user.nickname).catch(() => null);
-        await deletePublicAccount(user.id);
+        await bootstrapBackendUserSession(Number(user.backend_user_id ?? user.id), user.nickname).catch(() => null);
+        await deletePublicAccount(Number(user.backend_user_id ?? user.id));
         await deleteUserAccount(user.id);
         clearBackendUserSession();
         setUser(null);

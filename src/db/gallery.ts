@@ -1,6 +1,7 @@
 import { getDb } from './database';
 import { GALLERY_SEED } from '@/data/gallery-seed';
 import { getBackendApiUrl, hasBackendApi } from '@/lib/cinema-backend';
+import { getBackendUserTokenForUser, resolveBackendUserId } from '@/lib/backend-session';
 
 export type GalleryDetails = Record<string, string>;
 
@@ -67,7 +68,11 @@ type RemoteGalleryComment = {
   created_at: string;
 };
 
-async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<T | null> {
+async function requestBackendJson<T>(
+  path: string,
+  init?: RequestInit,
+  options?: { userIdForToken?: number | null }
+): Promise<T | null> {
   if (!hasBackendApi()) return null;
   const url = getBackendApiUrl(path);
   if (!url) return null;
@@ -76,12 +81,29 @@ async function requestBackendJson<T>(path: string, init?: RequestInit): Promise<
       'Content-Type': 'application/json',
       ...(init?.headers as Record<string, string> | undefined),
     };
+    const token = getBackendUserTokenForUser(options?.userIdForToken ?? null);
+    if (token) headers['x-user-token'] = token;
     const res = await fetch(url, { ...init, headers });
     if (!res.ok) return null;
     return (await res.json()) as T;
   } catch {
     return null;
   }
+}
+
+function resolveUserRouteId(userId: number): number | null {
+  if (hasBackendApi()) {
+    const sessionUserId = resolveBackendUserId();
+    if (Number.isFinite(Number(sessionUserId)) && Number(sessionUserId) > 0) {
+      return Number(sessionUserId);
+    }
+    return null;
+  }
+  const localUserId = Number(userId);
+  if (Number.isFinite(localUserId) && localUserId > 0) {
+    return localUserId;
+  }
+  return null;
 }
 
 function mapRemoteGalleryItem(row: RemoteGalleryItem): GalleryItem {
@@ -467,19 +489,24 @@ async function ensureSeededOnce() {
 
 export async function getGalleryItems(opts?: { userId?: number; query?: string }): Promise<GalleryFeedItem[]> {
   if (hasBackendApi()) {
+    const requestedUserId = Number(opts?.userId ?? 0);
+    const routeUserId = requestedUserId > 0 ? resolveUserRouteId(requestedUserId) : null;
     const search = new URLSearchParams();
-    if (Number(opts?.userId ?? 0) > 0) {
-      search.set('user_id', String(Number(opts?.userId ?? 0)));
+    if (routeUserId && routeUserId > 0) {
+      search.set('user_id', String(routeUserId));
     }
     const query = String(opts?.query ?? '').trim();
     if (query) search.set('query', query);
     const payload = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
-      `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`
+      `/api/gallery${search.toString() ? `?${search.toString()}` : ''}`,
+      undefined,
+      routeUserId && routeUserId > 0 ? { userIdForToken: routeUserId } : undefined
     );
     if (Array.isArray(payload?.items)) {
       const mapped = payload.items.map(mapRemoteGalleryFeedItem).filter((item) => !!item.image);
       return dedupeMappedGalleryRows(mapped);
     }
+    return [];
   }
 
   await ensureSeededOnce();
@@ -590,6 +617,7 @@ export async function addGalleryItem(input: Omit<GalleryItem, 'id'>) {
     }),
   });
   if (remote?.item) return;
+  if (hasBackendApi()) return;
 
   const db = await getDb();
   const resolvedImage = resolveGalleryImage(input);
@@ -619,17 +647,25 @@ export async function deleteGalleryItem(id: string) {
     method: 'DELETE',
   });
   if (remote?.ok) return;
+  if (hasBackendApi()) return;
 
   const db = await getDb();
   await db.runAsync('DELETE FROM gallery_items WHERE id = ?', Number(id));
 }
 
 export async function toggleGalleryLike(userId: number, galleryId: number) {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-like`, {
-    method: 'POST',
-    body: JSON.stringify({ user_id: userId }),
-  });
+  const routeUserId = resolveUserRouteId(userId);
+  if (hasBackendApi() && !routeUserId) return false;
+  const remote = await requestBackendJson<{ active?: boolean }>(
+    `/api/gallery/${galleryId}/toggle-like`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ user_id: routeUserId }),
+    },
+    routeUserId ? { userIdForToken: routeUserId } : undefined
+  );
   if (typeof remote?.active === 'boolean') return remote.active;
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const exists = await db.getFirstAsync<{ ok: number }>(
@@ -651,11 +687,18 @@ export async function toggleGalleryLike(userId: number, galleryId: number) {
 }
 
 export async function toggleGalleryFavorite(userId: number, galleryId: number) {
-  const remote = await requestBackendJson<{ active?: boolean }>(`/api/gallery/${galleryId}/toggle-favorite`, {
-    method: 'POST',
-    body: JSON.stringify({ user_id: userId }),
-  });
+  const routeUserId = resolveUserRouteId(userId);
+  if (hasBackendApi() && !routeUserId) return false;
+  const remote = await requestBackendJson<{ active?: boolean }>(
+    `/api/gallery/${galleryId}/toggle-favorite`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ user_id: routeUserId }),
+    },
+    routeUserId ? { userIdForToken: routeUserId } : undefined
+  );
   if (typeof remote?.active === 'boolean') return remote.active;
+  if (hasBackendApi()) return false;
 
   const db = await getDb();
   const exists = await db.getFirstAsync<{ ok: number }>(
@@ -681,6 +724,7 @@ export async function getGalleryComments(galleryId: number): Promise<GalleryComm
   if (Array.isArray(remote?.comments)) {
     return remote.comments.map(mapRemoteGalleryComment);
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{
@@ -715,16 +759,23 @@ export async function getGalleryComments(galleryId: number): Promise<GalleryComm
 }
 
 export async function addGalleryComment(userId: number, galleryId: number, text: string, parentId?: number | null) {
-  const remote = await requestBackendJson<{ comment?: RemoteGalleryComment }>(`/api/gallery/${galleryId}/comments`, {
-    method: 'POST',
-    body: JSON.stringify({
-      user_id: userId,
-      gallery_id: galleryId,
-      text,
-      parent_id: parentId ?? null,
-    }),
-  });
+  const routeUserId = resolveUserRouteId(userId);
+  if (hasBackendApi() && !routeUserId) return;
+  const remote = await requestBackendJson<{ comment?: RemoteGalleryComment }>(
+    `/api/gallery/${galleryId}/comments`,
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        user_id: routeUserId,
+        gallery_id: galleryId,
+        text,
+        parent_id: parentId ?? null,
+      }),
+    },
+    routeUserId ? { userIdForToken: routeUserId } : undefined
+  );
   if (remote?.comment) return;
+  if (hasBackendApi()) return;
 
   const db = await getDb();
   const clean = text.trim();
@@ -744,12 +795,17 @@ export async function syncGalleryCommentAvatarsForUser(_userId: number, _avatarU
 }
 
 export async function getUserFavoriteGallery(userId: number): Promise<GalleryItem[]> {
+  const routeUserId = resolveUserRouteId(userId);
+  if (hasBackendApi() && !routeUserId) return [];
   const remote = await requestBackendJson<{ items?: RemoteGalleryItem[] }>(
-    `/api/users/${encodeURIComponent(String(userId))}/gallery-favorites`
+    `/api/users/${encodeURIComponent(String(routeUserId))}/gallery-favorites`,
+    undefined,
+    routeUserId ? { userIdForToken: routeUserId } : undefined
   );
   if (Array.isArray(remote?.items)) {
     return dedupeMappedGalleryRows(remote.items.map(mapRemoteGalleryItem));
   }
+  if (hasBackendApi()) return [];
 
   const db = await getDb();
   const rows = await db.getAllAsync<{

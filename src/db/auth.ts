@@ -7,6 +7,7 @@ import type { BackendLocalAuthUser } from '@/lib/local-auth-backend';
 
 export type User = {
   id: number;
+  backend_user_id: number | null;
   name: string | null;
   nickname: string;
   email: string | null;
@@ -362,6 +363,10 @@ export async function upsertLocalUserFromBackend(input: {
 }): Promise<User> {
   const db = await getDb();
   const remoteUser = input.user;
+  const backendUserId = Number(remoteUser?.user_id);
+  if (!Number.isFinite(backendUserId) || backendUserId <= 0) {
+    throw new Error('Invalid backend user id.');
+  }
   const nickname = String(remoteUser?.nickname || '').trim();
   if (!nickname) {
     throw new Error('Invalid backend user payload.');
@@ -372,16 +377,24 @@ export async function upsertLocalUserFromBackend(input: {
   const role: 'user' | 'admin' = remoteUser.role === 'admin' ? 'admin' : 'user';
   const authProvider: 'local' | 'google' | 'auth0' =
     remoteUser.auth_provider === 'auth0' ? 'auth0' : remoteUser.auth_provider === 'google' ? 'google' : 'local';
-  const existing = await db.getFirstAsync<User>('SELECT * FROM users WHERE LOWER(nickname) = LOWER(?)', nickname);
+  let existing = await db.getFirstAsync<User>('SELECT * FROM users WHERE backend_user_id = ?', backendUserId);
+  if (!existing) {
+    existing = await db.getFirstAsync<User>(
+      'SELECT * FROM users WHERE LOWER(nickname) = LOWER(?) AND (backend_user_id IS NULL OR backend_user_id <= 0)',
+      nickname
+    );
+  }
   let targetUserId: number;
   if (existing) {
     await db.runAsync(
       `
       UPDATE users
-      SET name = ?, email = ?, date_of_birth = ?, country = ?, bio = ?, avatar_url = ?, password_hash = ?, role = ?, auth_provider = ?, updated_at = ?
+      SET backend_user_id = ?, name = ?, nickname = ?, email = ?, date_of_birth = ?, country = ?, bio = ?, avatar_url = ?, password_hash = ?, role = ?, auth_provider = ?, updated_at = ?
       WHERE id = ?
       `,
+      backendUserId,
       remoteUser.name?.trim() || null,
+      nickname,
       remoteUser.email?.trim() || null,
       remoteUser.date_of_birth?.trim() || null,
       remoteUser.country?.trim() || null,
@@ -398,10 +411,11 @@ export async function upsertLocalUserFromBackend(input: {
     const result = await db.runAsync(
       `
       INSERT INTO users
-        (name, nickname, email, date_of_birth, country, bio, avatar_url, password_hash, role, auth_provider, google_sub, created_at, updated_at)
+        (backend_user_id, name, nickname, email, date_of_birth, country, bio, avatar_url, password_hash, role, auth_provider, google_sub, created_at, updated_at)
       VALUES
-        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
+        (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, NULL, ?, ?)
       `,
+      backendUserId,
       remoteUser.name?.trim() || null,
       nickname,
       remoteUser.email?.trim() || null,

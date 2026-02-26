@@ -25,6 +25,7 @@ export async function initDb() {
 
     CREATE TABLE IF NOT EXISTS users (
       id INTEGER PRIMARY KEY AUTOINCREMENT,
+      backend_user_id INTEGER,
       name TEXT,
       nickname TEXT NOT NULL UNIQUE,
       email TEXT,
@@ -225,6 +226,7 @@ export async function initDb() {
     );
 
     CREATE INDEX IF NOT EXISTS idx_user_movies_user ON user_movies(user_id);
+    CREATE INDEX IF NOT EXISTS idx_users_backend_user_id ON users(backend_user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_updated ON auth_login_attempts(updated_at DESC);
     CREATE INDEX IF NOT EXISTS idx_user_watchlist_user ON user_watchlist(user_id);
     CREATE INDEX IF NOT EXISTS idx_user_favorites_user ON user_favorites(user_id);
@@ -244,6 +246,7 @@ export async function initDb() {
   `);
 
   await ensureColumn(db, 'users', 'google_sub', 'ALTER TABLE users ADD COLUMN google_sub TEXT');
+  await ensureColumn(db, 'users', 'backend_user_id', 'ALTER TABLE users ADD COLUMN backend_user_id INTEGER');
   await ensureColumn(db, 'users', 'bio', 'ALTER TABLE users ADD COLUMN bio TEXT');
   await ensureColumn(db, 'users', 'avatar_url', 'ALTER TABLE users ADD COLUMN avatar_url TEXT');
   await ensureColumn(
