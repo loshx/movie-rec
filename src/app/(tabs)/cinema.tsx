@@ -631,75 +631,98 @@ export default function CinemaScreen() {
     const revealResults = isClosed || userHasVoted;
     return (
       <View style={styles.pollCard}>
-        <View style={styles.pollHeader}>
-          <Text style={styles.pollTitle}>Cinema Poll</Text>
-          <Text style={[styles.pollStatus, isClosed ? styles.pollStatusClosed : styles.pollStatusOpen]}>
-            {isClosed ? 'Closed' : 'Open'}
-          </Text>
-        </View>
-        <Text style={styles.pollQuestion}>{poll.question || 'Choose next movie'}</Text>
-        <View style={styles.pollOptionsWrap}>
-          {poll.options.map((option, idx) => {
-            const selected = poll.user_vote_option_id === option.id;
-            const disabled = isClosed || !!pollSubmittingId;
-            const isLast = idx === poll.options.length - 1;
-            return (
-              <Pressable
-                key={option.id}
-                onPress={() => void onVotePollOption(option.id)}
-                disabled={disabled}
-                style={[
-                  styles.pollOption,
-                  selected ? styles.pollOptionSelected : null,
-                  isLast ? styles.pollOptionLast : null,
-                  disabled ? styles.pollOptionDisabled : null,
-                ]}>
-                {option.poster_url ? (
-                  <Image source={{ uri: option.poster_url }} style={styles.pollPoster} resizeMode="cover" />
-                ) : (
-                  <View style={styles.pollPosterFallback} />
-                )}
-                <View style={styles.pollMeta}>
-                  <Text style={styles.pollOptionTitle} numberOfLines={1}>
-                    {option.title}
-                  </Text>
-                  {revealResults ? (
-                    <>
-                      <Text style={styles.pollOptionStats}>
-                        {Number(option.votes || 0)} votes - {Math.round(Number(option.percent || 0))}%
-                      </Text>
-                      <View style={styles.pollProgressTrack}>
-                        <View
-                          style={[
-                            styles.pollProgressFill,
-                            {
-                              width: `${Math.max(
-                                selected ? 4 : 0,
-                                Math.min(100, Math.round(Number(option.percent || 0)))
-                              )}%`,
-                            },
-                          ]}
-                        />
+        <LinearGradient
+          colors={['rgba(10,14,26,0.97)', 'rgba(7,12,22,0.97)', 'rgba(5,8,16,0.99)']}
+          start={{ x: 0, y: 0 }}
+          end={{ x: 1, y: 1 }}
+          style={styles.pollCardGradient}>
+          <View style={styles.pollHeader}>
+            <View style={styles.pollHeaderLeft}>
+              <View style={styles.pollTitleIconWrap}>
+                <Ionicons name="sparkles" size={12} color="#7dd3fc" />
+              </View>
+              <Text style={styles.pollTitle}>Cinema Poll</Text>
+            </View>
+            <Text style={[styles.pollStatus, isClosed ? styles.pollStatusClosed : styles.pollStatusOpen]}>
+              {isClosed ? 'Closed' : 'Open'}
+            </Text>
+          </View>
+          <Text style={styles.pollQuestion}>{poll.question || 'Choose next movie'}</Text>
+          {!revealResults ? <Text style={styles.pollQuestionHint}>Vote once to reveal percentages</Text> : null}
+          <View style={styles.pollOptionsWrap}>
+            {poll.options.map((option, idx) => {
+              const selected = poll.user_vote_option_id === option.id;
+              const disabled = isClosed || !!pollSubmittingId || userHasVoted;
+              const percent = Math.max(0, Math.min(100, Math.round(Number(option.percent || 0))));
+              return (
+                <Pressable
+                  key={option.id}
+                  onPress={() => void onVotePollOption(option.id)}
+                  disabled={disabled}
+                  style={[styles.pollOption, disabled ? styles.pollOptionDisabled : null]}>
+                  <LinearGradient
+                    colors={
+                      selected
+                        ? ['rgba(21,128,61,0.5)', 'rgba(8,20,24,0.92)']
+                        : ['rgba(15,23,42,0.92)', 'rgba(17,24,39,0.82)']
+                    }
+                    start={{ x: 0, y: 0 }}
+                    end={{ x: 1, y: 1 }}
+                    style={[styles.pollOptionBackdrop, selected ? styles.pollOptionBackdropSelected : null]}>
+                    {option.poster_url ? (
+                      <Image source={{ uri: option.poster_url }} style={styles.pollPoster} resizeMode="cover" />
+                    ) : (
+                      <View style={styles.pollPosterFallback} />
+                    )}
+                    <View style={styles.pollMeta}>
+                      <View style={styles.pollTitleRow}>
+                        <View style={styles.pollRankBadge}>
+                          <Text style={styles.pollRankBadgeText}>{idx + 1}</Text>
+                        </View>
+                        <Text style={styles.pollOptionTitle} numberOfLines={1}>
+                          {option.title}
+                        </Text>
                       </View>
-                    </>
-                  ) : (
-                    <Text style={styles.pollOptionHint}>Tap to vote and unlock results</Text>
-                  )}
-                </View>
-                {selected ? <Ionicons name="checkmark-circle" size={18} color="#22c55e" /> : null}
-              </Pressable>
-            );
-          })}
-        </View>
-        <Text style={styles.pollFooter}>
-          {revealResults
-            ? `Total votes: ${Number(poll.total_votes || 0)}`
-            : 'Results will appear after your vote'}
-        </Text>
-        {pollMessage ? <Text style={styles.pollMessage}>{pollMessage}</Text> : null}
+                      {revealResults ? (
+                        <>
+                          <View style={styles.pollStatsRow}>
+                            <Text style={styles.pollOptionStats}>{Number(option.votes || 0)} votes</Text>
+                            <Text style={styles.pollOptionPercent}>{percent}%</Text>
+                          </View>
+                          <View style={styles.pollProgressTrack}>
+                            <View
+                              style={[
+                                styles.pollProgressFill,
+                                selected ? styles.pollProgressFillSelected : null,
+                                { width: `${Math.max(selected ? 8 : 0, percent)}%` },
+                              ]}
+                            />
+                          </View>
+                        </>
+                      ) : (
+                        <Text style={styles.pollOptionHint}>Tap to vote</Text>
+                      )}
+                    </View>
+                    {selected ? (
+                      <Ionicons name="checkmark-circle" size={20} color="#22c55e" style={styles.pollCheckIcon} />
+                    ) : null}
+                  </LinearGradient>
+                </Pressable>
+              );
+            })}
+          </View>
+          <Text style={styles.pollFooter}>
+            {revealResults
+              ? `Total votes: ${Number(poll.total_votes || 0)}`
+              : 'Results stay hidden until you vote'}
+          </Text>
+          {pollMessage ? <Text style={styles.pollMessage}>{pollMessage}</Text> : null}
+        </LinearGradient>
       </View>
     );
   }, [poll, pollSubmittingId, pollMessage, onVotePollOption]);
+
+  const emptyPollTopOffset = Math.max(insets.top + 10, 18);
 
   const chatStateLabel =
     chatStatus === 'connected'
@@ -723,8 +746,19 @@ export default function CinemaScreen() {
   if (!event || phase === 'ended') {
     const showNoCinemaArtwork = !poll && !pollLoading;
     return (
-      <View style={[styles.emptyRoot, poll ? styles.emptyRootWithPoll : null, { backgroundColor: theme.background }]}>
-        <View style={[styles.emptyContent, poll ? styles.emptyContentWithPoll : null, { paddingBottom: Math.max(insets.bottom + 44, 64) }]}>
+      <View
+        style={[
+          styles.emptyRoot,
+          poll ? styles.emptyRootWithPoll : null,
+          poll ? { paddingTop: emptyPollTopOffset } : null,
+          { backgroundColor: theme.background },
+        ]}>
+        <View
+          style={[
+            styles.emptyContent,
+            poll ? styles.emptyContentWithPoll : null,
+            { paddingBottom: Math.max(insets.bottom + 44, 64) },
+          ]}>
           {showNoCinemaArtwork ? (
             <>
               {EMPTY_CINEMA_IMAGE_URL ? (
@@ -752,7 +786,7 @@ export default function CinemaScreen() {
       behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 4 : 0}>
       {phase === 'upcoming' ? (
-        <View style={styles.phaseShell}>
+        <View style={[styles.phaseShell, { paddingTop: Math.max(insets.top + 10, Spacing.three + 8) }]}>
           <View style={styles.phasePosterWrap}>
             {event.poster_url ? (
               <Image source={{ uri: event.poster_url }} style={styles.phasePoster} resizeMode="cover" />
@@ -791,7 +825,7 @@ export default function CinemaScreen() {
               style={styles.playerTopFade}
               pointerEvents="none"
             />
-            <View style={styles.playerOverlayTop}>
+            <View style={[styles.playerOverlayTop, { top: Math.max(insets.top + 8, 14) }]}>
               <View style={styles.liveBadge}>
                 <View style={styles.liveBadgeDot} />
                 <Text style={styles.liveBadgeText}>LIVE</Text>
@@ -987,31 +1021,46 @@ const styles = StyleSheet.create({
   pollCard: {
     width: '100%',
     alignSelf: 'stretch',
-    borderRadius: 0,
-    borderWidth: 0,
-    borderColor: 'transparent',
-    backgroundColor: 'transparent',
-    padding: 0,
+    marginTop: 10,
+    borderRadius: 24,
+    overflow: 'hidden',
+    shadowColor: '#020617',
+    shadowOpacity: 0.45,
+    shadowRadius: 20,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 14,
+  },
+  pollCardGradient: {
+    paddingHorizontal: 14,
+    paddingVertical: 14,
     gap: 10,
-    marginTop: 6,
-    shadowColor: 'transparent',
-    shadowOpacity: 0,
-    shadowRadius: 0,
-    shadowOffset: { width: 0, height: 0 },
-    elevation: 0,
   },
   pollHeader: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    paddingHorizontal: 2,
+  },
+  pollHeaderLeft: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pollTitleIconWrap: {
+    width: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(125,211,252,0.42)',
+    backgroundColor: 'rgba(14,116,144,0.26)',
+    alignItems: 'center',
+    justifyContent: 'center',
   },
   pollTitle: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 15,
+    fontSize: 16,
     textTransform: 'uppercase',
-    letterSpacing: 0.8,
+    letterSpacing: 0.9,
     fontWeight: '700',
   },
   pollStatus: {
@@ -1024,9 +1073,9 @@ const styles = StyleSheet.create({
     overflow: 'hidden',
   },
   pollStatusOpen: {
-    color: '#22c55e',
-    borderColor: 'rgba(34,197,94,0.5)',
-    backgroundColor: 'rgba(34,197,94,0.15)',
+    color: '#4ade80',
+    borderColor: 'rgba(34,197,94,0.55)',
+    backgroundColor: 'rgba(22,163,74,0.22)',
   },
   pollStatusClosed: {
     color: '#fca5a5',
@@ -1036,89 +1085,126 @@ const styles = StyleSheet.create({
   pollQuestion: {
     color: '#fff',
     fontFamily: Fonts.serif,
-    fontSize: 17,
-    lineHeight: 23,
-    paddingHorizontal: 2,
+    fontSize: 20,
+    lineHeight: 26,
+  },
+  pollQuestionHint: {
+    color: 'rgba(191,219,254,0.9)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.3,
   },
   pollOptionsWrap: {
-    gap: 0,
-    borderTopWidth: 1,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
+    gap: 10,
   },
   pollOption: {
+    borderRadius: 16,
+    overflow: 'hidden',
+  },
+  pollOptionDisabled: {
+    opacity: 0.84,
+  },
+  pollOptionBackdrop: {
     flexDirection: 'row',
     alignItems: 'center',
     gap: 10,
-    borderWidth: 0,
-    borderBottomWidth: 1,
-    borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 0,
-    paddingHorizontal: 2,
-    paddingVertical: 11,
-    backgroundColor: 'transparent',
+    paddingHorizontal: 10,
+    paddingVertical: 10,
+    borderRadius: 16,
   },
-  pollOptionSelected: {
-    borderColor: 'rgba(34,197,94,0.72)',
-    backgroundColor: 'rgba(34,197,94,0.12)',
-  },
-  pollOptionDisabled: {
-    opacity: 0.82,
-  },
-  pollOptionLast: {
-    borderBottomWidth: 0,
+  pollOptionBackdropSelected: {
+    backgroundColor: 'rgba(34,197,94,0.06)',
   },
   pollPoster: {
-    width: 52,
-    height: 74,
-    borderRadius: 4,
+    width: 58,
+    height: 84,
+    borderRadius: 10,
     backgroundColor: '#111',
   },
   pollPosterFallback: {
-    width: 52,
-    height: 74,
-    borderRadius: 4,
+    width: 58,
+    height: 84,
+    borderRadius: 10,
     backgroundColor: 'rgba(255,255,255,0.12)',
   },
   pollMeta: {
     flex: 1,
-    gap: 4,
+    gap: 5,
+  },
+  pollTitleRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+  },
+  pollRankBadge: {
+    minWidth: 22,
+    height: 22,
+    borderRadius: 11,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(15,23,42,0.7)',
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  pollRankBadgeText: {
+    color: 'rgba(226,232,240,0.95)',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
   },
   pollOptionTitle: {
     color: '#fff',
     fontFamily: Fonts.serif,
-    fontSize: 16,
+    fontSize: 17,
+    flex: 1,
+  },
+  pollStatsRow: {
+    marginTop: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
   },
   pollOptionStats: {
-    color: 'rgba(255,255,255,0.84)',
+    color: 'rgba(241,245,249,0.88)',
     fontFamily: Fonts.mono,
     fontSize: 11,
   },
+  pollOptionPercent: {
+    color: '#86efac',
+    fontFamily: Fonts.mono,
+    fontSize: 11.5,
+    fontWeight: '700',
+  },
   pollOptionHint: {
-    color: 'rgba(255,255,255,0.66)',
+    color: 'rgba(191,219,254,0.9)',
     fontFamily: Fonts.mono,
     fontSize: 11,
   },
   pollProgressTrack: {
-    marginTop: 1,
-    height: 4,
-    borderRadius: 0,
-    backgroundColor: 'rgba(255,255,255,0.16)',
+    marginTop: 2,
+    height: 6,
+    borderRadius: 999,
+    backgroundColor: 'rgba(148,163,184,0.28)',
     overflow: 'hidden',
   },
   pollProgressFill: {
     height: '100%',
-    borderRadius: 0,
+    borderRadius: 999,
+    backgroundColor: '#34d399',
+  },
+  pollProgressFillSelected: {
     backgroundColor: '#22c55e',
+  },
+  pollCheckIcon: {
+    marginLeft: 2,
   },
   pollFooter: {
     color: 'rgba(255,255,255,0.78)',
     fontFamily: Fonts.mono,
     fontSize: 11.5,
-    paddingHorizontal: 2,
+    marginTop: 1,
   },
   pollMessage: {
-    color: '#d1d5db',
+    color: '#dbeafe',
     fontFamily: Fonts.mono,
     fontSize: 11,
   },

@@ -465,16 +465,14 @@ function voteCinemaPoll(pollIdInput, userIdInput, optionIdInput) {
   if (!selectedOption) throw new Error('Invalid option_id.');
 
   const previousOptionId = String(poll.votes_by_user?.[String(userId)] || '').toLowerCase();
-  if (previousOptionId && previousOptionId !== optionId) {
-    const previousOption = poll.options.find((option) => option.id === previousOptionId);
-    if (previousOption && previousOption.votes > 0) {
-      previousOption.votes -= 1;
+  if (previousOptionId) {
+    if (previousOptionId === optionId) {
+      return poll;
     }
+    throw new Error('You already voted in this poll.');
   }
 
-  if (!previousOptionId || previousOptionId !== optionId) {
-    selectedOption.votes += 1;
-  }
+  selectedOption.votes += 1;
 
   poll.votes_by_user[String(userId)] = optionId;
   poll.updated_at = nowIso();
