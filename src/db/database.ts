@@ -225,6 +225,39 @@ export async function initDb() {
       FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
     );
 
+    CREATE TABLE IF NOT EXISTS user_notifications (
+      id INTEGER PRIMARY KEY AUTOINCREMENT,
+      user_id INTEGER NOT NULL,
+      type TEXT NOT NULL,
+      title TEXT NOT NULL,
+      body TEXT NOT NULL,
+      action_path TEXT,
+      payload_json TEXT,
+      dedupe_key TEXT,
+      created_at TEXT NOT NULL,
+      read_at TEXT,
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_markers (
+      user_id INTEGER NOT NULL,
+      scope TEXT NOT NULL,
+      marker TEXT NOT NULL,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, scope, marker),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
+    CREATE TABLE IF NOT EXISTS notification_subscriptions (
+      user_id INTEGER NOT NULL,
+      kind TEXT NOT NULL,
+      target_id TEXT NOT NULL,
+      payload_json TEXT,
+      created_at TEXT NOT NULL,
+      PRIMARY KEY(user_id, kind, target_id),
+      FOREIGN KEY(user_id) REFERENCES users(id) ON DELETE CASCADE
+    );
+
     CREATE INDEX IF NOT EXISTS idx_user_movies_user ON user_movies(user_id);
     CREATE INDEX IF NOT EXISTS idx_users_backend_user_id ON users(backend_user_id);
     CREATE INDEX IF NOT EXISTS idx_auth_login_attempts_updated ON auth_login_attempts(updated_at DESC);
@@ -243,6 +276,12 @@ export async function initDb() {
     CREATE INDEX IF NOT EXISTS idx_user_search_clicks_user ON user_search_clicks(user_id, last_used_at DESC);
     CREATE INDEX IF NOT EXISTS idx_cinema_events_start ON cinema_events(start_at DESC);
     CREATE INDEX IF NOT EXISTS idx_user_list_privacy_user ON user_list_privacy(user_id);
+    CREATE INDEX IF NOT EXISTS idx_user_notifications_user_created ON user_notifications(user_id, created_at DESC);
+    CREATE UNIQUE INDEX IF NOT EXISTS idx_user_notifications_user_dedupe
+      ON user_notifications(user_id, dedupe_key)
+      WHERE dedupe_key IS NOT NULL AND dedupe_key != '';
+    CREATE INDEX IF NOT EXISTS idx_notification_subscriptions_user_kind
+      ON notification_subscriptions(user_id, kind);
   `);
 
   await ensureColumn(db, 'users', 'google_sub', 'ALTER TABLE users ADD COLUMN google_sub TEXT');

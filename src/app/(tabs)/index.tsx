@@ -2,7 +2,6 @@ import { Image } from 'expo-image';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
-  Alert,
   Animated,
   AppState,
   Easing,
@@ -52,6 +51,7 @@ import { getMlRecommendations, hasMlApi, syncMlFollowingGraph } from '@/lib/ml-r
 import { getFollowingProfiles } from '@/lib/social-backend';
 import { getSearchClickHistory, upsertSearchClickHistory } from '@/db/search-click-history';
 import { getCinemaEventMeta, type CinemaEventMeta } from '@/lib/cinema-event-meta';
+import { useNotifications } from '@/contexts/NotificationsContext';
 
 type FeaturedDisplay = {
   tmdb_id: number | null;
@@ -471,6 +471,12 @@ function rankByTaste(items: SearchResultItem[], signals: SearchTasteSignals): Se
 
 export default function HomeScreen() {
   const { user } = useAuth();
+  const {
+    unreadCount,
+    armCinemaLiveReminder,
+    disarmCinemaLiveReminder,
+    isCinemaLiveReminderArmed,
+  } = useNotifications();
   const theme = useTheme();
   const insets = useSafeAreaInsets();
 
@@ -515,7 +521,6 @@ export default function HomeScreen() {
   });
   const [cinemaEvent, setCinemaEvent] = useState<CinemaEvent | null>(null);
   const [cinemaNowIso, setCinemaNowIso] = useState(new Date().toISOString());
-  const [cinemaNotifyArmed, setCinemaNotifyArmed] = useState(false);
   const [cinemaMeta, setCinemaMeta] = useState<CinemaEventMeta | null>(null);
   const [heroIndex, setHeroIndex] = useState(0);
   const [heroSlideWidth, setHeroSlideWidth] = useState(0);
@@ -527,7 +532,6 @@ export default function HomeScreen() {
   const firstLoadDoneRef = useRef(false);
   const appStateRef = useRef(AppState.currentState);
   const shouldRefreshOnActiveRef = useRef(false);
-  const prevCinemaPhaseRef = useRef<'upcoming' | 'live' | 'ended' | 'none'>('none');
   const watchedIdsRef = useRef<number[]>([]);
   const searchTasteSignalsRef = useRef<SearchTasteSignals>(searchTasteSignals);
 
@@ -1391,20 +1395,8 @@ export default function HomeScreen() {
     return 'ended';
   }, [cinemaEvent, cinemaNowIso]);
 
-  useEffect(() => {
-    const prev = prevCinemaPhaseRef.current;
-    if (cinemaNotifyArmed && prev === 'upcoming' && cinemaPhase === 'live' && cinemaEvent?.title) {
-      Alert.alert('Cinema is live', `${cinemaEvent.title} just started.`, [
-        { text: 'Later', style: 'cancel' },
-        {
-          text: 'Go to live',
-          onPress: () => router.push('/cinema'),
-        },
-      ]);
-      setCinemaNotifyArmed(false);
-    }
-    prevCinemaPhaseRef.current = cinemaPhase;
-  }, [cinemaEvent?.title, cinemaNotifyArmed, cinemaPhase]);
+  const cinemaReminderArmed =
+    cinemaPhase === 'upcoming' ? isCinemaLiveReminderArmed(cinemaEvent) : false;
 
   const heroSlides = useMemo<HeroSlide[]>(() => {
     const candidates = [
@@ -1580,9 +1572,19 @@ export default function HomeScreen() {
               <Ionicons name="menu" size={22} color="#FFFFFF" />
             </Pressable>
           </View>
-          <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtnPlain}>
-            <Ionicons name="search" size={22} color="#FFFFFF" />
-          </Pressable>
+          <View style={styles.headerRight}>
+            <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtnPlain}>
+              <Ionicons name="search" size={22} color="#FFFFFF" />
+            </Pressable>
+            <Pressable onPress={() => router.push('/notifications' as any)} style={styles.headerIconBtnPlain}>
+              <Ionicons name="notifications-outline" size={22} color="#FFFFFF" />
+              {unreadCount > 0 ? (
+                <View style={styles.headerIconBadge}>
+                  <Text style={styles.headerIconBadgeText}>{Math.min(99, unreadCount)}</Text>
+                </View>
+              ) : null}
+            </Pressable>
+          </View>
         </View>
 
         <View style={styles.heroWrap}>
@@ -1723,7 +1725,7 @@ export default function HomeScreen() {
                 <Image
                   source={{ uri: heroTopImage }}
                   style={styles.heroImage}
-                  contentFit="cover"
+                  contentFit="contain"
                   contentPosition="center"
                   transition={140}
                   cachePolicy="memory-disk"
@@ -1746,13 +1748,18 @@ export default function HomeScreen() {
             <View style={styles.cinemaHeroFooter}>
               {cinemaPhase === 'upcoming' ? (
                 <Pressable
-                  style={[styles.cinemaHeroNotifyBtn, cinemaNotifyArmed && styles.cinemaHeroNotifyBtnArmed]}
+                  style={[styles.cinemaHeroNotifyBtn, cinemaReminderArmed && styles.cinemaHeroNotifyBtnArmed]}
                   onPress={() => {
-                    setCinemaNotifyArmed(true);
-                    Alert.alert('Notifications enabled', 'You will be alerted when the live stream starts.');
+                    if (cinemaReminderArmed) {
+                      void disarmCinemaLiveReminder(cinemaEvent);
+                    } else {
+                      void armCinemaLiveReminder(cinemaEvent);
+                    }
                   }}>
                   <Ionicons name="notifications-outline" size={18} color="#fff" />
-                  <Text style={styles.cinemaHeroNotifyText}>Notify me</Text>
+                  <Text style={styles.cinemaHeroNotifyText}>
+                    {cinemaReminderArmed ? 'Reminder on' : 'Notify me'}
+                  </Text>
                 </Pressable>
               ) : cinemaPhase === 'live' ? (
                 <Pressable style={styles.cinemaHeroNotifyBtn} onPress={() => router.push('/cinema')}>
@@ -1830,9 +1837,19 @@ export default function HomeScreen() {
         <Pressable onPress={() => setCategoriesOpen(true)} style={styles.headerIconBtn}>
           <Ionicons name="menu" size={18} color="#0D1117" />
         </Pressable>
-        <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtn}>
-          <Ionicons name="search" size={18} color="#0D1117" />
-        </Pressable>
+        <View style={styles.headerRight}>
+          <Pressable onPress={() => setSearchOpen(true)} style={styles.headerIconBtn}>
+            <Ionicons name="search" size={18} color="#0D1117" />
+          </Pressable>
+          <Pressable onPress={() => router.push('/notifications' as any)} style={styles.headerIconBtn}>
+            <Ionicons name="notifications-outline" size={18} color="#0D1117" />
+            {unreadCount > 0 ? (
+              <View style={styles.headerIconBadgeLight}>
+                <Text style={styles.headerIconBadgeLightText}>{Math.min(99, unreadCount)}</Text>
+              </View>
+            ) : null}
+          </Pressable>
+        </View>
       </Animated.View>
 
       {(categoriesOpen || searchOpen) && (
@@ -2102,6 +2119,11 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     gap: Spacing.two,
   },
+  headerRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: Spacing.one,
+  },
   headerIconBtn: {
     width: 40,
     height: 40,
@@ -2125,6 +2147,40 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     backgroundColor: 'transparent',
     borderWidth: 0,
+  },
+  headerIconBadge: {
+    position: 'absolute',
+    right: 4,
+    top: 5,
+    minWidth: 16,
+    height: 16,
+    borderRadius: 8,
+    paddingHorizontal: 4,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#EF4444',
+  },
+  headerIconBadgeText: {
+    color: '#FFFFFF',
+    fontSize: 9,
+    fontWeight: '700',
+  },
+  headerIconBadgeLight: {
+    position: 'absolute',
+    right: 2,
+    top: 3,
+    minWidth: 14,
+    height: 14,
+    borderRadius: 7,
+    paddingHorizontal: 3,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#DC2626',
+  },
+  headerIconBadgeLightText: {
+    color: '#FFFFFF',
+    fontSize: 8,
+    fontWeight: '700',
   },
   heroWrap: {
     paddingHorizontal: Spacing.four,
@@ -2175,7 +2231,8 @@ const styles = StyleSheet.create({
   },
   heroImage: {
     width: '100%',
-    height: 336,
+    aspectRatio: 3 / 4,
+    backgroundColor: '#05070d',
   },
   heroCinemaPosterTap: {
     width: '100%',

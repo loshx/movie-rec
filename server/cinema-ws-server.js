@@ -1941,6 +1941,72 @@ function syncStoredCommentIdentityForUser(userId, prevNickname, nextNickname, ne
   }
 }
 
+function collectReplyNotificationsForUser(userIdInput, options = {}) {
+  const userId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!userId) return [];
+  const sinceRaw = String(options.since || '').trim();
+  const sinceTs = Number.isFinite(Date.parse(sinceRaw)) ? Date.parse(sinceRaw) : null;
+  const limitRaw = parsePositiveNumber(options.limit);
+  const limit = Math.max(1, Math.min(300, limitRaw || 80));
+  const result = [];
+
+  const pushReply = (row, parentRow, source) => {
+    const parentIdentity = resolveCommentIdentity(parentRow);
+    const parentUserId = parsePositiveNumber(parentIdentity.public_user_id || parentRow?.user_id);
+    if (!parentUserId || parentUserId !== userId) return;
+    const replyIdentity = resolveCommentIdentity(row);
+    const fromUserId = parsePositiveNumber(replyIdentity.public_user_id || row?.user_id);
+    if (!fromUserId || fromUserId === userId) return;
+    const createdAt = normalizeIso(row?.created_at, nowIso());
+    if (sinceTs && Date.parse(createdAt) <= sinceTs) return;
+    result.push({
+      source,
+      reply_id: parsePositiveNumber(row?.id) || 0,
+      parent_id: parsePositiveNumber(parentRow?.id) || 0,
+      created_at: createdAt,
+      text: normalizeText(row?.text, 1000),
+      from_user_id: fromUserId,
+      from_nickname: normalizeText(replyIdentity.nickname, 80) || `user_${fromUserId}`,
+      from_avatar_url: normalizeAvatarUrl(replyIdentity.avatar_url),
+      tmdb_id: source === 'movie' ? parsePositiveNumber(row?.tmdb_id) : null,
+      gallery_id: source === 'gallery' ? parsePositiveNumber(row?.gallery_id) : null,
+    });
+  };
+
+  const movieById = new Map();
+  for (const row of store.comments || []) {
+    const id = parsePositiveNumber(row?.id);
+    if (!id) continue;
+    movieById.set(id, row);
+  }
+  for (const row of store.comments || []) {
+    const parentId = parsePositiveNumber(row?.parent_id);
+    if (!parentId) continue;
+    const parentRow = movieById.get(parentId);
+    if (!parentRow) continue;
+    pushReply(row, parentRow, 'movie');
+  }
+
+  const galleryById = new Map();
+  for (const row of store.galleryComments || []) {
+    const id = parsePositiveNumber(row?.id);
+    if (!id) continue;
+    galleryById.set(id, row);
+  }
+  for (const row of store.galleryComments || []) {
+    const parentId = parsePositiveNumber(row?.parent_id);
+    if (!parentId) continue;
+    const parentRow = galleryById.get(parentId);
+    if (!parentRow) continue;
+    pushReply(row, parentRow, 'gallery');
+  }
+
+  return result
+    .filter((row) => row.reply_id > 0 && row.parent_id > 0 && !!row.text)
+    .sort((a, b) => Date.parse(String(b.created_at || '')) - Date.parse(String(a.created_at || '')))
+    .slice(0, limit);
+}
+
 function normalizeGalleryCommentPayload(input, galleryIdFromPath) {
   const userId = parsePositiveNumber(input?.user_id);
   const galleryId = parsePositiveNumber(input?.gallery_id ?? galleryIdFromPath);
@@ -3891,6 +3957,20 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { counts });
     }
 
+    if (method === 'GET' && pathname === '/api/notifications/replies') {
+      const userId =
+        resolveCanonicalUserId(url.searchParams.get('user_id')) ||
+        parsePositiveNumber(url.searchParams.get('user_id'));
+      if (!userId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      const replies = collectReplyNotificationsForUser(userId, {
+        since: url.searchParams.get('since'),
+        limit: url.searchParams.get('limit'),
+      });
+      return json(res, 200, { replies });
+    }
+
     if (method === 'POST' && pathname === '/api/comments') {
       const body = await readBody(req);
       const clean = normalizeCommentInput(body);
@@ -4187,7 +4267,7 @@ async function startServer() {
   server.listen(port, () => {
     console.log(`Cinema backend running on http://localhost:${port}`);
     console.log(
-      `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
+      `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, GET /api/notifications/replies, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
     );
     console.log(`WS:    ws://localhost:${port}/ws`);
   });

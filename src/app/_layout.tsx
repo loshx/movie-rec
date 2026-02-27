@@ -8,6 +8,7 @@ import { runOnJS } from 'react-native-reanimated';
 import { AnimatedSplashOverlay } from '@/components/animated-icon';
 import { GlobalBottomDock } from '@/components/global-bottom-dock';
 import { AuthProvider } from '@/contexts/AuthContext';
+import { NotificationsProvider } from '@/contexts/NotificationsContext';
 
 const ROOT_TAB_PATHS = new Set(['/', '/gallery', '/cinema', '/profile']);
 const BACK_EDGE_SIZE = 56;
@@ -83,24 +84,28 @@ export default function RootLayout() {
   return (
     <GestureHandlerRootView style={{ flex: 1 }}>
       <AuthProvider>
-        <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
-          <Stack screenOptions={{ headerShown: false }}>
-            <Stack.Screen name="(auth)" />
+        <NotificationsProvider>
+          <ThemeProvider value={colorScheme === 'dark' ? DarkTheme : DefaultTheme}>
+            <Stack screenOptions={{ headerShown: false }}>
+              <Stack.Screen name="(auth)" />
             <Stack.Screen name="(tabs)" />
             <Stack.Screen name="onboarding-watched" />
             <Stack.Screen name="admin" />
+            <Stack.Screen name="notifications" />
+            <Stack.Screen name="discover-picks" />
             <Stack.Screen name="index" />
           </Stack>
-          <GlobalBottomDock />
-          {!shouldDisableBackSwipe ? (
-            <View pointerEvents="box-none" style={styles.edgeHost}>
-              <GestureDetector gesture={backSwipeGesture}>
-                <View style={styles.leftEdgeZone} />
-              </GestureDetector>
-            </View>
-          ) : null}
-          <AnimatedSplashOverlay />
-        </ThemeProvider>
+            <GlobalBottomDock />
+            {!shouldDisableBackSwipe ? (
+              <View pointerEvents="box-none" style={styles.edgeHost}>
+                <GestureDetector gesture={backSwipeGesture}>
+                  <View style={styles.leftEdgeZone} />
+                </GestureDetector>
+              </View>
+            ) : null}
+            <AnimatedSplashOverlay />
+          </ThemeProvider>
+        </NotificationsProvider>
       </AuthProvider>
     </GestureHandlerRootView>
   );

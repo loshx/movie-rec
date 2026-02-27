@@ -60,6 +60,19 @@ export type BackendCloudinarySignature = {
   canonical_user_id?: number | null;
 };
 
+export type BackendCommentReplyNotification = {
+  source: 'movie' | 'gallery';
+  reply_id: number;
+  parent_id: number;
+  created_at: string;
+  text: string;
+  from_user_id: number;
+  from_nickname: string;
+  from_avatar_url: string | null;
+  tmdb_id: number | null;
+  gallery_id: number | null;
+};
+
 const extra = (Constants.expoConfig?.extra ?? {}) as {
   EXPO_PUBLIC_BACKEND_URL?: string;
 };
@@ -169,15 +182,45 @@ export async function backendGetCurrentCinemaPoll(userId?: number | null) {
   }
 }
 
+export async function backendGetCommentReplyNotifications(
+  userId: number,
+  options?: {
+    sinceIso?: string | null;
+    limit?: number | null;
+  }
+) {
+  const cleanUserId = Number(resolveBackendUserId(userId) ?? userId);
+  if (!Number.isFinite(cleanUserId) || cleanUserId <= 0) return [] as BackendCommentReplyNotification[];
+
+  const search = new URLSearchParams();
+  search.set('user_id', String(cleanUserId));
+  const sinceIso = String(options?.sinceIso ?? '').trim();
+  if (sinceIso) search.set('since', sinceIso);
+  const limit = Number(options?.limit ?? 80);
+  if (Number.isFinite(limit) && limit > 0) {
+    search.set('limit', String(Math.max(1, Math.min(300, Math.floor(limit)))));
+  }
+
+  const url = getBackendApiUrl(`/api/notifications/replies?${search.toString()}`);
+  if (!url) return [] as BackendCommentReplyNotification[];
+
+  const headers = withUserTokenHeader({ 'Content-Type': 'application/json' }, cleanUserId);
+  const payload = await requestJson<{ replies?: BackendCommentReplyNotification[] }>(url, {
+    method: 'GET',
+    headers,
+  });
+  return Array.isArray(payload?.replies) ? payload.replies : [];
+}
+
 export async function backendCreateCinemaPoll(
   input: {
     question?: string | null;
-    options: Array<{
+    options: {
       id?: string;
       title: string;
       poster_url: string;
       tmdb_id?: number | null;
-    }>;
+    }[];
   },
   options?: { adminKey?: string | null }
 ) {

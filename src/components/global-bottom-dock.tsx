@@ -32,6 +32,8 @@ function shouldHideDock(pathname: string, cinemaHasEvent: boolean) {
     pathname.startsWith('/login') ||
     pathname.startsWith('/register') ||
     pathname.startsWith('/movie/') ||
+    pathname.startsWith('/notifications') ||
+    pathname.startsWith('/discover-picks') ||
     (pathname.startsWith('/cinema') && cinemaHasEvent) ||
     pathname.startsWith('/onboarding-watched') ||
     pathname.startsWith('/admin')
