@@ -120,8 +120,10 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
   const syncLockRef = useRef(false);
   const notificationsRef = useRef<AppNotification[]>([]);
+  const hasHydratedNotificationsRef = useRef(false);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
   const expoPushTokenRef = useRef<string | null>(null);
+  const pushRegisterBusyRef = useRef(false);
 
   useEffect(() => {
     notificationsRef.current = notifications;
@@ -276,6 +278,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       setNotifications([]);
       setUnreadCount(0);
       setLiveReminderTargets(new Set());
+      hasHydratedNotificationsRef.current = false;
       return;
     }
     if (syncLockRef.current) return;
@@ -283,6 +286,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     setRefreshing(true);
     try {
       const previousTopId = Number(notificationsRef.current[0]?.id ?? 0);
+      const hadNotificationsBefore = notificationsRef.current.length > 0;
       await syncReplies(userId);
       await syncCinemaPollNotification(userId);
       await syncCinemaLiveReminderNotification(userId);
@@ -291,8 +295,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
 
       const nextTop = nextRows[0];
       if (
+        hasHydratedNotificationsRef.current &&
+        hadNotificationsBefore &&
         nextTop &&
         Number(nextTop.id) > previousTopId &&
+        !nextTop.readAt &&
         String(appStateRef.current) === 'active'
       ) {
         setToast({
@@ -301,6 +308,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           body: String(nextTop.body || ''),
         });
       }
+      hasHydratedNotificationsRef.current = true;
     } finally {
       syncLockRef.current = false;
       setRefreshing(false);
@@ -327,6 +335,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       setNotifications([]);
       setUnreadCount(0);
       setLiveReminderTargets(new Set());
+      hasHydratedNotificationsRef.current = false;
       return;
     }
     void refresh();
@@ -336,45 +345,51 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     return () => clearInterval(interval);
   }, [refresh, user?.id]);
 
+  const ensurePushRegistration = useCallback(async () => {
+    const userId = Number(user?.id ?? 0);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return;
+    }
+    if (pushRegisterBusyRef.current) return;
+    pushRegisterBusyRef.current = true;
+    try {
+      const token = await getExpoPushTokenSafe();
+      if (!token) {
+        console.warn('[push] Expo push token missing. Permission denied or device not eligible.');
+        return;
+      }
+      expoPushTokenRef.current = token;
+      await registerPushTokenOnBackend({
+        userId,
+        expoPushToken: token,
+        platform: String(Device.osName || 'unknown'),
+        deviceName: Device.deviceName ?? null,
+      });
+    } catch (err) {
+      console.warn('[push] register token failed:', err instanceof Error ? err.message : String(err));
+    } finally {
+      pushRegisterBusyRef.current = false;
+    }
+  }, [user?.id]);
+
   useEffect(() => {
     const sub = AppState.addEventListener('change', (next) => {
       appStateRef.current = next;
       if (next === 'active' && user?.id) {
         void refresh();
+        void ensurePushRegistration();
       }
     });
     return () => sub.remove();
-  }, [refresh, user?.id]);
+  }, [ensurePushRegistration, refresh, user?.id]);
 
   useEffect(() => {
     const userId = Number(user?.id ?? 0);
     if (!Number.isFinite(userId) || userId <= 0) {
       return;
     }
-    let active = true;
-    (async () => {
-      try {
-        const token = await getExpoPushTokenSafe();
-        if (!active) return;
-        if (!token) {
-          console.warn('[push] Expo push token missing. Permission denied or device not eligible.');
-          return;
-        }
-        expoPushTokenRef.current = token;
-        await registerPushTokenOnBackend({
-          userId,
-          expoPushToken: token,
-          platform: String(Device.osName || 'unknown'),
-          deviceName: Device.deviceName ?? null,
-        });
-      } catch (err) {
-        console.warn('[push] register token failed:', err instanceof Error ? err.message : String(err));
-      }
-    })();
-    return () => {
-      active = false;
-    };
-  }, [user?.id]);
+    void ensurePushRegistration();
+  }, [ensurePushRegistration, user?.id]);
 
   useEffect(() => {
     const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
