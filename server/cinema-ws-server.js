@@ -32,6 +32,9 @@ const CLOUDINARY_STORE_TAG = 'movie_rec_store';
 const CLOUDINARY_STORE_PUBLIC_ID = 'movie-rec-store/cinema-events';
 const CLOUDINARY_STORE_FILENAME = 'cinema-events.json';
 const CLOUDINARY_STORE_SYNC_DEBOUNCE_MS = 1200;
+const EXPO_PUSH_SEND_URL = 'https://exp.host/--/api/v2/push/send';
+const EXPO_PUSH_BATCH_SIZE = 100;
+const LIVE_PUSH_CHECK_INTERVAL_MS = 15 * 1000;
 const LOCAL_NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
 const LOCAL_PASSWORD_MIN_LEN = 8;
 
@@ -57,6 +60,12 @@ function createEmptyStoreState() {
     galleryLikes: [],
     galleryFavorites: [],
     galleryComments: [],
+    pushTokenIdSeq: 1,
+    pushTokens: [],
+    pushState: {
+      notified_live_event_ids: [],
+      notified_poll_ids: [],
+    },
   };
 }
 
@@ -129,6 +138,12 @@ function hydrateStoreState(parsed) {
     (acc, row) => Math.max(acc, parsePositiveNumber(row?.user_id) || 0),
     0
   );
+  const pushTokens = Array.isArray(parsed?.pushTokens)
+    ? parsed.pushTokens
+        .map((row) => normalizePushTokenRecord(row))
+        .filter(Boolean)
+    : [];
+  const pushState = normalizePushState(parsed?.pushState);
   return {
     store_updated_at: normalizeIso(parsed?.store_updated_at, nowIso()),
     idSeq: Number(parsed?.idSeq || 1),
@@ -162,6 +177,13 @@ function hydrateStoreState(parsed) {
     galleryLikes,
     galleryFavorites,
     galleryComments,
+    pushTokenIdSeq: Number(
+      parsed?.pushTokenIdSeq ||
+        (pushTokens.reduce((acc, row) => Math.max(acc, parsePositiveNumber(row?.id) || 0), 0) + 1) ||
+        fallback.pushTokenIdSeq
+    ),
+    pushTokens,
+    pushState,
   };
 }
 
@@ -650,6 +672,401 @@ function parsePositiveNumber(value) {
   const parsed = Number(value);
   if (!Number.isFinite(parsed) || parsed <= 0) return null;
   return Math.floor(parsed);
+}
+
+function normalizeExpoPushToken(input) {
+  const token = String(input || '').trim();
+  if (!token) return '';
+  if (/^(ExponentPushToken|ExpoPushToken)\[[^\]]+\]$/.test(token)) return token;
+  return '';
+}
+
+function normalizePushTokenRecord(row) {
+  if (!row || typeof row !== 'object') return null;
+  const userId = parsePositiveNumber(row.user_id);
+  const token = normalizeExpoPushToken(row.expo_push_token || row.token);
+  if (!userId || !token) return null;
+  const id = parsePositiveNumber(row.id) || null;
+  const platform = normalizeText(row.platform, 30) || 'unknown';
+  const deviceName = normalizeText(row.device_name, 120) || null;
+  const createdAt = normalizeIso(row.created_at, nowIso());
+  const updatedAt = normalizeIso(row.updated_at, createdAt);
+  return {
+    id,
+    user_id: userId,
+    expo_push_token: token,
+    platform,
+    device_name: deviceName,
+    created_at: createdAt,
+    updated_at: updatedAt,
+    last_error: normalizeText(row.last_error, 300) || null,
+  };
+}
+
+function normalizePushState(raw) {
+  const state = raw && typeof raw === 'object' ? raw : {};
+  const normalizeList = (value) =>
+    Array.from(
+      new Set(
+        (Array.isArray(value) ? value : [])
+          .map((id) => parsePositiveNumber(id))
+          .filter((id) => !!id)
+      )
+    );
+  return {
+    notified_live_event_ids: normalizeList(state.notified_live_event_ids),
+    notified_poll_ids: normalizeList(state.notified_poll_ids),
+  };
+}
+
+function ensurePushStores() {
+  if (!Array.isArray(store.pushTokens)) {
+    store.pushTokens = [];
+  }
+  store.pushState = normalizePushState(store.pushState);
+  const maxPushTokenId = store.pushTokens.reduce((acc, row) => {
+    return Math.max(acc, parsePositiveNumber(row?.id) || 0);
+  }, 0);
+  const nextSeq = parsePositiveNumber(store.pushTokenIdSeq) || maxPushTokenId + 1 || 1;
+  store.pushTokenIdSeq = Math.max(1, nextSeq, maxPushTokenId + 1);
+}
+
+function appendUniqueCapped(listInput, idInput, maxSize = 800) {
+  const id = parsePositiveNumber(idInput);
+  if (!id) return listInput;
+  const list = Array.isArray(listInput) ? listInput : [];
+  if (!list.includes(id)) list.push(id);
+  while (list.length > maxSize) list.shift();
+  return list;
+}
+
+function upsertPushTokenRecord({ userId, expoPushToken, platform, deviceName }) {
+  const canonicalUserId = resolveCanonicalUserId(userId) || parsePositiveNumber(userId);
+  const token = normalizeExpoPushToken(expoPushToken);
+  if (!canonicalUserId || !token) return null;
+  ensurePushStores();
+
+  const now = nowIso();
+  let reusedId = null;
+  let createdAt = now;
+
+  store.pushTokens = store.pushTokens.filter((row) => {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) return false;
+    if (normalized.expo_push_token !== token) return true;
+    reusedId = parsePositiveNumber(normalized.id) || reusedId;
+    createdAt = normalized.created_at || createdAt;
+    return false;
+  });
+
+  const id = reusedId || parsePositiveNumber(store.pushTokenIdSeq) || 1;
+  store.pushTokenIdSeq = Math.max(parsePositiveNumber(store.pushTokenIdSeq) || 1, id + 1);
+
+  const record = {
+    id,
+    user_id: canonicalUserId,
+    expo_push_token: token,
+    platform: normalizeText(platform, 30) || 'unknown',
+    device_name: normalizeText(deviceName, 120) || null,
+    created_at: normalizeIso(createdAt, now),
+    updated_at: now,
+    last_error: null,
+  };
+  store.pushTokens.push(record);
+  return record;
+}
+
+function removePushTokenRecord(userIdInput, tokenInput) {
+  const token = normalizeExpoPushToken(tokenInput);
+  if (!token) return 0;
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  ensurePushStores();
+  const before = store.pushTokens.length;
+  store.pushTokens = store.pushTokens.filter((row) => {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) return false;
+    if (normalized.expo_push_token !== token) return true;
+    if (canonicalUserId && normalized.user_id !== canonicalUserId) return true;
+    return false;
+  });
+  return Math.max(0, before - store.pushTokens.length);
+}
+
+function removePushTokensForUsers(userIdsInput) {
+  const userIds = new Set(
+    (Array.isArray(userIdsInput) ? userIdsInput : [])
+      .map((id) => resolveCanonicalUserId(id) || parsePositiveNumber(id))
+      .filter((id) => !!id)
+  );
+  if (!userIds.size) return 0;
+  ensurePushStores();
+  const before = store.pushTokens.length;
+  store.pushTokens = store.pushTokens.filter((row) => {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) return false;
+    return !userIds.has(normalized.user_id);
+  });
+  return Math.max(0, before - store.pushTokens.length);
+}
+
+function markPushTokenError(tokenInput, errorInput) {
+  const token = normalizeExpoPushToken(tokenInput);
+  if (!token) return;
+  const message = normalizeText(errorInput, 300) || 'Unknown push error.';
+  const now = nowIso();
+  ensurePushStores();
+  for (const row of store.pushTokens) {
+    if (normalizeExpoPushToken(row?.expo_push_token) !== token) continue;
+    row.last_error = message;
+    row.updated_at = now;
+  }
+}
+
+function clearPushTokenError(tokenInput) {
+  const token = normalizeExpoPushToken(tokenInput);
+  if (!token) return;
+  const now = nowIso();
+  ensurePushStores();
+  for (const row of store.pushTokens) {
+    if (normalizeExpoPushToken(row?.expo_push_token) !== token) continue;
+    row.last_error = null;
+    row.updated_at = now;
+  }
+}
+
+function collectExpoPushTokensForUsers(userIdsInput) {
+  ensurePushStores();
+  const canonicalIds = new Set();
+  for (const rawId of Array.isArray(userIdsInput) ? userIdsInput : []) {
+    const canonical = resolveCanonicalUserId(rawId) || parsePositiveNumber(rawId);
+    if (!canonical) continue;
+    canonicalIds.add(canonical);
+    for (const aliasId of getAliasUserIdsForCanonical(canonical)) {
+      const aliasCanonical = resolveCanonicalUserId(aliasId) || parsePositiveNumber(aliasId);
+      if (aliasCanonical) canonicalIds.add(aliasCanonical);
+    }
+  }
+  if (!canonicalIds.size) return [];
+  const tokenSet = new Set();
+  for (const row of store.pushTokens) {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) continue;
+    if (!canonicalIds.has(normalized.user_id)) continue;
+    tokenSet.add(normalized.expo_push_token);
+  }
+  return Array.from(tokenSet);
+}
+
+function collectExpoPushTokensForAllUsers() {
+  ensurePushStores();
+  const tokenSet = new Set();
+  for (const row of store.pushTokens) {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) continue;
+    tokenSet.add(normalized.expo_push_token);
+  }
+  return Array.from(tokenSet);
+}
+
+function buildExpoPushMessages(tokensInput, payloadInput = {}) {
+  const tokens = Array.isArray(tokensInput) ? tokensInput : [];
+  const title = normalizeText(payloadInput.title, 120) || 'Movie Rec';
+  const body = normalizeText(payloadInput.body, 240) || 'Open app.';
+  const data =
+    payloadInput.data && typeof payloadInput.data === 'object'
+      ? payloadInput.data
+      : {};
+  return tokens
+    .map((token) => normalizeExpoPushToken(token))
+    .filter((token) => !!token)
+    .map((token) => ({
+      to: token,
+      sound: 'default',
+      title,
+      body,
+      data,
+      priority: 'high',
+      channelId: 'default',
+    }));
+}
+
+async function sendExpoPushMessages(messagesInput) {
+  const messages = Array.isArray(messagesInput) ? messagesInput.filter((row) => !!normalizeExpoPushToken(row?.to)) : [];
+  if (!messages.length) return { sent: 0, errors: 0, removed: 0 };
+
+  let sent = 0;
+  let errors = 0;
+  let removed = 0;
+
+  for (let idx = 0; idx < messages.length; idx += EXPO_PUSH_BATCH_SIZE) {
+    const batch = messages.slice(idx, idx + EXPO_PUSH_BATCH_SIZE);
+    let response = null;
+    try {
+      response = await fetch(EXPO_PUSH_SEND_URL, {
+        method: 'POST',
+        headers: {
+          'content-type': 'application/json',
+          accept: 'application/json',
+        },
+        body: JSON.stringify(batch),
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      for (const row of batch) {
+        markPushTokenError(row.to, message);
+        errors += 1;
+      }
+      continue;
+    }
+
+    if (!response || !response.ok) {
+      const message = `Expo push HTTP ${response ? response.status : 0}`;
+      for (const row of batch) {
+        markPushTokenError(row.to, message);
+        errors += 1;
+      }
+      continue;
+    }
+
+    const payload = await response.json().catch(() => null);
+    const tickets = Array.isArray(payload?.data) ? payload.data : [];
+    for (let ticketIdx = 0; ticketIdx < batch.length; ticketIdx += 1) {
+      const ticket = tickets[ticketIdx] || null;
+      const row = batch[ticketIdx];
+      const token = normalizeExpoPushToken(row?.to);
+      if (!token) continue;
+      if (ticket?.status === 'ok') {
+        clearPushTokenError(token);
+        sent += 1;
+        continue;
+      }
+
+      const expoErrorCode = normalizeText(ticket?.details?.error, 120);
+      const errorMessage =
+        normalizeText(ticket?.message, 280) ||
+        normalizeText(ticket?.error, 280) ||
+        normalizeText(expoErrorCode, 280) ||
+        'Expo push rejected message.';
+      markPushTokenError(token, errorMessage);
+      errors += 1;
+
+      if (expoErrorCode === 'DeviceNotRegistered') {
+        removed += removePushTokenRecord(null, token);
+      }
+    }
+  }
+
+  return { sent, errors, removed };
+}
+
+async function pushNotifyUsers(userIdsInput, payloadInput) {
+  const tokens = collectExpoPushTokensForUsers(userIdsInput);
+  if (!tokens.length) return { sent: 0, errors: 0, removed: 0 };
+  const messages = buildExpoPushMessages(tokens, payloadInput);
+  return sendExpoPushMessages(messages);
+}
+
+async function pushNotifyAllUsers(payloadInput) {
+  const tokens = collectExpoPushTokensForAllUsers();
+  if (!tokens.length) return { sent: 0, errors: 0, removed: 0 };
+  const messages = buildExpoPushMessages(tokens, payloadInput);
+  return sendExpoPushMessages(messages);
+}
+
+async function notifyCinemaPollOpenedPush(pollInput) {
+  const pollId = parsePositiveNumber(pollInput?.id);
+  if (!pollId) return false;
+  if (String(pollInput?.status || 'open') !== 'open') return false;
+  ensurePushStores();
+  if (store.pushState.notified_poll_ids.includes(pollId)) return false;
+
+  await pushNotifyAllUsers({
+    title: 'New cinema poll is open',
+    body: normalizeText(pollInput?.question, 180) || 'Vote now and pick the next stream title.',
+    data: {
+      type: 'cinema_poll_open',
+      pollId,
+      actionPath: '/cinema',
+    },
+  });
+
+  store.pushState.notified_poll_ids = appendUniqueCapped(store.pushState.notified_poll_ids, pollId, 500);
+  return true;
+}
+
+function getLiveCinemaEvent(nowMsInput = Date.now()) {
+  const nowMs = Number.isFinite(Number(nowMsInput)) ? Number(nowMsInput) : Date.now();
+  const candidates = (Array.isArray(store.items) ? store.items : [])
+    .filter((item) => {
+      const id = parsePositiveNumber(item?.id);
+      const startAt = Date.parse(String(item?.start_at || ''));
+      const endAt = Date.parse(String(item?.end_at || ''));
+      if (!id || !Number.isFinite(startAt) || !Number.isFinite(endAt)) return false;
+      return startAt <= nowMs && endAt >= nowMs;
+    })
+    .sort((a, b) => Date.parse(String(b?.start_at || '')) - Date.parse(String(a?.start_at || '')));
+  return candidates[0] || null;
+}
+
+async function notifyCinemaLiveStartedPushIfNeeded() {
+  const liveEvent = getLiveCinemaEvent(Date.now());
+  if (!liveEvent) return false;
+  const liveEventId = parsePositiveNumber(liveEvent?.id);
+  if (!liveEventId) return false;
+  ensurePushStores();
+  if (store.pushState.notified_live_event_ids.includes(liveEventId)) return false;
+
+  await pushNotifyAllUsers({
+    title: `${normalizeText(liveEvent?.title, 90) || 'Cinema'} is live now`,
+    body: 'Tap to join the stream.',
+    data: {
+      type: 'cinema_live_start',
+      eventId: liveEventId,
+      actionPath: '/cinema',
+    },
+  });
+
+  store.pushState.notified_live_event_ids = appendUniqueCapped(store.pushState.notified_live_event_ids, liveEventId, 500);
+  return true;
+}
+
+function resolveReplyPushTargetUserId(parentRow) {
+  if (!parentRow || typeof parentRow !== 'object') return null;
+  const identity = resolveCommentIdentity(parentRow);
+  return parsePositiveNumber(identity?.public_user_id || parentRow?.user_id);
+}
+
+async function notifyCommentReplyPush(source, replyRow, parentRow) {
+  const sourceType = source === 'gallery' ? 'gallery' : 'movie';
+  const targetUserId = resolveReplyPushTargetUserId(parentRow);
+  const actorIdentity = resolveCommentIdentity(replyRow);
+  const actorUserId = parsePositiveNumber(actorIdentity?.public_user_id || replyRow?.user_id);
+  if (!targetUserId || !actorUserId || actorUserId === targetUserId) return false;
+
+  const galleryId = parsePositiveNumber(replyRow?.gallery_id);
+  const tmdbId = parsePositiveNumber(replyRow?.tmdb_id);
+  const actionPath =
+    sourceType === 'gallery'
+      ? galleryId
+        ? `/gallery?open=${galleryId}`
+        : '/gallery'
+      : tmdbId
+        ? `/movie/${tmdbId}`
+        : '/';
+  const text = normalizeText(replyRow?.text, 160) || 'Open app to view the reply.';
+
+  await pushNotifyUsers([targetUserId], {
+    title: `${normalizeText(actorIdentity?.nickname, 80) || 'Someone'} replied to your comment`,
+    body: text,
+    data: {
+      type: 'comment_reply',
+      source: sourceType,
+      replyId: parsePositiveNumber(replyRow?.id) || 0,
+      parentId: parsePositiveNumber(parentRow?.id) || 0,
+      actionPath,
+    },
+  });
+  return true;
 }
 
 function ensureUserAliasesStore() {
@@ -1293,6 +1710,30 @@ function maintainCanonicalUserMappings() {
 
   maintainLocalAuthMappings();
   remapFollowsToCanonicalIds();
+  ensurePushStores();
+  const dedupedPushByToken = new Map();
+  for (const row of store.pushTokens) {
+    const normalized = normalizePushTokenRecord(row);
+    if (!normalized) continue;
+    normalized.user_id = resolveCanonicalUserId(normalized.user_id) || normalized.user_id;
+    const prev = dedupedPushByToken.get(normalized.expo_push_token);
+    if (!prev) {
+      dedupedPushByToken.set(normalized.expo_push_token, normalized);
+      continue;
+    }
+    const prevTs = Date.parse(String(prev.updated_at || prev.created_at || ''));
+    const nextTs = Date.parse(String(normalized.updated_at || normalized.created_at || ''));
+    if (!Number.isFinite(prevTs) || nextTs >= prevTs) {
+      dedupedPushByToken.set(normalized.expo_push_token, normalized);
+    }
+  }
+  store.pushTokens = Array.from(dedupedPushByToken.values());
+  store.pushState = normalizePushState(store.pushState);
+  const maxPushTokenId = store.pushTokens.reduce((acc, row) => {
+    return Math.max(acc, parsePositiveNumber(row?.id) || 0);
+  }, 0);
+  store.pushTokenIdSeq = Math.max(parsePositiveNumber(store.pushTokenIdSeq) || 1, maxPushTokenId + 1);
+
   const maxProfileUserId = Object.entries(store.users || {}).reduce((acc, [rawUserId, profile]) => {
     const idFromKey = parsePositiveNumber(rawUserId) || 0;
     const idFromProfile = parsePositiveNumber(profile?.user_id) || 0;
@@ -2157,6 +2598,7 @@ function deleteUserAccountFromStore(userIdInput) {
 
   store.galleryLikes = store.galleryLikes.filter((row) => !deletedIdsSet.has(parsePositiveNumber(row?.user_id)));
   store.galleryFavorites = store.galleryFavorites.filter((row) => !deletedIdsSet.has(parsePositiveNumber(row?.user_id)));
+  removePushTokensForUsers(aliasIds);
 
   if (store.cinemaPollCurrent?.votes_by_user && typeof store.cinemaPollCurrent.votes_by_user === 'object') {
     const nextVotesByUser = {};
@@ -3148,6 +3590,12 @@ function resetAllStoreData(adminProfileInput = null) {
   store.galleryLikes = [];
   store.galleryFavorites = [];
   store.galleryComments = [];
+  store.pushTokenIdSeq = 1;
+  store.pushTokens = [];
+  store.pushState = {
+    notified_live_event_ids: [],
+    notified_poll_ids: [],
+  };
   saveStore(store);
   return adminProfile;
 }
@@ -3167,6 +3615,13 @@ const server = http.createServer(async (req, res) => {
     if (pollClosedByExpiry) {
       saveStore(store);
     }
+    void notifyCinemaLiveStartedPushIfNeeded()
+      .then((changed) => {
+        if (changed) saveStore(store);
+      })
+      .catch((err) => {
+        console.warn('Live push notify failed:', err instanceof Error ? err.message : String(err));
+      });
     if (
       pathname === '/api/gallery' ||
       pathname.startsWith('/api/gallery/') ||
@@ -3345,6 +3800,11 @@ const server = http.createServer(async (req, res) => {
       }
       const body = await readBody(req);
       const poll = createCinemaPoll(body);
+      try {
+        await notifyCinemaPollOpenedPush(poll);
+      } catch (err) {
+        console.warn('Poll push notify failed:', err instanceof Error ? err.message : String(err));
+      }
       saveStore(store);
       return json(res, 201, { poll: serializeCinemaPollForUser(poll, null) });
     }
@@ -3944,6 +4404,16 @@ const server = http.createServer(async (req, res) => {
         created_at: nowIso(),
       };
       store.galleryComments.push(comment);
+      if (comment.parent_id) {
+        const parentRow = store.galleryComments.find((row) => Number(row.id) === Number(comment.parent_id));
+        if (parentRow) {
+          try {
+            await notifyCommentReplyPush('gallery', comment, parentRow);
+          } catch (err) {
+            console.warn('Gallery reply push failed:', err instanceof Error ? err.message : String(err));
+          }
+        }
+      }
       saveStore(store);
       return json(res, 201, { comment });
     }
@@ -3971,6 +4441,62 @@ const server = http.createServer(async (req, res) => {
       return json(res, 200, { replies });
     }
 
+    if (method === 'POST' && pathname === '/api/notifications/push/register') {
+      const body = await readBody(req);
+      const userId =
+        resolveCanonicalUserId(body?.user_id ?? body?.userId) ||
+        parsePositiveNumber(body?.user_id ?? body?.userId);
+      if (!userId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      const sessionCheck = requireUserSession(req, userId);
+      if (!sessionCheck.ok) {
+        return json(res, sessionCheck.status, { error: sessionCheck.error });
+      }
+      const expoPushToken = normalizeExpoPushToken(body?.expo_push_token ?? body?.token);
+      if (!expoPushToken) {
+        return json(res, 400, { error: 'expo_push_token is invalid.' });
+      }
+      const record = upsertPushTokenRecord({
+        userId: sessionCheck.userId,
+        expoPushToken,
+        platform: body?.platform,
+        deviceName: body?.device_name ?? body?.deviceName,
+      });
+      if (!record) {
+        return json(res, 400, { error: 'Could not register push token.' });
+      }
+      saveStore(store);
+      return json(res, 200, {
+        ok: true,
+        token_id: Number(record.id),
+        user_id: Number(record.user_id),
+      });
+    }
+
+    if (method === 'POST' && pathname === '/api/notifications/push/unregister') {
+      const body = await readBody(req);
+      const userId =
+        resolveCanonicalUserId(body?.user_id ?? body?.userId) ||
+        parsePositiveNumber(body?.user_id ?? body?.userId);
+      if (!userId) {
+        return json(res, 400, { error: 'user_id is required.' });
+      }
+      const sessionCheck = requireUserSession(req, userId);
+      if (!sessionCheck.ok) {
+        return json(res, sessionCheck.status, { error: sessionCheck.error });
+      }
+      const expoPushToken = normalizeExpoPushToken(body?.expo_push_token ?? body?.token);
+      if (!expoPushToken) {
+        return json(res, 400, { error: 'expo_push_token is invalid.' });
+      }
+      const removed = removePushTokenRecord(sessionCheck.userId, expoPushToken);
+      if (removed > 0) {
+        saveStore(store);
+      }
+      return json(res, 200, { ok: true, removed });
+    }
+
     if (method === 'POST' && pathname === '/api/comments') {
       const body = await readBody(req);
       const clean = normalizeCommentInput(body);
@@ -3988,6 +4514,16 @@ const server = http.createServer(async (req, res) => {
         created_at: nowIso(),
       };
       store.comments.push(comment);
+      if (comment.parent_id) {
+        const parentRow = store.comments.find((row) => Number(row.id) === Number(comment.parent_id));
+        if (parentRow) {
+          try {
+            await notifyCommentReplyPush('movie', comment, parentRow);
+          } catch (err) {
+            console.warn('Movie reply push failed:', err instanceof Error ? err.message : String(err));
+          }
+        }
+      }
       saveStore(store);
       return json(res, 201, { comment });
     }
@@ -4259,15 +4795,36 @@ setInterval(() => {
   });
 }, EXPIRED_CLEANUP_INTERVAL_MS);
 
+let livePushCheckInProgress = false;
+async function runLivePushCheck() {
+  if (livePushCheckInProgress) return;
+  livePushCheckInProgress = true;
+  try {
+    const changed = await notifyCinemaLiveStartedPushIfNeeded();
+    if (changed) {
+      saveStore(store);
+    }
+  } catch (err) {
+    console.warn('Live push check failed:', err instanceof Error ? err.message : String(err));
+  } finally {
+    livePushCheckInProgress = false;
+  }
+}
+
+setInterval(() => {
+  void runLivePushCheck();
+}, LIVE_PUSH_CHECK_INTERVAL_MS);
+
 async function startServer() {
   await restoreStoreFromCloudinaryBackup();
   maintainCanonicalUserMappings();
+  await runLivePushCheck();
   saveStore(store);
   registerShutdownSyncHandlers();
   server.listen(port, () => {
     console.log(`Cinema backend running on http://localhost:${port}`);
     console.log(
-      `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, GET /api/notifications/replies, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
+      `REST:  GET /health, GET /api/cinema/current, GET /api/cinema/latest, GET /api/cinema/poll/current, GET /api/notifications/replies, POST /api/notifications/push/register, POST /api/notifications/push/unregister, POST /api/cinema/poll, POST /api/cinema/poll/:id/vote, POST /api/cinema/events`
     );
     console.log(`WS:    ws://localhost:${port}/ws`);
   });

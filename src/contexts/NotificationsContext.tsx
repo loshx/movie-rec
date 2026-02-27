@@ -1,6 +1,8 @@
 import React, { createContext, useCallback, useContext, useEffect, useMemo, useRef, useState } from 'react';
 import { AppState, AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
+import * as Device from 'expo-device';
+import * as Notifications from 'expo-notifications';
 
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -20,6 +22,14 @@ import {
 import { getCurrentCinemaPoll, getCinemaEventByStatusNow, type CinemaEvent } from '@/db/cinema';
 import { getUserWatchlist } from '@/db/user-movies';
 import { hasBackendApi, backendGetCommentReplyNotifications } from '@/lib/cinema-backend';
+import {
+  cancelScheduledLocalNotification,
+  configureForegroundNotificationBehavior,
+  getExpoPushTokenSafe,
+  registerPushTokenOnBackend,
+  scheduleLocalLiveReminder,
+  unregisterPushTokenOnBackend,
+} from '@/lib/push-notifications';
 
 const SYNC_INTERVAL_MS = 45_000;
 const TOAST_MS = 4_200;
@@ -80,6 +90,8 @@ function pickDailyMood() {
 }
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
+  configureForegroundNotificationBehavior();
+
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
   const [unreadCount, setUnreadCount] = useState(0);
@@ -90,6 +102,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   const syncLockRef = useRef(false);
   const notificationsRef = useRef<AppNotification[]>([]);
   const appStateRef = useRef<AppStateStatus>(AppState.currentState);
+  const expoPushTokenRef = useRef<string | null>(null);
 
   useEffect(() => {
     notificationsRef.current = notifications;
@@ -314,6 +327,54 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     return () => sub.remove();
   }, [refresh, user?.id]);
 
+  useEffect(() => {
+    const userId = Number(user?.id ?? 0);
+    if (!Number.isFinite(userId) || userId <= 0) {
+      return;
+    }
+    let active = true;
+    (async () => {
+      try {
+        const token = await getExpoPushTokenSafe();
+        if (!active || !token) return;
+        expoPushTokenRef.current = token;
+        await registerPushTokenOnBackend({
+          userId,
+          expoPushToken: token,
+          platform: String(Device.osName || 'unknown'),
+          deviceName: Device.deviceName ?? null,
+        });
+      } catch {
+      }
+    })();
+    return () => {
+      active = false;
+    };
+  }, [user?.id]);
+
+  useEffect(() => {
+    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+      const data = (response.notification.request.content.data ?? {}) as Record<string, unknown>;
+      const actionPath = String(data?.actionPath ?? '').trim();
+      if (actionPath) {
+        router.push(actionPath as never);
+      }
+    });
+    return () => {
+      responseSub.remove();
+    };
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      const userId = Number(user?.id ?? 0);
+      const token = expoPushTokenRef.current;
+      if (!Number.isFinite(userId) || userId <= 0) return;
+      if (!token) return;
+      void unregisterPushTokenOnBackend(userId, token).catch(() => {});
+    };
+  }, [user?.id]);
+
   const markRead = useCallback(
     async (notificationId: number) => {
       const userId = Number(user?.id ?? 0);
@@ -350,9 +411,19 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       const userId = Number(user?.id ?? 0);
       if (!Number.isFinite(userId) || userId <= 0) return;
       const target = event?.id ? String(event.id) : 'next';
+      let localReminderId: string | null = null;
+      if (event?.id && event?.start_at) {
+        localReminderId =
+          (await scheduleLocalLiveReminder({
+            id: Number(event.id),
+            title: String(event.title || 'Cinema'),
+            startAt: String(event.start_at),
+          })) ?? null;
+      }
       await upsertNotificationSubscription(userId, 'cinema_live', target, {
         title: event?.title ?? null,
         start_at: event?.start_at ?? null,
+        local_notification_id: localReminderId,
       });
       await addUserNotification(userId, {
         type: 'cinema_live_reminder_armed',
@@ -373,6 +444,12 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       const userId = Number(user?.id ?? 0);
       if (!Number.isFinite(userId) || userId <= 0) return;
       const target = event?.id ? String(event.id) : 'next';
+      const current = await listNotificationSubscriptions(userId, 'cinema_live');
+      const currentTarget = current.find((row) => row.targetId === target);
+      const localId = String(currentTarget?.payload?.local_notification_id ?? '').trim();
+      if (localId) {
+        await cancelScheduledLocalNotification(localId);
+      }
       await removeNotificationSubscription(userId, 'cinema_live', target);
       await reloadFromStore(userId);
     },
