@@ -980,7 +980,7 @@ async function notifyCinemaPollOpenedPush(pollInput) {
   ensurePushStores();
   if (store.pushState.notified_poll_ids.includes(pollId)) return false;
 
-  await pushNotifyAllUsers({
+  const result = await pushNotifyAllUsers({
     title: 'New cinema poll is open',
     body: normalizeText(pollInput?.question, 180) || 'Vote now and pick the next stream title.',
     data: {
@@ -989,6 +989,9 @@ async function notifyCinemaPollOpenedPush(pollInput) {
       actionPath: '/cinema',
     },
   });
+  console.log(
+    `[push] poll_open id=${pollId} sent=${Number(result?.sent || 0)} errors=${Number(result?.errors || 0)} removed=${Number(result?.removed || 0)}`
+  );
 
   store.pushState.notified_poll_ids = appendUniqueCapped(store.pushState.notified_poll_ids, pollId, 500);
   return true;
@@ -1016,7 +1019,7 @@ async function notifyCinemaLiveStartedPushIfNeeded() {
   ensurePushStores();
   if (store.pushState.notified_live_event_ids.includes(liveEventId)) return false;
 
-  await pushNotifyAllUsers({
+  const result = await pushNotifyAllUsers({
     title: `${normalizeText(liveEvent?.title, 90) || 'Cinema'} is live now`,
     body: 'Tap to join the stream.',
     data: {
@@ -1025,6 +1028,9 @@ async function notifyCinemaLiveStartedPushIfNeeded() {
       actionPath: '/cinema',
     },
   });
+  console.log(
+    `[push] live_start event=${liveEventId} sent=${Number(result?.sent || 0)} errors=${Number(result?.errors || 0)} removed=${Number(result?.removed || 0)}`
+  );
 
   store.pushState.notified_live_event_ids = appendUniqueCapped(store.pushState.notified_live_event_ids, liveEventId, 500);
   return true;
@@ -1045,13 +1051,23 @@ async function notifyCommentReplyPush(source, replyRow, parentRow) {
 
   const galleryId = parsePositiveNumber(replyRow?.gallery_id);
   const tmdbId = parsePositiveNumber(replyRow?.tmdb_id);
+  const parentId = parsePositiveNumber(parentRow?.id);
+  const replyId = parsePositiveNumber(replyRow?.id);
+  let movieReplyPath = '/';
+  if (tmdbId) {
+    const query = new URLSearchParams();
+    query.set('openComments', '1');
+    if (parentId) query.set('focusParent', String(parentId));
+    if (replyId) query.set('focusReply', String(replyId));
+    movieReplyPath = `/movie/${tmdbId}?${query.toString()}`;
+  }
   const actionPath =
     sourceType === 'gallery'
       ? galleryId
         ? `/gallery?open=${galleryId}`
         : '/gallery'
       : tmdbId
-        ? `/movie/${tmdbId}`
+        ? movieReplyPath
         : '/';
   const text = normalizeText(replyRow?.text, 160) || 'Open app to view the reply.';
 

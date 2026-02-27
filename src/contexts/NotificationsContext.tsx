@@ -3,6 +3,7 @@ import { AppState, AppStateStatus, Pressable, StyleSheet, Text, View } from 'rea
 import { router } from 'expo-router';
 import * as Device from 'expo-device';
 import * as Notifications from 'expo-notifications';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import {
@@ -66,6 +67,22 @@ function stripText(text: string, limit = 120) {
   return `${clean.slice(0, Math.max(1, limit - 1)).trimEnd()}…`;
 }
 
+function buildMovieReplyActionPath(tmdbIdInput: unknown, parentIdInput?: unknown, replyIdInput?: unknown) {
+  const tmdbId = Number(tmdbIdInput);
+  if (!Number.isFinite(tmdbId) || tmdbId <= 0) return '/';
+  const params = new URLSearchParams();
+  params.set('openComments', '1');
+  const parentId = Number(parentIdInput);
+  if (Number.isFinite(parentId) && parentId > 0) {
+    params.set('focusParent', String(Math.floor(parentId)));
+  }
+  const replyId = Number(replyIdInput);
+  if (Number.isFinite(replyId) && replyId > 0) {
+    params.set('focusReply', String(Math.floor(replyId)));
+  }
+  return `/movie/${Math.floor(tmdbId)}?${params.toString()}`;
+}
+
 function isEventLive(event: CinemaEvent | null, nowMs = Date.now()) {
   if (!event) return false;
   const start = Date.parse(String(event.start_at || ''));
@@ -91,6 +108,8 @@ function pickDailyMood() {
 
 export function NotificationsProvider({ children }: { children: React.ReactNode }) {
   configureForegroundNotificationBehavior();
+  const insets = useSafeAreaInsets();
+  const toastTopOffset = useMemo(() => Math.max(16, insets.top + 10), [insets.top]);
 
   const { user } = useAuth();
   const [notifications, setNotifications] = useState<AppNotification[]>([]);
@@ -129,7 +148,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           const dedupe = `reply:${source}:${Number(row.reply_id)}`;
           const actionPath =
             source === 'movie' && Number(row.tmdb_id) > 0
-              ? `/movie/${Number(row.tmdb_id)}`
+              ? buildMovieReplyActionPath(row.tmdb_id, row.parent_id, row.reply_id)
               : source === 'gallery' && Number(row.gallery_id) > 0
                 ? `/gallery?open=${Number(row.gallery_id)}`
                 : '/';
@@ -156,7 +175,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       const dedupe = `reply:${row.source}:${row.replyId}`;
       const actionPath =
         row.source === 'movie' && Number(row.tmdbId) > 0
-          ? `/movie/${Number(row.tmdbId)}`
+          ? buildMovieReplyActionPath(row.tmdbId, row.parentId, row.replyId)
           : row.source === 'gallery' && Number(row.galleryId) > 0
             ? `/gallery?open=${Number(row.galleryId)}`
             : '/';
@@ -336,7 +355,11 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     (async () => {
       try {
         const token = await getExpoPushTokenSafe();
-        if (!active || !token) return;
+        if (!active) return;
+        if (!token) {
+          console.warn('[push] Expo push token missing. Permission denied or device not eligible.');
+          return;
+        }
         expoPushTokenRef.current = token;
         await registerPushTokenOnBackend({
           userId,
@@ -344,7 +367,8 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
           platform: String(Device.osName || 'unknown'),
           deviceName: Device.deviceName ?? null,
         });
-      } catch {
+      } catch (err) {
+        console.warn('[push] register token failed:', err instanceof Error ? err.message : String(err));
       }
     })();
     return () => {
@@ -371,7 +395,9 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
       const token = expoPushTokenRef.current;
       if (!Number.isFinite(userId) || userId <= 0) return;
       if (!token) return;
-      void unregisterPushTokenOnBackend(userId, token).catch(() => {});
+      void unregisterPushTokenOnBackend(userId, token).catch((err) => {
+        console.warn('[push] unregister token failed:', err instanceof Error ? err.message : String(err));
+      });
     };
   }, [user?.id]);
 
@@ -495,7 +521,7 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
     <NotificationsContext.Provider value={value}>
       {children}
       {toast ? (
-        <View pointerEvents="box-none" style={styles.toastHost}>
+        <View pointerEvents="box-none" style={[styles.toastHost, { top: toastTopOffset }]}>
           <Pressable
             onPress={() => {
               const target = notificationsRef.current.find((row) => Number(row.id) === Number(toast.id));
@@ -527,7 +553,6 @@ export function useNotifications() {
 const styles = StyleSheet.create({
   toastHost: {
     position: 'absolute',
-    top: 16,
     left: 12,
     right: 12,
     alignItems: 'center',

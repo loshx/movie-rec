@@ -105,13 +105,43 @@ function formatCommentTime(value?: string | null) {
   });
 }
 
+function firstParamValue(value: unknown) {
+  if (Array.isArray(value)) return String(value[0] ?? '').trim();
+  return String(value ?? '').trim();
+}
+
+function parsePositiveParam(value: unknown) {
+  const n = Number(firstParamValue(value));
+  if (!Number.isFinite(n) || n <= 0) return null;
+  return Math.floor(n);
+}
+
+function parseBooleanParam(value: unknown) {
+  const raw = firstParamValue(value).toLowerCase();
+  return raw === '1' || raw === 'true' || raw === 'yes';
+}
+
 export default function MovieDetailScreen() {
   const theme = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
   const params = useLocalSearchParams();
-  const tmdbId = Number(params.id ?? 0);
-  const mediaType = params.type === 'tv' ? 'tv' : 'movie';
+  const tmdbId = Number(firstParamValue(params.id) || 0);
+  const mediaType = firstParamValue(params.type) === 'tv' ? 'tv' : 'movie';
+  const openCommentsFromParams = useMemo(
+    () => parseBooleanParam((params as Record<string, unknown>).openComments),
+    [params]
+  );
+  const focusParentCommentId = useMemo(
+    () => parsePositiveParam((params as Record<string, unknown>).focusParent),
+    [params]
+  );
+  const focusReplyCommentId = useMemo(
+    () => parsePositiveParam((params as Record<string, unknown>).focusReply),
+    [params]
+  );
+  const activeUserId = Number((user as any)?.id ?? 0);
+  const activeUserNicknameKey = String((user as any)?.nickname ?? '').trim().toLowerCase();
 
   const [movie, setMovie] = useState<Movie | TvShow | null>(null);
   const [loading, setLoading] = useState(true);
@@ -155,7 +185,10 @@ export default function MovieDetailScreen() {
   const [accentColor, setAccentColor] = useState(accent);
   const watchToastTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const scrollRef = useRef<ScrollView | null>(null);
+  const commentsScrollRef = useRef<ScrollView | null>(null);
   const nearBottomArmedRef = useRef(false);
+  const commentLayoutYRef = useRef<Record<number, number>>({});
+  const openedFromParamsRef = useRef(false);
 
   const heroGradientColors = useMemo<readonly [string, string, string, string]>(() => {
     if (theme.mode === 'light') {
@@ -422,6 +455,19 @@ export default function MovieDetailScreen() {
     });
   }, [commentsOpen, screenHeight, sheetY]);
 
+  useEffect(() => {
+    commentLayoutYRef.current = {};
+    openedFromParamsRef.current = false;
+  }, [tmdbId, focusParentCommentId, focusReplyCommentId, openCommentsFromParams]);
+
+  useEffect(() => {
+    if (!openCommentsFromParams) return;
+    if (commentsOpen) return;
+    if (openedFromParamsRef.current) return;
+    openedFromParamsRef.current = true;
+    openCommentsSheet();
+  }, [commentsOpen, openCommentsFromParams, openCommentsSheet]);
+
   const commentsPromptGesture = useMemo(
     () =>
       Gesture.Pan()
@@ -522,16 +568,44 @@ export default function MovieDetailScreen() {
     [commentsOpen, openCommentsSheet]
   );
 
-  const rootComments = useMemo(
-    () =>
-      comments
-        .filter((c) => !c.parent_id)
-        .sort(
-          (a, b) =>
-            new Date(String(b.created_at ?? '')).getTime() -
-            new Date(String(a.created_at ?? '')).getTime()
-        ),
-    [comments]
+  const isCommentOwnedByActiveUser = useCallback(
+    (comment: MovieComment) => {
+      const commentUserId = Number(comment.public_user_id ?? comment.user_id ?? 0);
+      if (activeUserId > 0 && commentUserId === activeUserId) return true;
+      const commentNicknameKey = String(comment.nickname ?? '').trim().toLowerCase();
+      if (activeUserNicknameKey && commentNicknameKey && commentNicknameKey === activeUserNicknameKey) return true;
+      return false;
+    },
+    [activeUserId, activeUserNicknameKey]
+  );
+
+  const rootComments = useMemo(() => {
+    const sortedRoots = comments
+      .filter((c) => !c.parent_id)
+      .sort(
+        (a, b) =>
+          new Date(String(b.created_at ?? '')).getTime() -
+          new Date(String(a.created_at ?? '')).getTime()
+      );
+    if (activeUserId <= 0 && !activeUserNicknameKey) return sortedRoots;
+    const myComments = sortedRoots.filter((c) => isCommentOwnedByActiveUser(c));
+    const otherComments = sortedRoots.filter((c) => !isCommentOwnedByActiveUser(c));
+    return [...myComments, ...otherComments];
+  }, [activeUserId, activeUserNicknameKey, comments, isCommentOwnedByActiveUser]);
+
+  const scrollToFocusedComment = useCallback(
+    (animated = true) => {
+      const targetId = focusParentCommentId;
+      if (!targetId) return false;
+      const targetY = Number(commentLayoutYRef.current[targetId]);
+      if (!Number.isFinite(targetY)) return false;
+      commentsScrollRef.current?.scrollTo({
+        y: Math.max(0, targetY - 10),
+        animated,
+      });
+      return true;
+    },
+    [focusParentCommentId]
   );
   const repliesByParent = useMemo(
     () => {
@@ -552,6 +626,15 @@ export default function MovieDetailScreen() {
     },
     [comments]
   );
+
+  useEffect(() => {
+    if (!commentsOpen) return;
+    if (!focusParentCommentId) return;
+    const timer = setTimeout(() => {
+      scrollToFocusedComment(true);
+    }, 140);
+    return () => clearTimeout(timer);
+  }, [commentsOpen, focusParentCommentId, rootComments.length, scrollToFocusedComment]);
 
   if (loading || !movie) {
     return (
@@ -939,6 +1022,7 @@ export default function MovieDetailScreen() {
                 </Pressable>
               </View>
               <ScrollView
+                ref={commentsScrollRef}
                 style={styles.commentsScroll}
                 showsVerticalScrollIndicator={false}
                 keyboardDismissMode="interactive"
@@ -946,8 +1030,23 @@ export default function MovieDetailScreen() {
                 contentContainerStyle={styles.commentsWrap}>
                 {rootComments.map((comment) => {
                   const avatarUri = normalizeCommentAvatarUri(comment.avatar_url ?? null);
+                  const isFocusedComment =
+                    !!focusParentCommentId && Number(comment.id) === Number(focusParentCommentId);
                   return (
-                    <View key={comment.id} style={styles.commentCard}>
+                    <View
+                      key={comment.id}
+                      onLayout={(event) => {
+                        commentLayoutYRef.current[Number(comment.id)] = event.nativeEvent.layout.y;
+                        if (isFocusedComment && commentsOpen) {
+                          requestAnimationFrame(() => {
+                            scrollToFocusedComment(false);
+                          });
+                        }
+                      }}
+                      style={[
+                        styles.commentCard,
+                        isFocusedComment ? styles.commentCardFocused : null,
+                      ]}>
                       <Pressable
                         style={styles.avatarCircle}
                         onPress={() => router.push(`/user/${comment.public_user_id ?? comment.user_id}` as any)}>
@@ -1539,6 +1638,10 @@ const styles = StyleSheet.create({
     backgroundColor: '#08090B',
     borderWidth: 1,
     borderColor: '#1A1A1F',
+  },
+  commentCardFocused: {
+    borderColor: 'rgba(96,165,250,0.78)',
+    backgroundColor: 'rgba(8,14,24,0.96)',
   },
   avatarCircle: {
     width: 46,

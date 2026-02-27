@@ -147,7 +147,8 @@ export default function DiscoverPicksScreen() {
         ].filter(hasPoster);
 
         const unique = toUniqueMovies(base);
-        const ranked = unique
+        const unseenUnique = unique.filter((movie) => !watchedSet.has(Number(movie.id)));
+        const ranked = unseenUnique
           .map((movie, idx) => ({
             movie,
             idx,
@@ -322,4 +323,3 @@ const styles = StyleSheet.create({
     fontSize: 11,
   },
 });
-
