@@ -13,6 +13,7 @@ import {
 } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
@@ -78,6 +79,7 @@ const PROFILE_SECTION_ORDER: ProfileSectionKey[] = [
   'shots',
   'following',
 ];
+const PROFILE_HERO_IMAGE_VERTICAL_SHIFT = 0;
 
 function buildUnifiedPrivacy(isPublic: boolean): PrivacyState {
   return {
@@ -117,6 +119,11 @@ async function mapWithConcurrency<T, R>(
 
 export default function ProfileScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const heroTopOffset = useMemo(
+    () => Math.max(8, Math.min(16, insets.top * 0.35)),
+    [insets.top]
+  );
   const detailsCacheRef = useRef<Map<string, ProfileMovieItem>>(new Map());
   const inFlightRef = useRef<Map<string, Promise<ProfileMovieItem | null>>>(new Map());
   const invalidKeysRef = useRef<Set<string>>(new Set());
@@ -179,6 +186,34 @@ export default function ProfileScreen() {
   const [ratedItems, setRatedItems] = useState<ProfileMovieItem[]>([]);
   const [followingTaste, setFollowingTaste] = useState<PublicProfile[]>([]);
   const scrollRef = useRef<ScrollView | null>(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroScrollTranslateY = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 260],
+        outputRange: [0, -86],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
+  const heroScrollScale = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [-160, 0],
+        outputRange: [1.16, 1],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
+  const heroScrollOpacity = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 260],
+        outputRange: [1, 0.72],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
 
   const nickname = user?.nickname ?? 'nickname';
   const bio = (user as any)?.bio ?? '';
@@ -493,58 +528,71 @@ export default function ProfileScreen() {
       <KeyboardAvoidingView
         behavior={Platform.OS === 'ios' ? 'padding' : undefined}
         style={styles.flex}>
-        <ScrollView
+        <Animated.ScrollView
           ref={scrollRef}
           contentContainerStyle={styles.scroll}
+          onScroll={Animated.event(
+            [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+            { useNativeDriver: true }
+          )}
+          scrollEventThrottle={16}
           showsVerticalScrollIndicator={false}>
           <Animated.View
             style={[
               styles.heroStage,
-              { opacity: heroOpacity, transform: [{ translateY: heroTranslateY }] },
+              { marginTop: heroTopOffset, opacity: heroOpacity, transform: [{ translateY: heroTranslateY }] },
             ]}>
-            <View style={styles.heroImage}>
-              {hasAvatar ? (
-                <Image source={{ uri: avatarUrl }} style={styles.heroImageInner} />
-              ) : (
-                <View style={styles.heroPlaceholder}>
-                  <Text style={styles.heroPlaceholderText}>?</Text>
-                </View>
-              )}
-              <LinearGradient
-                colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.42)', 'rgba(5,5,5,0.94)']}
-                locations={[0, 0.52, 1]}
-                style={styles.heroImageOverlay}
-              />
-
-              <View style={styles.heroBottomContent}>
-                <Text style={styles.name}>{fullName}</Text>
-                <Text style={styles.nickname}>@{nickname}</Text>
-                <Text style={styles.bio} numberOfLines={2}>
-                  {bio || 'Design your taste profile and share it with others.'}
-                </Text>
-                <View style={styles.statsRow}>
-                  <Pressable onPress={() => openListSection('favorites')} style={styles.statCard}>
-                    <Text style={styles.statValue}>{favoriteItems.length}</Text>
-                    <Text style={styles.statLabel}>Favorites</Text>
-                  </Pressable>
-                  <Pressable onPress={() => openListSection('watched')} style={styles.statCard}>
-                    <Text style={styles.statValue}>{watchedItems.length}</Text>
-                    <Text style={styles.statLabel}>Watched</Text>
-                  </Pressable>
-                  <Pressable onPress={() => openListSection('following')} style={styles.statCard}>
-                    <Text style={styles.statValue}>{followingTaste.length}</Text>
-                    <Text style={styles.statLabel}>Following</Text>
+            <Animated.View
+              style={[
+                styles.heroImageShell,
+                {
+                  transform: [{ translateY: heroScrollTranslateY }, { scale: heroScrollScale }],
+                  opacity: heroScrollOpacity,
+                },
+              ]}>
+              <View style={styles.heroImage}>
+                {hasAvatar ? (
+                  <Image source={{ uri: avatarUrl }} style={[styles.heroImageInner, styles.heroImageInnerShift]} />
+                ) : (
+                  <View style={styles.heroPlaceholder}>
+                    <Text style={styles.heroPlaceholderText}>?</Text>
+                  </View>
+                )}
+                <LinearGradient
+                  colors={['rgba(0,0,0,0.03)', 'rgba(0,0,0,0.18)', 'rgba(4,5,7,0.42)']}
+                  locations={[0, 0.7, 1]}
+                  style={styles.heroImageOverlay}
+                />
+                <View style={[styles.heroTopActions, { top: insets.top + 12 }]}>
+                  <Pressable
+                    onPress={() => router.push('/profile-settings' as any)}
+                    style={styles.settingsIconBtn}>
+                    <Ionicons name="settings-outline" size={18} color="#fff" />
                   </Pressable>
                 </View>
               </View>
-            </View>
+            </Animated.View>
 
-            <View style={styles.heroTopActions}>
-              <Pressable
-                onPress={() => router.push('/profile-settings' as any)}
-                style={styles.settingsIconBtn}>
-                <Ionicons name="settings-outline" size={18} color="#fff" />
-              </Pressable>
+            <View style={styles.profileMetaBlock}>
+              <Text style={styles.name}>{fullName}</Text>
+              <Text style={styles.nickname}>@{nickname}</Text>
+              <Text style={styles.bio} numberOfLines={3}>
+                {bio || 'Design your taste profile and share it with others.'}
+              </Text>
+              <View style={styles.statsRow}>
+                <Pressable onPress={() => openListSection('favorites')} style={styles.statCard}>
+                  <Text style={styles.statValue}>{favoriteItems.length}</Text>
+                  <Text style={styles.statLabel}>Favorites</Text>
+                </Pressable>
+                <Pressable onPress={() => openListSection('watched')} style={styles.statCard}>
+                  <Text style={styles.statValue}>{watchedItems.length}</Text>
+                  <Text style={styles.statLabel}>Watched</Text>
+                </Pressable>
+                <Pressable onPress={() => openListSection('following')} style={styles.statCard}>
+                  <Text style={styles.statValue}>{followingTaste.length}</Text>
+                  <Text style={styles.statLabel}>Following</Text>
+                </Pressable>
+              </View>
             </View>
           </Animated.View>
 
@@ -581,7 +629,7 @@ export default function ProfileScreen() {
               <Text style={styles.sectionEmptyHint}>No items yet. Add favorites or watched to build your profile.</Text>
             ) : null}
           </Animated.View>
-        </ScrollView>
+        </Animated.ScrollView>
       </KeyboardAvoidingView>
     </View>
   );
@@ -600,29 +648,32 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.two,
+    paddingTop: 0,
     paddingBottom: 146,
   },
   heroStage: {
-    marginBottom: Spacing.three,
+    marginBottom: Spacing.four,
+  },
+  heroImageShell: {
+    marginHorizontal: 0,
+    overflow: 'hidden',
   },
   heroImage: {
-    height: 458,
-    borderRadius: 26,
+    height: undefined,
+    aspectRatio: 1,
+    borderRadius: 24,
     width: '100%',
     overflow: 'hidden',
     backgroundColor: '#11151d',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
-    shadowColor: '#000',
-    shadowOpacity: 0.36,
-    shadowRadius: 24,
-    shadowOffset: { width: 0, height: 16 },
-    elevation: 12,
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   heroImageInner: {
     ...StyleSheet.absoluteFillObject,
     resizeMode: 'cover',
+  },
+  heroImageInnerShift: {
+    transform: [{ translateY: PROFILE_HERO_IMAGE_VERTICAL_SHIFT }, { scale: 1.02 }],
   },
   heroPlaceholder: {
     ...StyleSheet.absoluteFillObject,
@@ -639,21 +690,20 @@ const styles = StyleSheet.create({
   heroImageOverlay: {
     ...StyleSheet.absoluteFillObject,
   },
-  heroBottomContent: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 18,
-  },
   heroTopActions: {
     position: 'absolute',
     left: 0,
     right: 0,
-    top: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-end',
     paddingHorizontal: 14,
+  },
+  profileMetaBlock: {
+    marginTop: 14,
+    borderRadius: 16,
+    paddingHorizontal: 4,
+    paddingBottom: 2,
   },
   settingsIconBtn: {
     width: 38,
@@ -689,22 +739,22 @@ const styles = StyleSheet.create({
   },
   name: {
     fontFamily: Fonts.serif,
-    fontSize: 34,
-    lineHeight: 36,
+    fontSize: 39,
+    lineHeight: 41,
     color: '#FFFFFF',
   },
   nickname: {
-    marginTop: 4,
+    marginTop: 6,
     fontFamily: Fonts.mono,
-    fontSize: 11,
-    color: 'rgba(255,255,255,0.75)',
+    fontSize: 12,
+    color: 'rgba(255,255,255,0.74)',
   },
   bio: {
-    marginTop: 10,
+    marginTop: 12,
     fontFamily: Fonts.serif,
-    fontSize: 13.5,
-    lineHeight: 19,
-    color: 'rgba(255,255,255,0.86)',
+    fontSize: 14,
+    lineHeight: 20,
+    color: 'rgba(255,255,255,0.82)',
   },
   editBtn: {
     borderRadius: 999,
@@ -723,16 +773,16 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
+    gap: 9,
+    marginTop: 14,
   },
   statCard: {
     flex: 1,
     borderRadius: 11,
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
-    backgroundColor: 'rgba(8,10,15,0.64)',
+    backgroundColor: 'rgba(9,13,19,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
   },
@@ -748,7 +798,7 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   sectionRailWrap: {
-    marginBottom: 12,
+    marginBottom: 18,
   },
   sectionRailTitle: {
     marginBottom: 10,

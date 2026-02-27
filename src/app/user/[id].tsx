@@ -1,9 +1,10 @@
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
-import { ActivityIndicator, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
+import { ActivityIndicator, Animated, Image, Pressable, ScrollView, StyleSheet, Text, View } from 'react-native';
 import { router, useLocalSearchParams } from 'expo-router';
 import { Ionicons } from '@expo/vector-icons';
 import { useFocusEffect } from '@react-navigation/native';
 import { LinearGradient } from 'expo-linear-gradient';
+import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { Fonts, Spacing } from '@/constants/theme';
@@ -29,9 +30,42 @@ const PUBLIC_SECTION_ORDER: PublicSectionKey[] = [
 
 export default function PublicUserProfileScreen() {
   const { user } = useAuth();
+  const insets = useSafeAreaInsets();
+  const heroTopOffset = useMemo(
+    () => Math.max(8, Math.min(16, insets.top * 0.35)),
+    [insets.top]
+  );
   const params = useLocalSearchParams<{ id?: string }>();
   const targetId = Number(params.id ?? 0);
   const scrollRef = useRef<ScrollView | null>(null);
+  const scrollY = useRef(new Animated.Value(0)).current;
+  const heroScrollTranslateY = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 260],
+        outputRange: [0, -84],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
+  const heroScrollScale = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [-160, 0],
+        outputRange: [1.16, 1],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
+  const heroScrollOpacity = useMemo(
+    () =>
+      scrollY.interpolate({
+        inputRange: [0, 260],
+        outputRange: [1, 0.72],
+        extrapolate: 'clamp',
+      }),
+    [scrollY]
+  );
 
   const [loading, setLoading] = useState(true);
   const [profile, setProfile] = useState<PublicProfile | null>(null);
@@ -187,68 +221,82 @@ export default function PublicUserProfileScreen() {
         style={styles.screenGradient}
       />
 
-      <ScrollView
+      <Animated.ScrollView
         ref={scrollRef}
         contentContainerStyle={styles.scroll}
+        onScroll={Animated.event(
+          [{ nativeEvent: { contentOffset: { y: scrollY } } }],
+          { useNativeDriver: true }
+        )}
+        scrollEventThrottle={16}
         showsVerticalScrollIndicator={false}>
-        <View style={styles.heroStage}>
-          <View style={styles.heroImage}>
-            {hasAvatar ? (
-              <Image source={{ uri: avatarUrl }} style={styles.heroImageInner} />
-            ) : (
-              <View style={styles.heroPlaceholder}>
-                <Text style={styles.heroPlaceholderText}>?</Text>
-              </View>
-            )}
+        <View style={[styles.heroStage, { marginTop: heroTopOffset }]}>
+          <Animated.View
+            style={[
+              styles.heroImageShell,
+              {
+                transform: [{ translateY: heroScrollTranslateY }, { scale: heroScrollScale }],
+                opacity: heroScrollOpacity,
+              },
+            ]}>
+            <View style={styles.heroImage}>
+              {hasAvatar ? (
+                <Image source={{ uri: avatarUrl }} style={styles.heroImageInner} />
+              ) : (
+                <View style={styles.heroPlaceholder}>
+                  <Text style={styles.heroPlaceholderText}>?</Text>
+                </View>
+              )}
             <LinearGradient
-              colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.42)', 'rgba(5,5,5,0.94)']}
-              locations={[0, 0.52, 1]}
+              colors={['rgba(0,0,0,0.03)', 'rgba(0,0,0,0.18)', 'rgba(4,5,7,0.42)']}
+              locations={[0, 0.7, 1]}
               style={styles.heroImageOverlay}
             />
 
-            <View style={styles.heroTopActions}>
-              <Pressable onPress={() => router.back()} style={styles.backIconBtn}>
-                <Ionicons name="chevron-back" size={18} color="#fff" />
-              </Pressable>
-            </View>
-
-            <View style={styles.heroBottomContent}>
-              <Text style={styles.name}>{title}</Text>
-              <Text style={styles.nickname}>@{profile.nickname}</Text>
-              <Text style={styles.bio} numberOfLines={2}>
-                {bio || 'This user has not added a bio yet.'}
-              </Text>
-              <View style={styles.statsRow}>
-                <Pressable onPress={() => openPublicSection('favorites')} style={styles.statCard}>
-                  <Text style={styles.statValue}>{(profile.favorites ?? []).length}</Text>
-                  <Text style={styles.statLabel}>Favorites</Text>
+              <View style={[styles.heroTopActions, { top: insets.top + 12 }]}>
+                <Pressable onPress={() => router.back()} style={styles.backIconBtn}>
+                  <Ionicons name="chevron-back" size={18} color="#fff" />
                 </Pressable>
-                <Pressable onPress={() => openPublicSection('watched')} style={styles.statCard}>
-                  <Text style={styles.statValue}>{(profile.watched ?? []).length}</Text>
-                  <Text style={styles.statLabel}>Watched</Text>
-                </Pressable>
-                <View style={styles.statCard}>
-                  <Text style={styles.statValue}>{Number(profile.followers ?? 0)}</Text>
-                  <Text style={styles.statLabel}>Followers</Text>
-                </View>
               </View>
-              {canFollow ? (
-                <Pressable
-                  onPress={() => void handleFollowToggle()}
-                  disabled={saving}
-                  style={[
-                    styles.followPillLarge,
-                    following ? styles.followPillLargeActive : null,
-                    saving ? styles.followPillLargeDisabled : null,
-                  ]}>
-                  <Text style={styles.followPillLargeText}>
-                    {saving ? 'Saving...' : following ? 'Following' : 'Follow'}
-                  </Text>
-                </Pressable>
-              ) : !user ? (
-                <Text style={styles.followHint}>Sign in to follow taste.</Text>
-              ) : null}
             </View>
+          </Animated.View>
+
+          <View style={styles.profileMetaBlock}>
+            <Text style={styles.name}>{title}</Text>
+            <Text style={styles.nickname}>@{profile.nickname}</Text>
+            <Text style={styles.bio} numberOfLines={3}>
+              {bio || 'This user has not added a bio yet.'}
+            </Text>
+            <View style={styles.statsRow}>
+              <Pressable onPress={() => openPublicSection('favorites')} style={styles.statCard}>
+                <Text style={styles.statValue}>{(profile.favorites ?? []).length}</Text>
+                <Text style={styles.statLabel}>Favorites</Text>
+              </Pressable>
+              <Pressable onPress={() => openPublicSection('watched')} style={styles.statCard}>
+                <Text style={styles.statValue}>{(profile.watched ?? []).length}</Text>
+                <Text style={styles.statLabel}>Watched</Text>
+              </Pressable>
+              <View style={styles.statCard}>
+                <Text style={styles.statValue}>{Number(profile.followers ?? 0)}</Text>
+                <Text style={styles.statLabel}>Followers</Text>
+              </View>
+            </View>
+            {canFollow ? (
+              <Pressable
+                onPress={() => void handleFollowToggle()}
+                disabled={saving}
+                style={[
+                  styles.followPillLarge,
+                  following ? styles.followPillLargeActive : null,
+                  saving ? styles.followPillLargeDisabled : null,
+                ]}>
+                <Text style={styles.followPillLargeText}>
+                  {saving ? 'Saving...' : following ? 'Following' : 'Follow'}
+                </Text>
+              </Pressable>
+            ) : !user ? (
+              <Text style={styles.followHint}>Sign in to follow taste.</Text>
+            ) : null}
           </View>
         </View>
 
@@ -270,7 +318,7 @@ export default function PublicUserProfileScreen() {
           </View>
           {allListsEmpty ? <Text style={styles.sectionEmptyHint}>No public items yet.</Text> : null}
         </View>
-      </ScrollView>
+      </Animated.ScrollView>
     </View>
   );
 }
@@ -310,20 +358,25 @@ const styles = StyleSheet.create({
   },
   scroll: {
     paddingHorizontal: Spacing.three,
-    paddingTop: Spacing.three,
+    paddingTop: 0,
     paddingBottom: 132,
   },
   heroStage: {
     marginBottom: Spacing.four,
   },
+  heroImageShell: {
+    marginHorizontal: 0,
+    overflow: 'hidden',
+  },
   heroImage: {
-    height: 420,
-    borderRadius: 28,
+    height: undefined,
+    aspectRatio: 1,
+    borderRadius: 24,
     width: '100%',
     overflow: 'hidden',
     backgroundColor: '#1B1B1B',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.16)',
   },
   heroImageInner: {
     ...StyleSheet.absoluteFillObject,
@@ -348,7 +401,6 @@ const styles = StyleSheet.create({
     position: 'absolute',
     left: 0,
     right: 0,
-    top: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'flex-start',
@@ -387,43 +439,43 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 13,
   },
-  heroBottomContent: {
-    position: 'absolute',
-    left: 18,
-    right: 18,
-    bottom: 18,
+  profileMetaBlock: {
+    marginTop: 14,
+    borderRadius: 16,
+    paddingHorizontal: 4,
+    paddingBottom: 2,
   },
   name: {
     fontFamily: Fonts.serif,
-    fontSize: 34,
-    lineHeight: 36,
+    fontSize: 39,
+    lineHeight: 41,
     color: '#FFFFFF',
   },
   nickname: {
-    marginTop: 7,
+    marginTop: 6,
     fontFamily: Fonts.mono,
     fontSize: 12,
     color: 'rgba(255,255,255,0.74)',
   },
   bio: {
-    marginTop: 10,
+    marginTop: 12,
     fontFamily: Fonts.serif,
-    fontSize: 13,
-    lineHeight: 18,
+    fontSize: 14,
+    lineHeight: 20,
     color: 'rgba(255,255,255,0.82)',
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 8,
-    marginTop: 12,
+    gap: 9,
+    marginTop: 14,
   },
   statCard: {
     flex: 1,
     borderRadius: 11,
-    paddingVertical: 9,
+    paddingVertical: 10,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.22)',
-    backgroundColor: 'rgba(8,10,15,0.64)',
+    backgroundColor: 'rgba(9,13,19,0.72)',
     alignItems: 'center',
     justifyContent: 'center',
   },
