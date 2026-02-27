@@ -8,6 +8,7 @@ import {
   ActivityIndicator,
   FlatList,
   Image,
+  Keyboard,
   KeyboardAvoidingView,
   Platform,
   Pressable,
@@ -19,6 +20,7 @@ import {
   type NativeScrollEvent,
   type NativeSyntheticEvent,
 } from 'react-native';
+import { useIsFocused } from '@react-navigation/native';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { Fonts, Spacing } from '@/constants/theme';
@@ -61,11 +63,24 @@ const extra = (Constants.expoConfig?.extra ?? {}) as {
 const BACKEND_URL = (process.env.EXPO_PUBLIC_BACKEND_URL ?? extra.EXPO_PUBLIC_BACKEND_URL ?? '').trim();
 const EXPLICIT_WS_URL = (process.env.EXPO_PUBLIC_CINEMA_WS_URL ?? extra.EXPO_PUBLIC_CINEMA_WS_URL ?? '').trim();
 
-const WS_URL =
+const RAW_WS_URL =
   EXPLICIT_WS_URL ||
-  (BACKEND_URL
-    ? BACKEND_URL.replace(/^http/i, 'ws').replace(/\/+$/, '') + '/ws'
-    : '');
+  (BACKEND_URL ? BACKEND_URL.replace(/^http/i, 'ws').replace(/\/+$/, '') + '/ws' : '');
+
+function resolveWsUrl(input: string) {
+  const trimmed = String(input ?? '').trim();
+  if (!trimmed) return '';
+  let wsUrl = trimmed;
+  if (/^https?:\/\//i.test(wsUrl)) {
+    wsUrl = wsUrl.replace(/^http/i, 'ws');
+  }
+  if (Platform.OS === 'web' && typeof window !== 'undefined' && window.location.protocol === 'https:') {
+    wsUrl = wsUrl.replace(/^ws:\/\//i, 'wss://');
+  }
+  return wsUrl;
+}
+
+const WS_URL = resolveWsUrl(RAW_WS_URL);
 const LOCAL_EMPTY_CINEMA_IMAGE = require('../../../assets/images/no-cinema.png');
 
 function normalizeCinemaEmptyImageUrl(input: unknown): string | null {
@@ -173,6 +188,7 @@ export default function CinemaScreen() {
   const theme = useTheme();
   const { user } = useAuth();
   const insets = useSafeAreaInsets();
+  const isFocused = useIsFocused();
 
   const wsRef = useRef<WebSocket | null>(null);
   const videoViewRef = useRef<VideoView | null>(null);
@@ -205,6 +221,7 @@ export default function CinemaScreen() {
   const [pollMessage, setPollMessage] = useState<string | null>(null);
   const [eventMeta, setEventMeta] = useState<CinemaEventMeta | null>(null);
   const [eventMetaLoading, setEventMetaLoading] = useState(false);
+  const [keyboardHeight, setKeyboardHeight] = useState(0);
 
   const eventId = Number(event?.id ?? 0);
   const eventStartAt = String(event?.start_at ?? '');
@@ -255,6 +272,22 @@ export default function CinemaScreen() {
     return () => {
       mounted = false;
       clearInterval(refreshTimer);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (Platform.OS === 'web') return;
+    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
+    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
+    const showSub = Keyboard.addListener(showEvent, (event) => {
+      setKeyboardHeight(event.endCoordinates?.height ?? 0);
+    });
+    const hideSub = Keyboard.addListener(hideEvent, () => {
+      setKeyboardHeight(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
     };
   }, []);
 
@@ -380,7 +413,7 @@ export default function CinemaScreen() {
 
   const syncVideoToLive = useCallback(
     (force = false) => {
-      if (phase !== 'live' || !eventId) return;
+      if (!isFocused || phase !== 'live' || !eventId) return;
       const targetMs = getLiveTargetPositionMs();
       const currentMs = Math.round((Number(videoPlayer.currentTime) || 0) * 1000);
       const drift = Math.abs(currentMs - targetMs);
@@ -391,11 +424,11 @@ export default function CinemaScreen() {
         }
       }
     },
-    [eventId, phase, getLiveTargetPositionMs, videoPlayer]
+    [eventId, isFocused, phase, getLiveTargetPositionMs, videoPlayer]
   );
 
   useEffect(() => {
-    if (phase !== 'live' || !eventId) return;
+    if (!isFocused || phase !== 'live' || !eventId) return;
     const sub = videoPlayer.addListener('timeUpdate', (payload) => {
       const now = Date.now();
       if (now - lastLiveSyncMsRef.current < 2200) return;
@@ -410,10 +443,10 @@ export default function CinemaScreen() {
     return () => {
       sub.remove();
     };
-  }, [eventId, phase, getLiveTargetPositionMs, syncVideoToLive, videoPlayer]);
+  }, [eventId, isFocused, phase, getLiveTargetPositionMs, syncVideoToLive, videoPlayer]);
 
   useEffect(() => {
-    if (phase !== 'live' || !eventId) {
+    if (!isFocused || phase !== 'live' || !eventId) {
       lastLiveSyncMsRef.current = 0;
       try {
         videoPlayer.pause();
@@ -427,10 +460,10 @@ export default function CinemaScreen() {
       clearTimeout(timer);
       clearInterval(interval);
     };
-  }, [eventId, phase, syncVideoToLive, videoPlayer]);
+  }, [eventId, isFocused, phase, syncVideoToLive, videoPlayer]);
 
   useEffect(() => {
-    if (!eventId || phase !== 'live' || !WS_URL) {
+    if (!isFocused || !eventId || phase !== 'live' || !WS_URL) {
       if (wsRef.current) {
         try {
           wsRef.current.close();
@@ -538,7 +571,7 @@ export default function CinemaScreen() {
         wsRef.current = null;
       }
     };
-  }, [eventId, phase]);
+  }, [eventId, isFocused, phase]);
 
   useEffect(() => {
     if (!messages.length || !shouldAutoscrollRef.current) return;
@@ -550,11 +583,12 @@ export default function CinemaScreen() {
 
   const sendMessage = () => {
     const text = chatText.trim();
-    if (!text || !eventId || !wsRef.current || chatStatus !== 'connected') return;
+    const socket = wsRef.current;
+    if (!text || !eventId || !socket || socket.readyState !== WebSocket.OPEN) return;
     const now = Date.now();
     if (lastSentRef.current.text === text && now - lastSentRef.current.at < 900) return;
     lastSentRef.current = { text, at: now };
-    wsRef.current.send(
+    socket.send(
       JSON.stringify({
         type: 'message',
         room: `cinema:${eventId}`,
@@ -568,8 +602,9 @@ export default function CinemaScreen() {
   };
 
   const toggleLike = () => {
-    if (!eventId || !wsRef.current || chatStatus !== 'connected') return;
-    wsRef.current.send(
+    const socket = wsRef.current;
+    if (!eventId || !socket || socket.readyState !== WebSocket.OPEN) return;
+    socket.send(
       JSON.stringify({
         type: 'like',
         room: `cinema:${eventId}`,
@@ -785,6 +820,8 @@ export default function CinemaScreen() {
   const phasePosterImage = String(event?.poster_url ?? '').trim() || eventMeta?.backdrop || eventMeta?.poster || '';
   const phaseHeading = String(event?.title ?? '').trim() || eventMeta?.title || 'Cinema Event';
   const phaseSummary = String(event?.description ?? '').trim() || eventMeta?.overview || 'Live stream will begin soon.';
+  const composerLift = Platform.OS === 'android' ? Math.max(0, keyboardHeight) : 0;
+  const composerBottomInset = Math.max(8, insets.bottom) + composerLift;
 
   if (loading) {
     return (
@@ -834,7 +871,7 @@ export default function CinemaScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : 'height'}
+      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
       keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 4 : 0}>
       {phase === 'upcoming' ? (
         <View style={[styles.phaseShell, { paddingTop: Math.max(insets.top + 10, Spacing.three + 8) }]}>
@@ -972,8 +1009,8 @@ export default function CinemaScreen() {
               keyExtractor={(item) => item.id}
               renderItem={renderChatItem}
               style={styles.chatList}
-              contentContainerStyle={styles.chatListContent}
-              keyboardShouldPersistTaps="handled"
+              contentContainerStyle={[styles.chatListContent, { paddingBottom: 104 }]}
+              keyboardShouldPersistTaps="always"
               onScroll={onChatScroll}
               scrollEventThrottle={16}
               onContentSizeChange={() => {
@@ -983,24 +1020,28 @@ export default function CinemaScreen() {
               ListEmptyComponent={<Text style={styles.emptyChatText}>No messages yet. Be first in chat.</Text>}
             />
 
-            <View style={[styles.composerRow, { paddingBottom: Math.max(10, insets.bottom) }]}>
-              <TextInput
-                value={chatText}
-                onChangeText={setChatText}
-                placeholder={chatStatus === 'connected' ? 'Write a message...' : 'Chat offline'}
-                placeholderTextColor="rgba(255,255,255,0.55)"
-                style={styles.input}
-                editable={chatStatus === 'connected'}
-                returnKeyType="send"
-                blurOnSubmit={false}
-                onSubmitEditing={sendMessage}
-              />
-              <Pressable
-                onPress={sendMessage}
-                disabled={chatStatus !== 'connected' || !chatText.trim()}
-                style={[styles.sendBtn, (chatStatus !== 'connected' || !chatText.trim()) && styles.sendBtnDisabled]}>
-                <Ionicons name="send" size={18} color="#fff" />
-              </Pressable>
+            <View style={[styles.composerDock, { bottom: composerBottomInset }]}>
+              <View style={styles.composerRow}>
+                <TextInput
+                  value={chatText}
+                  onChangeText={setChatText}
+                  placeholder={chatStatus === 'connected' ? 'Write a message...' : 'Chat offline'}
+                  placeholderTextColor="rgba(255,255,255,0.55)"
+                  style={styles.input}
+                  editable={chatStatus === 'connected'}
+                  returnKeyType="send"
+                  blurOnSubmit={false}
+                  onSubmitEditing={sendMessage}
+                />
+                <Pressable
+                  onPressIn={sendMessage}
+                  onPress={sendMessage}
+                  hitSlop={8}
+                  disabled={chatStatus !== 'connected' || !chatText.trim()}
+                  style={[styles.sendBtn, (chatStatus !== 'connected' || !chatText.trim()) && styles.sendBtnDisabled]}>
+                  <Ionicons name="send" size={18} color="#fff" />
+                </Pressable>
+              </View>
             </View>
           </View>
         </View>
@@ -1526,6 +1567,7 @@ const styles = StyleSheet.create({
   chatPanel: {
     flex: 1,
     minHeight: 0,
+    position: 'relative',
     paddingHorizontal: 10,
     paddingTop: 10,
     gap: 8,
@@ -1626,7 +1668,17 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    paddingTop: 4,
+    borderRadius: 16,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(5,8,16,0.92)',
+    paddingHorizontal: 8,
+    paddingVertical: 8,
+  },
+  composerDock: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
   },
   input: {
     flex: 1,

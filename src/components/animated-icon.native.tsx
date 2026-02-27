@@ -1,46 +1,61 @@
 import { Image } from 'expo-image';
-import { useState } from 'react';
-import { Dimensions, StyleSheet, View } from 'react-native';
+import { useEffect, useState } from 'react';
+import { Dimensions, Platform, StyleSheet, useColorScheme, View } from 'react-native';
+import LottieView from 'lottie-react-native';
 import Animated, { Easing, Keyframe } from 'react-native-reanimated';
-import { scheduleOnRN } from 'react-native-worklets';
 
 const INITIAL_SCALE_FACTOR = Dimensions.get('screen').height / 90;
 const DURATION = 600;
 
-const splashKeyframe = new Keyframe({
-  0: {
-    transform: [{ scale: INITIAL_SCALE_FACTOR }],
-    opacity: 1,
-  },
-  20: {
-    opacity: 1,
-  },
-  70: {
-    opacity: 0,
-    easing: Easing.elastic(0.7),
-  },
-  100: {
-    opacity: 0,
-    transform: [{ scale: 1 }],
-    easing: Easing.elastic(0.7),
-  },
-});
-
 export function AnimatedSplashOverlay() {
   const [visible, setVisible] = useState(true);
+  const [minDelayDone, setMinDelayDone] = useState(false);
+  const [animationDone, setAnimationDone] = useState(false);
+  const systemScheme = useColorScheme();
+  const splashScheme: 'dark' | 'light' = systemScheme === 'light' ? 'light' : 'dark';
+  const assetId =
+    splashScheme === 'dark'
+      ? require('../../assets/videos/b.json')
+      : require('../../assets/videos/w.json');
+
+  useEffect(() => {
+    const minDelayMs = Platform.OS === 'web' ? 600 : 1600;
+    const maxDelayMs = Platform.OS === 'web' ? 2500 : 6000;
+    const t = setTimeout(() => setMinDelayDone(true), minDelayMs);
+    const fallback = setTimeout(() => setAnimationDone(true), maxDelayMs);
+    return () => {
+      clearTimeout(t);
+      clearTimeout(fallback);
+    };
+  }, []);
+
+  useEffect(() => {
+    if (!minDelayDone || !animationDone) return;
+    setVisible(false);
+  }, [minDelayDone, animationDone]);
 
   if (!visible) return null;
 
   return (
-    <Animated.View
-      entering={splashKeyframe.duration(DURATION).withCallback((finished) => {
-        'worklet';
-        if (finished) {
-          scheduleOnRN(setVisible, false);
-        }
-      })}
-      style={styles.backgroundSolidColor}
-    />
+    <View
+      style={[
+        styles.splashOverlay,
+        { backgroundColor: splashScheme === 'light' ? '#FFFFFF' : '#000000' },
+      ]}>
+      <View style={styles.videoWrap}>
+        <LottieView
+          source={assetId}
+          autoPlay
+          loop={false}
+          renderMode="AUTOMATIC"
+          style={[
+            styles.video,
+            { backgroundColor: splashScheme === 'light' ? '#FFFFFF' : '#000000' },
+          ]}
+          onAnimationFinish={() => setAnimationDone(true)}
+        />
+      </View>
+    </View>
   );
 }
 
@@ -96,6 +111,29 @@ export function AnimatedIcon() {
 }
 
 const styles = StyleSheet.create({
+  splashOverlay: {
+    position: 'absolute',
+    top: 0,
+    left: 0,
+    right: 0,
+    bottom: 0,
+    backgroundColor: '#000000',
+    alignItems: 'center',
+    justifyContent: 'center',
+    zIndex: 5000,
+    elevation: 5000,
+  },
+  videoWrap: {
+    width: '70%',
+    maxWidth: 320,
+    aspectRatio: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+  },
+  video: {
+    width: '100%',
+    height: '100%',
+  },
   imageContainer: {
     justifyContent: 'center',
     alignItems: 'center',
@@ -123,10 +161,5 @@ const styles = StyleSheet.create({
     width: 128,
     height: 128,
     position: 'absolute',
-  },
-  backgroundSolidColor: {
-    ...StyleSheet.absoluteFillObject,
-    backgroundColor: '#208AEF',
-    zIndex: 1000,
   },
 });

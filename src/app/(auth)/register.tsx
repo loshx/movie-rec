@@ -112,7 +112,7 @@ function WheelPicker({ data, value, onChange }: WheelProps) {
 }
 
 export default function RegisterScreen() {
-  const { register, error, clearError, checkNicknameAvailability } = useAuth();
+  const { register, error, clearError, checkNicknameAvailability, isReady } = useAuth();
 
   const [step, setStep] = useState(0);
   const [name, setName] = useState('');
@@ -153,7 +153,7 @@ export default function RegisterScreen() {
   const birthDate = `${birthYear}-${birthMonth}-${birthDay}`;
 
   React.useEffect(() => {
-    if (step !== 1) {
+    if (!isReady || step !== 1) {
       setNicknameStatus('idle');
       return;
     }
@@ -186,7 +186,7 @@ export default function RegisterScreen() {
       active = false;
       clearTimeout(timer);
     };
-  }, [checkNicknameAvailability, nickname, step]);
+  }, [checkNicknameAvailability, nickname, step, isReady]);
 
   React.useEffect(() => {
     if (nicknameStatus === 'idle') {
@@ -272,6 +272,10 @@ export default function RegisterScreen() {
   };
 
   const nextStep = async () => {
+    if (!isReady) {
+      setLocalError('Preparing local database. Try again in a second.');
+      return;
+    }
     const msg = validateStep();
     if (msg) {
       setLocalError(msg);
@@ -298,6 +302,10 @@ export default function RegisterScreen() {
   };
 
   const onRegister = async () => {
+    if (!isReady) {
+      setLocalError('Preparing local database. Try again in a second.');
+      return;
+    }
     const msg = validateStep();
     if (msg) {
       setLocalError(msg);
@@ -328,6 +336,7 @@ export default function RegisterScreen() {
           <GlassView intensity={24} tint="dark" style={styles.card}>
             <Text style={styles.title}>Sign up</Text>
             <Text style={styles.subtitle}>Step {step + 1} of 5</Text>
+            {!isReady ? <Text style={styles.subtitle}>Initializing local database...</Text> : null}
 
             <View style={styles.progressRow}>
               {Array.from({ length: 5 }).map((_, i) => (
@@ -451,15 +460,24 @@ export default function RegisterScreen() {
             {!localError && error ? <Text style={styles.error}>{error}</Text> : null}
 
             <View style={styles.navRow}>
-              <Pressable onPress={prevStep} style={[styles.navBtn, step === 0 && styles.navBtnDisabled]}>
+              <Pressable
+                onPress={prevStep}
+                disabled={step === 0 || !isReady}
+                style={[styles.navBtn, (step === 0 || !isReady) && styles.navBtnDisabled]}>
                 <Text style={styles.navText}>‹</Text>
               </Pressable>
               {step < 4 ? (
-                <Pressable onPress={nextStep} style={styles.primaryBtn}>
+                <Pressable
+                  onPress={nextStep}
+                  disabled={!isReady}
+                  style={[styles.primaryBtn, !isReady && styles.primaryBtnDisabled]}>
                   <Text style={styles.primaryBtnText}>›</Text>
                 </Pressable>
               ) : (
-                <Pressable onPress={onRegister} style={styles.primaryBtn}>
+                <Pressable
+                  onPress={onRegister}
+                  disabled={!isReady}
+                  style={[styles.primaryBtn, !isReady && styles.primaryBtnDisabled]}>
                   <Text style={styles.primaryBtnText}>Sign up</Text>
                 </Pressable>
               )}
@@ -635,6 +653,9 @@ const styles = StyleSheet.create({
     paddingVertical: Spacing.two,
     borderRadius: Spacing.two,
     alignItems: 'center',
+  },
+  primaryBtnDisabled: {
+    opacity: 0.5,
   },
   primaryBtnText: {
     color: '#fff',

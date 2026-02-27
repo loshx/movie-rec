@@ -52,6 +52,10 @@ function mlBaseUrl() {
     .replace(/\/+$/, '');
 }
 
+export function getMlApiBaseUrl() {
+  return mlBaseUrl();
+}
+
 async function fetchWithTimeout(url: string, init?: RequestInit) {
   const controller = init?.signal ? null : new AbortController();
   const timeout = controller ? setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS) : null;
@@ -79,6 +83,13 @@ function canUseMlApi() {
 
 export function hasMlApi() {
   return canUseMlApi();
+}
+
+export async function checkMlApiHealth() {
+  if (!canUseMlApi()) return false;
+  const baseUrl = mlBaseUrl();
+  const res = await fetchWithTimeout(`${baseUrl}/health`, { method: 'GET' });
+  return res.ok;
 }
 
 export async function getMlRecommendations(

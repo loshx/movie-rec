@@ -136,8 +136,8 @@ const styles = StyleSheet.create({
     backgroundColor: '#000000',
     alignItems: 'center',
     justifyContent: 'center',
-    zIndex: 1000,
-    elevation: 1000,
+    zIndex: 5000,
+    elevation: 5000,
   },
   video: {
     width: '100%',

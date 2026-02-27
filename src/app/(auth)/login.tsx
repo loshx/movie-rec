@@ -22,7 +22,7 @@ import { Fonts, Spacing } from '@/constants/theme';
 WebBrowser.maybeCompleteAuthSession();
 
 export default function LoginScreen() {
-  const { login, loginWithAuth0, error, clearError } = useAuth();
+  const { login, loginWithAuth0, error, clearError, isReady } = useAuth();
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
@@ -119,6 +119,10 @@ export default function LoginScreen() {
   }, [response, discovery, loginWithAuth0]);
 
   const onLogin = async () => {
+    if (!isReady) {
+      setLocalError('Preparing local database. Try again in a second.');
+      return;
+    }
     const cleanNickname = nickname.trim();
 
     if (!cleanNickname || !password) {
@@ -138,6 +142,10 @@ export default function LoginScreen() {
   };
 
   const onAuth0Login = async () => {
+    if (!isReady) {
+      setLocalError('Preparing local database. Try again in a second.');
+      return;
+    }
     if (!hasAuth0Config || !request) {
       setLocalError('Auth0 is not configured.');
       return;
@@ -161,6 +169,7 @@ export default function LoginScreen() {
           <GlassView intensity={24} tint="dark" style={styles.card}>
             <Text style={styles.title}>Sign in</Text>
             <Text style={styles.subtitle}>Sign in with nickname and password.</Text>
+            {!isReady ? <Text style={styles.subtitle}>Initializing local database...</Text> : null}
 
             <Text style={styles.label}>Nickname</Text>
             <TextInput
@@ -193,14 +202,14 @@ export default function LoginScreen() {
             {localError ? <Text style={styles.error}>{localError}</Text> : null}
             {!localError && error ? <Text style={styles.error}>{error}</Text> : null}
 
-            <Pressable onPress={onLogin} style={styles.primaryBtn}>
+            <Pressable onPress={onLogin} disabled={!isReady} style={[styles.primaryBtn, !isReady && styles.btnDisabled]}>
               <Text style={styles.primaryBtnText}>Sign in</Text>
             </Pressable>
 
             <Pressable
               onPress={onAuth0Login}
-              disabled={!hasAuth0Config || !request}
-              style={[styles.auth0Btn, (!hasAuth0Config || !request) && styles.auth0BtnDisabled]}>
+              disabled={!isReady || !hasAuth0Config || !request}
+              style={[styles.auth0Btn, (!isReady || !hasAuth0Config || !request) && styles.auth0BtnDisabled]}>
               <Text style={styles.auth0BtnText}>Sign in with Google</Text>
             </Pressable>
 
@@ -277,6 +286,9 @@ const styles = StyleSheet.create({
   primaryBtnText: {
     color: '#fff',
     fontFamily: Fonts.mono,
+  },
+  btnDisabled: {
+    opacity: 0.5,
   },
   auth0Btn: {
     marginTop: Spacing.two,

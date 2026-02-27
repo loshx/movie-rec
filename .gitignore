@@ -45,4 +45,5 @@ app-example
 # local runtime artifacts
 ml/__pycache__/
 ml/*.db
+ml_local.db
 server/data/*.bak

@@ -113,6 +113,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
       error,
       clearError: () => setError(null),
       login: async (nickname, password) => {
+        await initDb();
         setError(null);
         clearBackendUserSession();
         const cleanNickname = String(nickname || '').trim();
@@ -181,6 +182,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       register: async (input) => {
+        await initDb();
         setError(null);
         clearBackendUserSession();
         const cleanNickname = String(input.nickname || '').trim();
@@ -236,6 +238,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       loginWithAuth0: async (profile) => {
+        await initDb();
         setError(null);
         clearBackendUserSession();
         const u = await upsertAuth0User(profile);
@@ -254,6 +257,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
+        await initDb();
         setError(null);
         const backendEnabled = hasBackendApi();
         const canonicalExcludeUserId =
@@ -271,12 +275,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         return isNicknameAvailable(nickname, excludeUserId);
       },
       updateProfile: async (input) => {
+        await initDb();
         if (!user) return;
         setError(null);
         const u = await updateUserProfile(user.id, input);
         setUser(u);
       },
       deleteAccount: async () => {
+        await initDb();
         if (!user) return;
         setError(null);
         if (user.role === 'admin') {
@@ -289,12 +295,14 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         setUser(null);
       },
       logout: async () => {
+        await initDb();
         setError(null);
         await logoutUser();
         clearBackendUserSession();
         setUser(null);
       },
       resetToAdminOnly: async () => {
+        await initDb();
         setError(null);
         await resetDatabaseKeepAdminOnly();
         const current = await getCurrentUser();

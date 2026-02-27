@@ -33,7 +33,8 @@
                                                 "backgroundColor":  "#000000"
                                             },
                                  "predictiveBackGestureEnabled":  false,
-                                 "package":  "com.cleanwhiplash.movierec"
+                                 "package":  "com.cleanwhiplash.movierec",
+                                 "googleServicesFile":  "./android/app/google-services.json"
                              },
                  "web":  {
                              "output":  "static",

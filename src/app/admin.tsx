@@ -10,6 +10,7 @@ import { closeCinemaPoll, createCinemaEvent, createCinemaPoll, getCurrentCinemaP
 import { hasCloudinaryConfig, uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/cloudinary';
 import { hasBackendApi } from '@/lib/cinema-backend';
 import { setRuntimeAdminKey } from '@/lib/admin-session';
+import { checkMlApiHealth, getMlApiBaseUrl, hasMlApi } from '@/lib/ml-recommendations';
 import { getMovieById, getMovieCredits, posterUrl } from '@/lib/tmdb';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
@@ -317,6 +318,9 @@ export default function AdminScreen() {
   const [galleryMessage, setGalleryMessage] = useState<string | null>(null);
   const [gallerySubmitting, setGallerySubmitting] = useState(false);
   const [galleryPalettePreview, setGalleryPalettePreview] = useState<string[]>([]);
+  const [mlStatus, setMlStatus] = useState<'checking' | 'connected' | 'offline' | 'disabled'>(
+    hasMlApi() ? 'checking' : 'disabled'
+  );
 
   const cloudinaryReady = hasCloudinaryConfig();
   const cleanAdminKey = adminApiKey.trim();
@@ -343,6 +347,17 @@ export default function AdminScreen() {
 
   useEffect(() => {
     (async () => {
+      if (!hasMlApi()) {
+        setMlStatus('disabled');
+      } else {
+        setMlStatus('checking');
+        try {
+          const ok = await checkMlApiHealth();
+          setMlStatus(ok ? 'connected' : 'offline');
+        } catch {
+          setMlStatus('offline');
+        }
+      }
       const latest = await getLatestCinemaEvent();
       if (latest) {
         setLatestCinemaInfo(`${latest.title} (${fmtShortIso(latest.start_at)})`);
@@ -828,6 +843,33 @@ export default function AdminScreen() {
           <View style={[styles.statusPill, cloudinaryReady ? styles.statusOk : styles.statusWarn]}>
             <Text style={styles.statusText}>Cloudinary {cloudinaryReady ? 'Ready' : 'Missing config'}</Text>
           </View>
+          <View
+            style={[
+              styles.statusPill,
+              mlStatus === 'connected'
+                ? styles.statusOk
+                : mlStatus === 'checking'
+                  ? styles.statusInfo
+                  : styles.statusWarn,
+            ]}>
+            <Text style={styles.statusText}>
+              ML{' '}
+              {mlStatus === 'connected'
+                ? 'Connected'
+                : mlStatus === 'checking'
+                  ? 'Checking'
+                  : mlStatus === 'disabled'
+                    ? 'Disabled'
+                    : 'Offline'}
+            </Text>
+          </View>
+          {mlStatus !== 'connected' && getMlApiBaseUrl() ? (
+            <View style={[styles.statusPill, styles.statusWarn, styles.statusPillWide]}>
+              <Text style={styles.statusText} numberOfLines={1} ellipsizeMode="middle">
+                ML URL: {getMlApiBaseUrl()}
+              </Text>
+            </View>
+          ) : null}
         </View>
       </View>
 
@@ -1125,10 +1167,19 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(245,158,11,0.45)',
     backgroundColor: 'rgba(245,158,11,0.14)',
   },
+  statusInfo: {
+    borderColor: 'rgba(59,130,246,0.45)',
+    backgroundColor: 'rgba(59,130,246,0.14)',
+  },
   statusText: {
     fontFamily: Fonts.mono,
     fontSize: 10,
     color: '#fff',
+    flexShrink: 1,
+  },
+  statusPillWide: {
+    maxWidth: '100%',
+    width: '100%',
   },
   backBtn: {
     flexDirection: 'row',
