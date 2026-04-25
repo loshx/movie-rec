@@ -1,100 +1,97 @@
-﻿{
-    "expo":  {
-                 "name":  "Mchioce",
-                 "slug":  "movie-rec",
-                 "version":  "1.0.0",
-                 "orientation":  "portrait",
-                 "icon":  "./assets/images/icon.png",
-                 "splash":  {
-                                "image":  "./assets/images/logo-dark.png",
-                                "resizeMode":  "contain",
-                                "backgroundColor":  "#000000"
-                            },
-                 "scheme":  "movierec",
-                 "userInterfaceStyle":  "automatic",
-                 "ios":  {
-                             "icon":  "./assets/expo.icon",
-                             "splash":  {
-                                            "image":  "./assets/images/logo-dark.png",
-                                            "resizeMode":  "contain",
-                                            "backgroundColor":  "#000000"
-                                        }
-                         },
-                 "android":  {
-                                 "adaptiveIcon":  {
-                                                      "backgroundColor":  "#000000",
-                                                      "foregroundImage":  "./assets/images/android-icon-foreground.png",
-                                                      "backgroundImage":  "./assets/images/android-icon-background.png",
-                                                      "monochromeImage":  "./assets/images/android-icon-monochrome.png"
-                                                  },
-                                 "splash":  {
-                                                "image":  "./assets/images/logo-dark.png",
-                                                "resizeMode":  "contain",
-                                                "backgroundColor":  "#000000"
-                                            },
-                                 "predictiveBackGestureEnabled":  false,
-                                 "package":  "com.cleanwhiplash.movierec",
-                                 "googleServicesFile":  "./android/app/google-services.json"
-                             },
-                 "web":  {
-                             "output":  "static",
-                             "favicon":  "./assets/images/favicon.png",
-                             "backgroundColor":  "#000000",
-                             "themeColor":  "#000000"
-                         },
-                 "plugins":  [
-                                 "expo-router",
-                                 [
-                                     "expo-splash-screen",
-                                     {
-                                         "backgroundColor":  "#000000",
-                                         "android":  {
-                                                         "image":  "./assets/images/logo-dark.png",
-                                                         "imageWidth":  120
-                                         }
-                                     }
-                                 ],
-                                 [
-                                     "expo-font",
-                                     {
-                                         "fonts":  [
-                                                       "./assets/fonts/Nexa-ExtraLight.ttf",
-                                                       "./assets/fonts/Nexa-Heavy.ttf",
-                                                       "./assets/fonts/Ionicons.ttf"
-                                                   ]
-                                     }
-                                 ],
-                                 "expo-sqlite",
-                                 "expo-video",
-                                 "expo-notifications"
-                             ],
-                 "experiments":  {
-                                     "typedRoutes":  true,
-                                     "reactCompiler":  true
-                                 },
-                 "extra":  {
-                               "router":  {
-
-                                          },
-                               "eas":  {
-                                           "projectId":  "05c39085-4432-41c2-ab55-7712ca7e5949"
-                                       },
-                               "auth0":  {
-                                             "domain":  "dev-f1sh805deicgcvgx.us.auth0.com",
-                                             "clientId":  "gDmyTowdSaKu5Tt6yKK0WC5oRyhI520X",
-                                             "audience":  ""
-                                         },
-                               "EXPO_PUBLIC_TMDB_API_KEY":  "",
-                               "EXPO_PUBLIC_ML_API_URL":  "http://192.168.21.69:8008",
-                               "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME":  "dgbciucw7",
-                               "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET":  "MOVIE1",
-                               "EXPO_PUBLIC_BACKEND_URL":  "https://movie-rec-sbf1.onrender.com",
-                               "EXPO_PUBLIC_CINEMA_WS_URL":  "wss://movie-rec-sbf1.onrender.com/ws",
-                               "EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL":  "",
-                               "EXPO_PUBLIC_ADMIN_AUTH0_SUBS":  "",
-                               "EXPO_PUBLIC_ADMIN_EMAILS":  "",
-                               "EXPO_PUBLIC_TMDB_TOKEN":  "eyJhbGciOiJIUzI1NiJ9.eyJhdWQiOiIwNGE4NGYwNTljNDg0NTZjMjAyNjQ4ODYyMGZjNzQyZiIsIm5iZiI6MTc2MzIyMDE5MS4wNDE5OTk4LCJzdWIiOiI2OTE4OWFkZmJkZmUyMmE3ZDg4NzcwMjQiLCJzY29wZXMiOlsiYXBpX3JlYWQiXSwidmVyc2lvbiI6MX0.2jT49H22QOVKkrMcvrSv30WRguEvXRNF4Aqhv12SFXQ"
-                           },
-                 "owner":  "cleanwhiplash"
-             }
+{
+    "expo": {
+        "name": "Mchioce",
+        "slug": "movie-rec",
+        "version": "1.0.0",
+        "orientation": "portrait",
+        "icon": "./assets/images/icon.png",
+        "splash": {
+            "image": "./assets/images/logo-dark.png",
+            "resizeMode": "contain",
+            "backgroundColor": "#000000"
+        },
+        "scheme": "movierec",
+        "userInterfaceStyle": "automatic",
+        "ios": {
+            "icon": "./assets/expo.icon",
+            "splash": {
+                "image": "./assets/images/logo-dark.png",
+                "resizeMode": "contain",
+                "backgroundColor": "#000000"
+            }
+        },
+        "android": {
+            "adaptiveIcon": {
+                "backgroundColor": "#000000",
+                "foregroundImage": "./assets/images/android-icon-foreground.png",
+                "backgroundImage": "./assets/images/android-icon-background.png",
+                "monochromeImage": "./assets/images/android-icon-monochrome.png"
+            },
+            "splash": {
+                "image": "./assets/images/logo-dark.png",
+                "resizeMode": "contain",
+                "backgroundColor": "#000000"
+            },
+            "predictiveBackGestureEnabled": false,
+            "package": "com.cleanwhiplash.movierec"
+        },
+        "web": {
+            "output": "static",
+            "favicon": "./assets/images/favicon.png",
+            "backgroundColor": "#000000",
+            "themeColor": "#000000"
+        },
+        "plugins": [
+            "expo-router",
+            [
+                "expo-splash-screen",
+                {
+                    "backgroundColor": "#000000",
+                    "android": {
+                        "image": "./assets/images/logo-dark.png",
+                        "imageWidth": 120
+                    }
+                }
+            ],
+            [
+                "expo-font",
+                {
+                    "fonts": [
+                        "./assets/fonts/Nexa-ExtraLight.ttf",
+                        "./assets/fonts/Nexa-Heavy.ttf",
+                        "./assets/fonts/Ionicons.ttf"
+                    ]
+                }
+            ],
+            "expo-sqlite",
+            "expo-video",
+            "expo-notifications"
+        ],
+        "experiments": {
+            "typedRoutes": true,
+            "reactCompiler": true
+        },
+        "extra": {
+            "router": {},
+            "eas": {
+                "projectId": "05c39085-4432-41c2-ab55-7712ca7e5949"
+            },
+            "auth0": {
+                "domain": "dev-f1sh805deicgcvgx.us.auth0.com",
+                "clientId": "gDmyTowdSaKu5Tt6yKK0WC5oRyhI520X",
+                "audience": ""
+            },
+            "EXPO_PUBLIC_TMDB_API_KEY": "",
+            "EXPO_PUBLIC_ML_API_URL": "http://192.168.21.69:8008",
+            "EXPO_PUBLIC_CLOUDINARY_CLOUD_NAME": "dgbciucw7",
+            "EXPO_PUBLIC_CLOUDINARY_UPLOAD_PRESET": "MOVIE1",
+            "EXPO_PUBLIC_BACKEND_URL": "https://movie-rec-sbf1.onrender.com",
+            "EXPO_PUBLIC_CINEMA_WS_URL": "wss://movie-rec-sbf1.onrender.com/ws",
+            "EXPO_PUBLIC_CINEMA_EMPTY_IMAGE_URL": "",
+            "EXPO_PUBLIC_ADMIN_AUTH0_SUBS": "",
+            "EXPO_PUBLIC_ADMIN_EMAILS": "",
+            "EXPO_PUBLIC_TMDB_TOKEN": ""
+        },
+        "owner": "cleanwhiplash"
+    }
 }

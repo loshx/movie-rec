@@ -30,6 +30,12 @@ ml/.venv/Scripts/activate
 pip install -r ml/requirements.txt
 ```
 
+## Local secrets and private config
+
+1. Copy `.env.example` to `.env` and fill in the values you actually use.
+2. Keep `android/app/google-services.json` only on your machine, or provide it to EAS through the `GOOGLE_SERVICES_JSON` file secret.
+3. Do not commit runtime tokens or local service files back into Git.
+
 ## Start everything (recommended)
 
 ### Android phone via USB (most stable)
