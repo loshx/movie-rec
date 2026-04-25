@@ -35,6 +35,8 @@ import {
   getTvById,
   posterUrl,
   searchMulti,
+  SPECIAL_GENRE_ANIME,
+  SPECIAL_GENRE_CARTOON_MOVIES,
   Movie,
   SearchMediaResult,
   TvShow,
@@ -88,7 +90,8 @@ let homeSnapshot: HomeSnapshot | null = null;
 
 const GENRES = [
   { id: 27, name: 'Horror' },
-  { id: 16, name: 'Anime' },
+  { id: SPECIAL_GENRE_ANIME, name: 'Anime' },
+  { id: SPECIAL_GENRE_CARTOON_MOVIES, name: 'Cartoon Movies' },
   { id: 35, name: 'Comedy' },
   { id: 28, name: 'Action' },
   { id: 18, name: 'Drama' },

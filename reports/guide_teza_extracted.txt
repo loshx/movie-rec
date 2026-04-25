@@ -1,0 +1,2610 @@
+
+
+=== PAGE 1 ===
+ACADEMIA DE STUDII ECONOMICE DIN MOLDOVA 
+DEPARTAMENTUL  
+TEHNOLOGIA INFORMAȚIEI ȘI MANAGEMENT INFORMAȚIONAL 
+ZGUREANU Aureliu, PRISĂCARU Anatolie,  
+OPREA Serghei, PRISĂCARU Andrian, LOZAN Victoria 
+GHID METODIC 
+privind elaborarea și susținerea 
+proiectului de an, tezei de licență și tezei de master 
+pentru specialitățile: 
+0410.4 Cibernetică şi informatică economică  
+0613.1 Tehnologia informaţiei  
+0613.2 Securitate informaţională 
+0613.5 Informatică aplicată 
+pentru programele de master: 
+Securitatea sistemelor informatice 
+Management informațional 
+Tehnologii informaționale în economie 
+Chișinău -  2022 
+
+=== PAGE 2 ===
+2 
+ 
+CZU: 378(076.5) 
+G 49 
+ 
+Ghidul metodic privind elaborarea și susținerea „PROIECTULUI DE AN, TEZEI DE LICENȚĂ 
+ȘI TEZEI DE MASTER ‖ a fost examinat și recomandat la ședinț a Comisiei Metodice a Facultății 
+„Tehnologii Informaționale și Statistică Economică‖ (proces-verbal nr. 4 din 03.10.2022), la ședința 
+Departamentului „ Tehnologia Informației și Management Informațional ‖ (proces-verbal nr. 1  din 
+30.08.2022). 
+Recenzenți:  
+Costaș Ilie, dr.hab., prof.univ. 
+Pârțachi Ion, dr., prof.univ. 
+ 
+© Autori: 
+ 
+© Aureliu ZGUREANU  
+© Anatolie PRISĂCARU  
+© Serghei OPREA 
+© Andrian PRISĂCARU 
+© Victoria LOZAN 
+ 
+ISBN 978-9975-155-99-1 (PDF). 
+ 
+© 2022 . Autorii lucrării. Toate drepturile rezervate. R eproducerea integrală sau parțială a 
+textului, prin orice mijloace, fără acordul autorilor sau al Serviciului Editorial -Poligrafic al 
+ASEM, este interzisă și se pedepsește conform legii.  
+ 
+© Serviciul Editorial-Poligrafic al ASEM
+Descrierea CIP a Camerei Naţionale a Cărţii  
+ 
+Ghid metodic privind elaborarea și susținerea proiectului de an, tezei de licență și tezei de 
+master / Zgureanu Aureliu, Prisăcaru Anatolie, Oprea Serghei, Prisăcaru Andrian și Lozan Victoria; 
+Academia de Studii Economice din Moldova, Departamentul Tehnologia Informației și Management 
+Informațional. – Chişinău : ASEM, 2022. – 68 p. : fig., tab. 
+Cerinţe de sistem: PDF Reader. 
+Referinţe bibliogr.: p. 46 (8 tit.). 
+ISBN 978-9975-155-99-1 (PDF). 
+378(076.5) 
+G 49 
+ 
+
+=== PAGE 3 ===
+3 
+ 
+CUPRINS 
+I. ELABORAREA ȘI SUSȚINEREA PROIECTULUI DE AN ............................................................... 5 
+1.1. Alegerea temei proiectului de an ............................................................................................................... 6 
+1.2. Etapele elaborării proiectului de an .................................................................................................... 6 
+1.3. Structura și conținutul proiectului de an ............................................................................................. 9 
+1.4. Rolul conducătorului științific ............................................................................................................ 12 
+1.5. Atribuțiile șefului departamentului ................................................................................................... 12 
+1.6. Reguli privind redactarea proiectului de an ..................................................................................... 13 
+1.7. Exigențe etice ....................................................................................................................................... 14 
+1.8. Prezentarea și evaluarea proiectului de an ....................................................................................... 15 
+1.8.1. Prezentarea la departament a proiectului de an ...................................................................... 15 
+1.8.2. Evaluarea proiectului de an ....................................................................................................... 15 
+II. ELABORAREA ȘI SUSȚINEREA TEZEI DE LICENȚĂ ................................................................ 17 
+2.1. Etapele elaborării tezei de licență ........................................................................................................... 17 
+2.1.1. Alegerea temei tezei de licență ......................................................................................................... 17 
+2.1.2. Elaborarea tezei de licență ............................................................................................................... 18 
+2.2. Structura, conţinutul şi volumul tezei de licenţă .............................................................................. 19 
+2.3. Cerințe specifice către tezele în domeniul IT .................................................................................... 23 
+2.4. Cerinţe referitoare la redactarea tezei de licenţă ............................................................................. 28 
+2.5. Exigenţe etice ....................................................................................................................................... 29 
+2.6. Procedura de admitere la susţinerea tezei de licenţă ....................................................................... 30 
+2.7. Susţinerea tezei de licenţă ................................................................................................................... 31 
+2.8. Evaluarea studentului la examenul de licenţă .................................................................................. 31 
+2.9. Susținerea repetată .............................................................................................................................. 33 
+III. ELABORAREA ȘI SUSȚINEREA TEZEI DE MASTER .............................................................. 34 
+3.1. Alegerea temei tezei de master ........................................................................................................... 35 
+
+=== PAGE 4 ===
+4 
+ 
+3.2. Responsabilitățile masterandului pentru elaborarea și prezentarea tezei de master ................... 35 
+3.3. Activitatea conducătorului științific .................................................................................................. 36 
+3.4. Atribuțiile șefului departamentului de profil ........................................................................................ 37 
+3.5. Structura, conținutul și volumul tezei de master .............................................................................. 38 
+3.6. Cerințe referitoare la perfectarea tezei de master............................................................................ 41 
+3.6.1. Exigențe de perfectare ................................................................................................................ 41 
+3.6.2. Recomandări stilistice ................................................................................................................. 42 
+3.6.3. Exigențe etice ..................................................................................................................................... 42 
+3.7. Procedura de înregistrare și admitere la susținerea tezei de master ................................................... 43 
+3.8. Susținerea tezei de master ....................................................................................................................... 44 
+3.9. Criteriile de evaluare ............................................................................................................................... 44 
+3.10. Susținerea repetată ................................................................................................................................. 45 
+REFERINȚE BIBLIOGRAFICE .................................................................................................................. 46 
+ANEXE ............................................................................................................................................................. 47 
+Anexa 1. Cererea privind aprobarea temei................................................................................................... 47 
+Anexa 1.2. Cererea privind aprobarea temei tezei de licență...................................................................... 48 
+Anexa 2. Planul calendaristic de elaborare a lucrării .................................................................................. 50 
+Anexa 2.1. Planul calendaristic de executare a tezei de licență ................................................................... 50 
+Anexa 3. Foaie de titlu..................................................................................................................................... 52 
+Anexa 4. Cuprins (Model) .............................................................................................................................. 55 
+Anexa 5. Declarația privind propria răspundere ......................................................................................... 58 
+Anexa 6. Modele de prezentare a referințelor bibliografice în conformitate cu standardul SM ISO 
+690:2012 Informare și documentare. Reguli pentru prezentarea referinţelor bibliografice şi citarea 
+resurselor de informare .................................................................................................................................. 60 
+Anexa 7. Modele de reprezentare și numerotare a tabelelor, figurilor și formulelor ............................... 63 
+Anexa 8. Avizul conducătorului științific ...................................................................................................... 66 
+ 
+
+=== PAGE 5 ===
+5 
+ 
+I. ELABORAREA ȘI SUSȚINEREA PROIECTULUI DE AN 
+ 
+În acest compartiment al  Ghidului sunt stabilite regulile generale privind documentarea, 
+elaborarea și susținerea proiectelor de an  în cadrul departamentului Tehnologia Informației și 
+Management Informațional, ASEM.  Elaborat în conformitate cu Ghidul privind elaborarea și 
+susținerea tezei de licență, ASEM [4]. 
+Proiectul de an este o formă de evaluare obligatorie în cadrul studiilor superioare de licență, 
+Ciclul I, reprezentând o lucrare teoretico-aplicativă realizată de student, ce abordează  probleme 
+actuale din domeniul de formare profesională.  Scopul elaborării proiectului de an este aprofundarea 
+competenţelor obţinute în domeniul tehnologiilor informaționale  prin realizarea unei cercetări 
+independente. Proiectul de an  reprezintă rezultatul c umulativ al activităţilor de la câteva cursuri, 
+fiind considerat un produs interdisciplinar, care nu este atribuit unei unităţi de curs. Este elaborat în 
+limba română sau în limba în care studentul studiază și creditat cu 3 ECTS. 
+În r ezultatul elaborării p roiectului de an , studenţii vor dezvolta competenţele generale şi 
+profesionale necesare viitorilor specialişti IT: 
+ aprofundarea cunoștințelor teoretice în domeniul tehnologiilor informaționale; 
+ sistematizarea şi compara rea situaţiilor existente sau potenţi ale în domeniul de formare 
+profesională;  
+ colectarea, analizarea și interpretarea informației referitoare la subiectul cercetat; 
+ identificarea elementelor comune sau de diferenţiere a situaţiilor analizate, generând pe baza 
+acestora soluții practice și ipoteze de cercetare; 
+ utilizarea metodelor de implementa re actuale în procesul de realizare a soluțiilor practice , 
+corespunzătoare domeniului; 
+ analizarea critică şi propunerea ideilor noi şi complexe; 
+ propunerea soluţiilor inovatoare şi creative, fundamentate ştiinţific; 
+ contribuirea la promovarea dezvoltării economice, sociale şi culturale în contextual unei 
+societăţi bazate pe cunoaştere; 
+ utilizarea eficientă a resurselor și tehnicilor de învățare pentru dezvoltarea personală și 
+profesională; 
+ elaborarea algoritmilor și realizarea produselor software; 
+ elaborarea și utilizarea unor metode de testare, verificare și evaluare; 
+ dezvoltarea aplicațiilor; 
+ formarea abilității de lucru independent. 
+Proiectul de an este elaborat de student în mod individual. 
+Proiectul de an reprezintă o lucrare de sinteză, care demonstrează capacitatea de cercetare a 
+unei probleme cu identificarea soluțiilor și prezentarea rezultatelor conform unor reguli bine 
+determinate. 
+În cadrul proiectului de an, trebuie să fie clar identificabile c ontribuțiile propri i ale 
+studentului, care includ atât analiza și interpretarea literaturii de specialitate consultate, cât și 
+elementele de noutate introduse (prin elaborarea de algoritmi, software, etc.). 
+
+=== PAGE 6 ===
+6 
+ 
+1.1. Alegerea temei proiectului de an 
+Activitatea de lucru asupra proiectului de an debutează cu alegerea domeniului de cercetare a 
+lucrării, care poate fi selectat din tematica orientativă propusă de cadrele didactice ale 
+departamentului, sau poate fi propusă de către student în funcţie de interesele pe rsonale, fiind 
+corelată cu unitățile de curs corespunzătoare din planurile de învățământ și discutată cu conducătorul 
+științific. Planul proiectului de an este elaborat de către student în conlucrare cu conducătorul 
+ştiinţific se aprobă la şedinţa departamentului. 
+Teza de licenţă/masterat de regulă relevă continuarea, completarea, extinderea studiilor 
+iniţiate în cadrul proiectului de an.  
+Selectarea domeniului şi identificarea problemei de cercetare se realizează în baza 
+următoarele criterii:  
+ actualitatea şi impactul socio-economic al investigaţiilor realizate; 
+ interesul anterior demonstrat pentru problema dată; 
+ aptitudini personale de cercetare, analiză, realizare, prezentare, etc.; 
+ posibilităţi de documentare. Este necesar de a ţine cont de timpul prevăz ut pentru 
+elaborarea proiect ului şi de a analiza posibilităţile de documentare atât în plan teoretic 
+(literatura de specialitate), cât şi în plan practic; 
+ posibilitatea dezvoltării temei de cercetare la nivelul ulterior al carierii profesional - 
+ştiinţifice a studentului; 
+Pentru aproba rea temei proiectului de an, studentul completează şi prezintă şefului 
+departamentului o cerere (Anexa 1.1), în care se indică tema proiectului de an aleasă şi conducătorul 
+ştiinţific. Studentul beneficiază de dreptul de a soli cita schimbarea temei proiectului de an o singură 
+dată. Schimbarea temei proiectului se aprobă de către departamentul de specialitate  şi nu implică 
+modificarea duratei studiilor sau elaborării proiectului.  
+Titlul proiectului de an este formulat de coordonator, trebuie să fie concis, fără acronime 
+(neconsacrate) și să descrie subiectul și/sau aspectul supus studiului în mod precis, astfel încât să 
+poată fi înțeles și de un nespecialist. Titlul lucrării în mod obligatoriu trebuie să conțină un verb care 
+indică aria de activitate acoperită de proiectul de an. 
+1.2. Etapele elaborării proiectului de an 
+Procesul de elaborare şi susţinere a proiectului de an include următoarele etape de bază: 
+I. Familiarizarea studentului cu tematica proiectelor propusă de departament  
+Familiarizarea studentului cu lista temelor pentru proiectul de an se realizează în primele 
+săptămâni a anului de studiu. 
+ 
+II. Alegerea temei proiectului de an şi desemnarea conducătorului ştiinţific  
+Studentul își alege tema în conformitate cu interesele person ale și o validează împreună cu 
+conducătorul științific desemnat. 
+
+=== PAGE 7 ===
+7 
+ 
+Conducător ştiinţific al proiectului de an poate fi: profesor universitar, conferenţiar 
+universitar sau lector universitar din cadrul departamentului de specialitate, cercetător ştiinţific di n 
+instituţiile de cercetare, specialişti din economia naţională. Criteriile importante în alegerea 
+conducătorului de proiect sunt: nivelul academic, capacitatea unei comunicări libere, bazată pe 
+respect şi apreciere reciprocă între student şi coordonatorul  proiectului. Conducătorul ştiinţific este 
+aprobat la şedinţa departamentului, în baza cererii depuse de student (Anexa 1.1). 
+III. Documentarea ştiinţifică 
+Consultarea literaturii de specialitate reprezintă o etapă importantă în procesul de realizare a 
+proiectului de an. Această fază de lucru impune o analiză profundă a  surselor de documentare 
+disponibile: cărţi, monografii, reviste științifice de profil, articole , publicaţii  în materialele 
+conferințelor, brevete de invenție etc., publicate atât din țară, cât și  de peste hotare. O atenție 
+deosebită se va acorda publicațiilor din ultimii ani. În baza acestui studiu se va prezenta o analiză 
+comparativă a situației existente în domeniu temei abordate. Astfel, studentul va obține posibilitatea 
+acumulării informațiilor necesare pentru realizarea proiectului. Este important ca studentul să 
+demonstreze capacitatea de a integra diverse contribuții teoretice în unități tematice cu privire la 
+subiectul studiat și de a se raporta critic și independent la acestea.  Bibliografia lucrării se stabileşte 
+de către student în comun cu conducătorul ştiinţific. Pe parcursul desfăşurării etapei de documentare 
+studentul realizează selectarea, ordonarea şi prelucrarea datelor şi informaţiilor colectate.  
+Activitatea de documentare include : documentarea teoretică  şi documentarea de tip  
+aplicativ. Documentarea teoretică face trimitere la teorii, concepte şi perspective asupra tematicii 
+alese, pe când documentarea practică face trimitere la soluțiile existente și aplicații practice, ce țin 
+de problema abordată. 
+IV. Stabilirea structurii proiectului de an 
+Planul provizoriu al proiectului de an se realizează de student cu sprijinul conducătorului 
+științific. După colectarea informației, î n urma documentării  detaliate pe tema lucrării, cât şi 
+obținerea propriilor rezultate în baza studiului teoretic sau în baza utilizării aplicațiilor practice, este 
+întocmit planul definitiv al proiectului.  La întocmirea planului se recomandă ca proiectul de an să 
+conțină: 
+- Introducere, 2 Capitole, Concluzii, Bibliografie şi Anexe; 
+- fiecare capitol să cuprindă 2-3 subcapitole; 
+- denumirea capitolelor nu trebuie să dubleze denumirea temei, iar denumirea 
+subcapitolelor nu dublează denumirea capitolului. 
+Pentru a reflecta nivelul de pregătire teoretică și practică a studentul ui, conținutul lucrării 
+trebuie să fie organizat distinct pe două componente, și anume: componenta teoretică sau 
+conceptuală (se referă la stadiul actual al cunoașterii, prezentând aspecte necesare pentru 
+fundamentarea problemei abordate în lucrare și solu țiilor adoptate), respectiv, componenta 
+practică/aplicativă (conține una sau mai multe aplicații realizate de autor, care răspund obiectivelor 
+lucrării). Componenta teoretică demonstrează gradul de informare deținut de student și oferă 
+modelele teoretice a pelate, metodele utilizate, criteriile adoptate, tehnologiile folosite etc., 
+prezentate în formă de sinteză coerentă, constituind fundamentarea teoretică a lucrării. Componentă 
+
+=== PAGE 8 ===
+8 
+ 
+aplicativă sau practică necesită identificarea/formularea unor soluții cu aplic abilitate vis -à-vis de 
+problemele vizate în lucrare și se bazează pe un ansamblu de cunoștințe teoretice pe care le 
+integrează în scopul atingerii obiectivului lucrării. Având în vedere specificul programului de studii, 
+conținutul lucrării trebuie să prezinte echilibrat cele două componente, punând însă accent pe partea 
+aplicativă, adică pe contribuția propriu -zisă a studentului la tema abordată. Partea teoretică este 
+expusă în primul capitol al lucrării, iar cea aplicativă – în capitolul doi. Toate codurile relevante se 
+vor regăsi în anexele proiectului. 
+V. Colectarea, analiza, interpretarea datelor cu caracter practic 
+Informaţiile cu caracter practic/analitic pot fi obţinute atât de la  întreprinderile şi 
+organizaţiile care constituie obiectul de cercetare în  lucrare (note informative, rapoarte, facturi, dări 
+de seamă ale diferitelor   compartimente, servicii etc.), cât şi din diferite surse externe de informaţii 
+(materiale ale diferitor întreprinderi, instituții, asociații, rapoarte şi studii, publicaţii în mass media 
+etc.). Informaţia cu caracter practic, de asemenea, poate fi obţinută  prin consultarea specialiştilor, 
+precum şi realizarea unor cercetări primare de observarea și analiză. 
+VI. Pregătirea parţii textuale şi Redactarea proiectului de an 
+Pregătirea părţii textuale a proiectului include elaborarea capitolelor, formularea concluziilor 
+şi recomandărilor. Cerinţele privind redactarea proiectului de an sunt prezentate în subpunctul 1.6 al 
+prezentului Ghid. 
+VII. Depunerea proiectului de an la departamentul de specialitate 
+VIII. Verificarea proiectului de an de către conducătorul ştiinţific 
+IX. Întoarcerea proiectului de an verificat studentului şi  pregătirea pentru susţinere 
+Notă: Dacă este necesar, studentul va face corectările de rigoare, prezentând  repetat lucrarea 
+conducătorului. 
+X. Susţinerea proiectului de an 
+Planul calendaristic de realizare al proiectului de an (prezentat în tabelul 1 .1) structurează 
+activităţile de lucru asupra proiectului, identificând toate etapele și perioada de realizare a acestora. 
+Tabelul 1.1. Plan calendaristic de realizare al proiectului de an 
+Nr. 
+crt. Etapele Termenul de realizare 
+1 Familiarizarea cu tematica tezelor de an propusă de 
+departament 
+1-2 săptămână a anului de 
+studiu 
+2 Alegerea temei proiectului de an şi desemnarea 
+conducătorului ştiinţific 
+2-4 săptămână a anului de 
+studiu 
+3 Documentarea ştiinţifică 8-10 săptămâni 
+4 Stabilirea structurii proiectului de an 1-2 săptămâni 
+ 
+
+=== PAGE 9 ===
+9 
+ 
+Continuarea Tabelului 1.1
+Nr. 
+crt. Etapele Termenul de realizare 
+5 Colectarea, analiza, interpretarea datelor cu caracter 
+practice. Definitivarea structurii proiectului de an. 
+8-10 săptămâni 
+6 Pregătirea parţii textuale şi Redactarea proiectului de 
+an 
+4-6 săptămâni 
+7 Depunerea proiectului de an la departamentul de 
+specialitate 
+cu cel puţin 2 săptămâni 
+până la începerea 
+sesiunii de examene 
+ 
+8 Verificarea proiectului de an de către conducătorul 
+ştiinţific 
+cu cel puţin 2 săptămâni 
+până la începerea 
+sesiunii de examene 9 Întoarcerea proiectului de an verificat studentului şi  
+pregătirea pentru susţinere 
+10 Susţinerea proiectului de an cu cel puţin 1 săptămână până 
+la începerea sesiunii de 
+examen 
+1.3. Structura și conținutul proiectului de an 
+Conform Deciziei Senatului ASEM nr. 4/8 din 25 martie 2009 [6], volumul proiectului de an este 
+de 25 - 35 pagini. Structura şi volumul recomandat al proiectului de an sunt prezentate în tabelul 1.2. 
+Tabelul 1.2. Structura şi volumul recomandat al proiectului de an 
+Nr. 
+crt. Denumirea compartimentului Volum, pagini 
+1 Foaie de titlu 1 
+2 Cuprins 1 
+3 Introducere 1-2 
+4 Capitolul 1 (partea teoretică) 10-15 
+5 Capitolul 2 (partea aplicativă) 15-20 
+6 Concluzii 2-3 
+7 Referințe bibliografice 2-3 
+8 Anexe nu mai mult de 1/3 din 
+conținutul proiectului 
+Foaia de titlu 
+Foaia de titlu a proiectului  de an va conține următoarea informație: sigla și denumirea 
+instituției de învățământ; denumirea facultății și departamentul de specialitate; titlul proiectului de 
+an; autorul; conducătorul științific; localitatea și anul elaborării lucrării. Un model de foaie de titlu 
+este prezentat în Anexa 3.1. 
+
+=== PAGE 10 ===
+10 
+ 
+În caz că proiectul de an este scris în altă limbă decât cea română, se vor perfecta două foi 
+de titlu, prima fiind în limba română . 
+Cuprins 
+În Cuprins sunt menţionate toate capitolele şi subcapitolele proiectului  de an cu precizarea 
+paginilor la care acestea pot fi găsite (Anexa 4.1). Cuprinsul poate fi generat aplicând opţiunile 
+Microsoft Word-ului (Insert, References, Index and Tables). 
+Introducere 
+Introducerea are rolul de a informa cititorul/evaluatorul despre  conținutul și obiectivele 
+lucrării. În această parte a lucrării se vor prezenta, pe scurt, următoarele aspecte: încadrarea lucrării 
+într-un domeniu tematic, motivația alegerii temei, gradul de noutate a temei,  scopul și obiectivele 
+generale ale lucrării, metodologia de cercetare folosită, structura lucrării – descrierea succintă a 
+capitolelor și a legăturii dintre ele, precum și eventualele limite ale lucrării. Volumul introducerii nu 
+trebuie să depășească 2 pagini. 
+Conținutul de bază 
+Conținutul lucrării se structurează pe capitole – 2, fiecare având câte 2-3 subcapitole aranjate 
+într-o succesiune logică. Denumirea unităților structurale ale lucrării va reflecta conținutul acestora. 
+Fiecare capitol al proiectului se recomandă să fie finalizat cu concluzii. Conținutul proiectului 
+trebuie să coreleze totalmente cu tema  lucrării, fiind reflectat și în cuprinsul acest uia. În scopul 
+expunerii logice/coerente a conținutului poate fi recomandată următoarea structură: partea teoretică 
+(analiza situației în domeniul abordat în proiec t, metodologia și obiectivele studiului/cercetării 
+realizat) și partea practică/aplicativă (soluționarea practică a problemei abordate în proiect). 
+Proiectul de an este orientat spre crearea sistemelor informatice, software -lor, programelor, 
+etc. De aceea, Se admite modificarea conținutului de bază a lucrărilor în conformitate cu cerințele 
+standardelor în vigoare. Se încurajează implementarea acestora în practica reală a organizațiilor 
+Partea teoretică 
+Cadrul teoretic este reflectat în prim ul capitol al proiectului de an.  Acest compartiment 
+conține o analiză profundă a literaturii de specialitate la tema proiectului. În baza acestui studiu se 
+va prezenta o analiză comparativă a situației existente în domeniu, se vor formula scopul și 
+obiectivele proiectului. Selecția și analiza surselor teoretice se va face în susținerea procesului de 
+elaborare a ipotezelor care vor sta la baza propriei cercetări. Este important ca studentul să 
+demonstreze capacitatea de a integra diverse contribuții teoretic e în unități tematice cu privire la 
+subiectul studiat și de a se raporta critic și independent la acestea.  
+Volumul acestui compartiment va fi de 10-15 pagini. 
+Partea practică/aplicativă 
+În capitolul doi al proiectului, se cercetează/investighează/analizea ză ipoteza/ipotezele 
+formulate, se argumentează elaborările realizate de către autor (algoritmi, metode, sisteme, modele 
+etc.). Partea practică/aplicativă a proiectului de an conține una sau mai multe aplicații realizate de 
+autor care răspund obiectivelor lucrării și au ponderea cea mai mare a acesteia. În acest 
+compartiment se prezintă rezultatele realizărilor practice, descriind complexitatea acestora și 
+
+=== PAGE 11 ===
+11 
+ 
+eficiența implementării. Acest capitol trebuie să reflecte contribuția propriu zisă a autorului la tem a 
+abordată și capacitatea lui de a aplica în mod creativ cunoștințele sale teoretice. Capitolul se 
+recomandă să fie finalizat cu concluzii. Volumul capitolului va fi de 15-20 de pagini. 
+Concluzii 
+Concluziile conțin prezentarea succintă a principalelor rezu ltate obținute în lucrare  de către 
+student. Pot fi menționate și eventuale probleme rămase deschise, precum și propuneri privind 
+potențialele direcții viitoare de cercetare legate de tema abordată.  
+Tot aici, s e pot face aprecieri cu privire la dificultăți le întâmpinate pe parcursul cercetării, 
+eventualele puncte slabe ale acesteia, care vor trebui evitate în viitor, precum și deschideri către alte 
+direcții de cercetare legate de subiectul respectiv. 
+Concluziile enunţate se bazează pe materialul prezentat în compartimentele de bază ale 
+proiectului de an şi prezintă modul în care  scopul şi obiectivele indicate în Introducere au fost 
+realizate. Volumul acestui compartiment este de 2-3 pagini. 
+Referințe bibliografice 
+Acest compartiment indică volumul și calitat ea documentării teoretice a studentului pentru 
+elaborarea proiectului de an. Nu se permite indicarea titlurilor care  nu au fost consultate. De 
+asemenea, toate sursele citate în textul lucrării trebuie să se regăsească în lista bibliografică. 
+Lista cu r eferințe b ibliografice trebuie să includă 15 -20 de surse, aranjate în ordinea  
+alfabetică a primului cuvânt din referinţă (nume de familie a autor, primul cuvânt  din titlu). Mai 
+întâi, se ordonează referinţele cu caractere latine (româneşti şi străine),  apoi cele cu  caractere 
+chirilice. În cazul referințelor bibliografice de pe Internet, se indică adresa co mpletă cu precizare 
+între paranteze a datei accesării adresei respective. 
+Perfectarea referințelor bibliografice se realizează conform regulilor de prezentare  a 
+referințelor bibliografice și a citării resurselor de informare, stipulate în SM ISO 690:2012 
+Informare și documentare. ,,Reguli pentru prezentarea referințelor bibliografice și citarea resurselor 
+de informare‖, aprobat de către Institutul de Standardizare din Moldova (Anexa 6). 
+Anexe 
+În anexe se introduc informații, care nu sunt imediat necesare în textul lucrării, pentru ca 
+aceasta să fie înțeleasă sau care, dacă ar fi fost introduse în text, ar fi îndepărtat cititorul de la 
+cursivitatea ideilor.  Dar, care completează ideile expuse în proiectul  de an, la ele făcându -se 
+referinţe pe parcursul lucrării. Aici pot fi incluse listingurile programelor elaborate, algoritmi de 
+programe, scheme-bloc, sistematizări de rezultate sub forme de tabele etc. 
+Anexele nu se includ în volumul lucrării şi sunt expuse în ordinea în care sunt făcute referinţe 
+în textul de bază. Fiecare anexă se plasează din pagină nouă și  se indică, dacă e cazul, titlu şi sursa de 
+unde a fost preluat documentul respectiv. 
+
+=== PAGE 12 ===
+12 
+ 
+1.4. Rolul conducătorului științific 
+Pentru monitorizarea activității de elaborare a proiectului de an șeful departamentului 
+desemnează conducătorul științific. Conducătorul științific al proiectului de an se stabilește la 
+solicitarea studentului în limitele sarcinii didactice di sponibile, iar tema proiectului de an se va 
+încadra în aria de competențe profesionale ale acestuia. Conducătorul lucrării duce responsabilitate 
+de structura și integritatea conținutului proiectului de an. 
+Obligațiile conducătorului științific al proiectului de an includ: 
+ familiarizarea studentului cu prevederile prezentului ghid; 
+ consultarea studentului în stabilirea direcţiilor care vor fi studiate  în cadrul proiectului şi a 
+metodelor de cercetare;  
+ acordarea asistenței la toate etapele de elaborare a lucrării;  
+ coordonarea elaborării planului și graficului calendaristic de îndeplinire a proiectului de an;  
+ recomandarea surselor bibliografice la tema cercetată;  
+ consultarea studentului în procesul de elaborare a proiectului  de an, în orele de serviciu, de  
+fiecare dată când acesta solicită;  
+ verificarea periodică a îndeplinirii graficului de elaborare a proiectului conform planului 
+calendaristic;  
+ aprecierea calităţii conţinutului proiectului de an; 
+ admiterea sau respingerea proiectului de an spre susţinere; 
+ participarea la evaluarea finală a proiectului în urma susținerii acestuia în faţa Comisiei de 
+susţinere. 
+Notă: Studentul, în calitate de autor, este singurul care poartă  responsabilitate pentru exactitatea 
+şi veridicitatea tuturor datelor prezentate în lucrare. 
+1.5.  Atribuțiile șefului departamentului 
+Pentru facilitarea procesului elaborării, prez entării și sus ținerii proiectului de an , șeful 
+departamentului are următoarele responsabilități: 
+ desemnarea conducă torului științific în timp de p ână la 2 s ăptămâni după încheierea 
+termenului de depunere a cererilor de către studenți; 
+ plasarea informației privind aprobarea temelor și conducătorilor proiectelor de an  pe pagina 
+WEB a departamentului sau pe panoul de avize a departamentului; 
+ aprobarea/ respingerea solici tării de modificare a temei proiectului, cu 3 luni p ână la 
+începutul sesiunii de susținere a proiectelor; 
+ asigurarea interdisciplinarității și revizuirea anuală a tematicilor nominale propuse pentru 
+elaborare; 
+ elaborarea măsurilor de îmbunătățire continuă a calității proiectelor de an; 
+ asigurarea metodică a procesului de elaborare a proiectelor de an prin organizarea grupurilor 
+de lucru în vederea elaborării/ reactualizării materialelor didactice, îndrumare, ghiduri etc. 
+ 
+
+=== PAGE 13 ===
+13 
+ 
+1.6. Reguli privind redactarea proiectului de an 
+Proiectul trebuie redactat într -un limbaj impersonal, caracteristic lucrărilor științifice. 
+Enunțurile trebuie să fie clar e și concis e. Informațiile se  vor prezenta coerent și corect , într -o 
+structură logică bine definită. Nu se admit greșeli gra maticale și de editare, în acest scop, se v or 
+utiliza instrument ele Set Proofing Language...  (se selectează limba română) și apoi Spelling 
+&Grammar. Pentru scrierea corectă, dacă e cazul, studentul va utiliza dicționarul explicativ al limbii 
+române (https://dexonline.ro).  
+Limbajul și terminologia utilizate sunt specifice domeniului tehnologiilor informaționale. Se 
+va evita utilizarea omonimelor, expresiilor interpretabile sau ambigue. Toate abrevierile utilizate în 
+text vor fi definite. O documentare mai detaliată privind redactarea corectă a unei lucrării, po ate fi 
+realizată consultând sursele [7, 8]. 
+Pentru redactarea proiectului de an se va ține cont de următoarele cerințe: 
+ Proiectul se editează pe hârtie albă, format A 4,  pe o singură parte a foii. Paginile au câmp: 
+în stânga – 30 mm, în dreapta  – 15 mm, sus și jos – 25 mm. 
+ La perfectarea lucrării se foloseşte fontul Times New Rom an (TNR) cu dimensiunea 
+caracterelor de 12 puncte, spațiul între rânduri - 1,5 intervale. Textul se aliniază uniform 
+între margini (Justify). 
+ Titlul capitolelor se scriu cu litere majuscule (1 2 puncte, bold, centrat); subcapitolele — cu 
+minuscule, cu excep ția primei litere (12 puncte, bold, aliniere pe stânga). Capitolele și 
+subcapitolele se numerotează cu cifre arabe (ex., capitol - 1, subcapitol - 1.1). După 
+denumirea capitolului sau a subcapitolului nu se pune punct. Nu se utilizează  cuvintele 
+„Capitol‖, „Subcapitol‖ în titlul acestora. 
+ Fiecare capitol începe din pagină nouă, iar subcapitolele urmează succesiv. Ne se admite 
+sublinierea titlurilor. 
+ Toate paginile proiectului se numerotează, începând cu foaia de titlu și finisând cu ultima 
+pagină. Nu se adm ite lipsa acestora sau repetarea. Pe foia de titlul nu se indică numărul. 
+Numerotarea se realizează în câmpul de jos al paginii, centrat. 
+ Toate tabelele, formulele, figurile (scheme, diagrame, desene, imagini, fotografii etc.) se 
+numerotează, indicându-se numărul capitolului şi numărul de ordine a l acestora. De 
+exemplu, Tabelul 1.2 (tabelul doi din capitolul întâi). (Anexa 7) 
+ Denumirea tabelului se amplasează deasupra acestuia, se redactează cu bold, aliniat la 
+dreapta, iar denumirea figurii – sub figură, aliniat central. În mod obligatoriu este necesar de 
+indicat unităţile de măsură și sursele bibliografice. 
+ Formulele/ecuaţiile vor fi centrate, iar numerotarea acestora  se va plasa la sfârşitul rândului. 
+Explicaţia simbolurilor utilizate se prezintă imediat sub formulă în ordinea apariției în cadrul 
+acesteia. Modele de prezentare şi numerotare a tabelelor, figurilor şi formulelor sunt 
+prezentate în Anexa 7. 
+ Tabelul ce ocupă mai mult de 2/3 din pagină se plasează la Anexe. 
+ Dacă tabelul nu poate fi plasat pe o singură pagină, continuarea acestuia va începe cu indicarea 
+
+=== PAGE 14 ===
+14 
+ 
+„Continuare tabelul 1.2‖ și se va repeta prima linie ce conține etichetele coloanelor. 
+ Tabelele și figurile din anexe se numerotează luând în considerare numărul anexei, de 
+exemplu, Tabelul A 1.2 (tabelul 2 din Anexa 1). 
+ Înaintea semnelor de punctuație  (".", ";", ":",  "?", "!") nu se lasă spațiu. După, semnele de 
+punctuație, în mod obligatoriu, sunt urmate de un spaţiu. 
+ În mod obligatoriu, se utilizează literele cu diacritice specifice limbii române (ă, â, î, ş, ţ şi 
+majusculele lor). 
+ În proiect nu se admit însemnări, corecții, conturări de litere, ștersături, pete, ad ăugări la 
+pagină etc. 
+ Imprimarea proiectului pe h ârtie trebuie să fie calitativ ă. Lit erele, s emnele, formulele, 
+figurile trebuie să aibă aceeași intensitate pe parcursul rândului, paginii, lucrării în ansamblu, 
+iar indicii formulelor trebuie să fie lizibili. 
+ Proiectul de an se leagă prin copertare euro cu arc de plastic şi se prezintă la departament 
+într-un singur exemplar. 
+În baza Standardului SM ISO 690:2012 Informare şi documentare. Reguli pentru 
+prezentarea referinţelor bibliografice şi citarea resurselor de informare , referințele sunt inserate în 
+text între paranteze pătrate cu indicarea sursei la finele lucrării în Referințele bibl iografice (De 
+exemplu, ‖…vizualizator de algoritm…‖ [7, p. 35]). 
+În Referințe bibliografice: 
+7. Perhac, P., Simonak, S. Interactive System for Algorithm and Data Structure Visualization . 
+In: Computer Science Journal of Moldova. 2022, no.1(88), pp. 28-48. ISSN 1561-4042. 
+Referințele sunt inserate în lucrare cu ajutorul opțiunii Cross-reference, Microsoft Word. 
+ 
+1.7. Exigențe etice 
+Proiectul de an trebuie să reflecte integral munca studentului. Sursele bibliografice utilizate 
+vor fi menționate în lista referințelor b ibliografice și la acestea vor fi făcute referințe în text, în caz 
+contrar, studentul va fi învinuit de plagiat. 
+Potrivit Regulamentului ASEM privind prevenirea plagiatului  în rândul studenţilor/ 
+masteranzilor [3], se consideră situații de plagiat academic în următoarele cazuri: 
+ preluarea unor idei, date, texte care aparţin altei persoane, fără indicarea corectă/completă a 
+sursei; 
+ copierea unor pasaje integrale din diferite surse, în volum ce depășește 400 de cuvinte; 
+ evitarea menționării surselor originale pentru figuri, tabele, scheme, etc. 
+ prezența surselor bibliografice la care nu s-a făcut referință în textul lucrării. 
+ Preluarea și reproducerea lucrărilor altor autori şi prezentarea acestora ca fiind proprie. 
+Citarea permite identificarea publicației din care s -a extras citatul sau ideea analizată, fiind 
+component obligatorie a lucrărilor științifice. Prin citare se îndeplinesc obligațiile față de drepturile 
+de autor. Plagiatul este considerat о încă lcare a eti cii profesionale a savantului și potrivit  
+prevederilor Codului de Etică universitară al ASEM p. 4 art.  20, ‖plagierea se sancţionează cu  
+anularea examenului‖ [2]. 
+
+=== PAGE 15 ===
+15 
+ 
+ 
+1.8. Prezentarea și evaluarea proiectului de an 
+1.8.1. Prezentarea la departament a proiectului de an 
+Proiectul de an, semnat de autor, este prezentată la departamentul  Tehnologia Informației și 
+Management Informațional, cu cel puţin 2 săptămâni înainte de sesiune, şi înregistrat în Registrul 
+proiectelor de an. 
+Conducătorul ştiinţific, verifică lucrarea, în decurs de o săptămână, și ia decizia privin d 
+admiterea sau respingerea  acesteia. În caz că, proiectul este admis  spre susţinere, conducătorul 
+indică pe foaia de titlu a lucrării „ Admis spre susţinere ‖ și își fixe ază semnătura. După  care, 
+studentul se pregăteşte de susţinere, fiind anunţat prealabil despre data şi locul susţinerii. 
+În cazul unui aviz negativ, proiectul de an este returnat autorului pentru ca acesta să realizeze 
+corectările necesare, prezentând repe tat lucrarea conducătorului științific.  Studentul va ține cont, în 
+procesul perfectării, de observaţiile şi recomandările indicate de către conducător. 
+Proiectul de an nu se admite spre susținere în următoarele cazuri: 
+ conținutul lucrării nu reflectă tema, scopul și obiectivele acesteia; 
+ redactarea este realizată fără a se ține cont de regulile stipulate în acest capitol al Ghidului; 
+ proiectul nu include informații bine sintetizate, structurate și analizate, lipsind totalmente 
+expunerea logică a conținutului; 
+ contribuția personală a autorului lipsește și lucra rea nu prezintă nici o noutate/ valoare 
+științifică. 
+1.8.2.  Evaluarea proiectului de an 
+Proiectul de an se susţine cu cel puţin o săptămână până la începerea  sesiunii de examene. 
+Comisia de evaluare este const ituită din minimum  două cadre didactice, stabilite la nivelul 
+departamentului Tehnologia Informației și Management Informațional. 
+În timpul susţinerii proiectului de an, studentul va:  
+ argumenta actualitatea temei; 
+ prezenta scopul și obiectivele lucrării; 
+ justifica metodele de cercetare utilizate; 
+ expune conţinutul tezei; 
+ demonstra posedarea materialul teoretic utilizat; 
+ explica produsul elaborat; 
+ identifica complexitatea algoritmilor elaborați; 
+ argumenta concluziile şi recomandările formulate. 
+Studentul prezintă succint principalele idei ale proiectului de an (în timp de 5-7 min.) și 
+răspunde la întrebările adresate de către membrii comisiei.  
+Pentru aprecierea lucrării se ține cont de criteriile specificate în tabelul 1.3. 
+
+=== PAGE 16 ===
+16 
+ 
+Tabelul 1.3. Grilă de evaluare a proiectului de an 
+Nr. 
+crt. Criteriul de evaluare Punctajul 
+1 Calitatea conținutului proiectului 4 
+2 Respectarea regulilor de structurare ale proiectului conform 
+capitolului 1 al prezentului Ghid 
+1 
+3 Respectarea regulilor de redactare 1 
+4 Prezentarea proiectului 2 
+5 Răspunsurile la întrebări 2 
+Total 10 
+Proiectul de an este evaluat cu notă  care este inclusă în rezultatele sesiunii respective de 
+examinare. Nota acordată proiectului  se ia în considerare la calculul  mediei reuşitei academice a  
+studentului. Dacă punctajul acumulat conform grilei de evaluare a proiectului de an este cu zecimi 
+(de exemplu, total puncte 8,5), atunci nota se rotunjește în favoarea studentului (cu referire la 
+exemplu, nota 9).  Pentru acordarea punctajului și notei, membrii comi siei vor consulta 
+Regulamentul de organizare a studiilor superioare de licenţă (ciclul I) şi integrare [1, p. 14]. 
+
+=== PAGE 17 ===
+17 
+ 
+II. ELABORAREA ȘI SUSȚINEREA TEZEI DE LICENȚĂ 
+Studiile superioare de licență la specialitățile 0410. 4 Cibernetică şi informatică economică, 
+0613.1 Tehnologia informației, 0613.2 Securitate informațională  și 0613.5 Informatică aplicată  se 
+finalizează cu susținerea tezei de licență. 
+Teza de licență este o lucrare academică originală, cu caracter științific  sau aplicativ, 
+elaborată prin activitatea de cercetare sau proiectare independentă a studentului, care 
+reprezintă condiție obligatorie pentru acordarea unei calificări. 
+Teza de licență  are drept obiectiv evaluarea competenţelor absolvenţilor de a efectua 
+cercetări științifice, de a aplica cunoştinţe teoretice în procesul de elaborare a unor soluţii practice 
+specifice domeniului de formare profesională, de a redacta un material unitar respectând etapele de 
+cercetare a unei probleme teoretice, de proiectare a unor aplicații programate sau de soluționare a 
+unor probleme din domeniul tehnologiilor informaționale (IT). 
+Teza de licența este o lucrare de sinteză de calificare, care trebuie să trateze aspecte de 
+cercetare-elaborare-proiectare la o temă actuală din domeniul IT. Prin elaborarea şi susținerea tezei 
+de licență studentul demonstrează că posedă cunoștințele şi abilitățile necesare activității 
+profesionale ulterioare.  
+Teza de licenţă se elaborează în ultimul an al studiilor superioare de licenţă. Perioada  de 
+elaborare a tezei de licenţă este precedată de un stagiu de practică, care are drept scop consolidarea 
+cunoştinţelor teoretice, obţinute în ASEM, selectarea informaţiei necesare pentru elaborarea tezei de 
+licenţă şi, de asemenea, obţinerea unor abilităţi în domeniul de specializare. 
+Acest capitol al Ghidului Metodic este elaborat în baza recomandărilor din „ Ghidul privind 
+elaborarea și susținere tezelor de licență‖ al Academiei de Studii Economice din Moldova [4]. 
+Capitolul este adresat studenților, con ducătorilor științifici şi membrilor comisiilor pentru 
+examenul de licență.  
+2.1. Etapele elaborării tezei de licență 
+2.1.1. Alegerea temei tezei de licență 
+Tematica recomandată a tezelor de licență este propusă de către profesorii titulari ai 
+Departamentului Tehnologia Informației și Managementul Informațional (TIMI) și se aprobă anual  
+de Consiliul Facultății, fiind comunicată studenților, cel târziu, la finele penultimului an de studii. 
+Tematica recomandată este plasată pe pagina web a departamentului, fiind actualizată anual. 
+Pe parcursul lunii septembrie a anului terminal studentul selectează din lista temelor  propuse 
+tema tezei de licență. Se recomandă ca tema selectată să fie o continuare a cercetărilor efectuate de 
+student pe parcursul anilor de studi i la elaborarea proiectelor de an sau să fie conexă cu activitățile 
+profesionale ale studenților încadrați în câmpul muncii din cadrul companiilor IT. Studentul este în 
+drept să propună propria temă de cercetare, discutând prealabil tema cu conducătorul șt iințific al 
+tezei de licență și obținând acordul lui scris. 
+După selectarea temei tezei de licență, studentul, nu mai târziu de 30 septembrie, 
+completează și prezintă șefului departamentului Cererea privind aprobarea temei tezei de licență  
+
+=== PAGE 18 ===
+18 
+ 
+(Anexa 1 .2), în care indică tema tezei de licență, entitatea în baza căreia va fi elaborată teza 
+(opțional) și conducătorul științific al tezei. 
+După studierea cererilor depuse, șeful departamentului aprobă tema tezei de licență  și 
+desemnează conducătorul științific. 
+Studentul poate solicita schimbarea temei tezei de licență numai o singură dată, dar nu mai 
+târziu decât cu 3 luni până la susținerea tezei. Schimbarea temei se aprobă de către șeful 
+departamentului TIMI. 
+2.1.2. Elaborarea tezei de licență 
+Procesul de elaborare și susținere a tezei de licență include următoarele etape de bază: 
+1. Selectarea temei tezei de licență și depunerea  Cererii privind aprobarea temei tezei de licență 
+la departamentul de profil - până la data de 30 septembrie al ultimului an de studii; 
+2. Întocmirea de comun acord cu conducătorul științific a Planului calendaristic de executare a 
+tezei de licență (Anexa 2.1). 
+3. Studierea surselor bibliografice conform temei alese . Consultarea surselor bibliografice de către 
+student are ca scop completarea cunoștin țelor în domeniu, colectarea informației necesare pentru 
+elaborarea tezei de licență. Analizând sursele bibliografice, studentul urmează să selecteze 
+informațiile care se înscriu în tema de cercetare şi să le structureze logic. Suplimentar, este necesar 
+să se aleagă informația necesară pentru alcătuirea ulterioară a bibliografiei: denumirea revistei, 
+articolului, numele şi prenumele autorului, denumirea cărții, locul editării, anul de ediţie, paginile de 
+unde s-a colectat informaţia etc.; 
+4. Formularea obiectivelor și aprobarea planului provizoriu al tezei . Planul provizoriu al tezei se 
+elaborează sub egida conducătorului științific, ulterior, odată cu documentarea detaliată pe tema 
+respectivă, se va întocmi planul definitiv.  Cuprinsul specifică  structura expun erii sistematizate ș i 
+facilitează regăsirea materialelor necesare ale lucrării. El consta din denumirile compartimentelor 
+tezei (posibil ierarhizate până la nivelul trei: capitole, paragrafe (subcapitole), puncte 
+(subparagrafe)). 
+5. Colectarea, analiza, inter pretarea datelor cu caracter practic. Acestea pot fi obținute atât din 
+sursele interne ale întreprinderilor şi organizaţiilor ce sunt obiect de studiu în lucrare (note, 
+informări, rapoarte, facturi, comenzi, evidenţe, dări de seamă ale diferitelor comparti mente, servicii, 
+etc.), cât şi din diferite surse externe de informaţii secundare (materiale ale diferitelor întreprinderi, 
+instituţii, asociaţii, centre şi instituţii de cercetări, etc.). Informația privind întreprinderea, studentul 
+o obține în decursul d esfășurării stagiului de practică, unele materiale pot fi colectate si din alte 
+surse. Colectarea materialelor se poate îmbina, uneori, cu studierea surselor bibliografice la tema 
+tezei, pentru folosirea acestora la obținerea unor soluții de proiect reușit e. Prelucrarea materialelor 
+colectate se va efectua în conformitate cu obiectivele și cuprinsul tezei de licență. Se vor stabili 
+cerințele, se vor specifica restricțiile si se vor determina alternative de soluții. Ulterior, se vor selecta 
+alternativele rez onabile de soluții în baza criteriilor de estimare și eficiență. În acest scop se vor 
+utiliza metodele economico-matematice și mijloacele informatice avansate.  
+
+=== PAGE 19 ===
+19 
+ 
+6. Pregătirea părții textuale a tezei . Elaborarea capitolelor, conform cerințelor din acest capito l al 
+Ghidului. Perfectarea texului lucrării presupune expunerea materialelor în cadrul tezei într -o formă 
+sistematizată, logic bine concepută, care va corespunde planului întocmit al lucrării. La perfectarea 
+tezei se vor respecta normele și standardele în vigoare aferente. Este obligatorie respectarea 
+drepturilor de autor. Materialele, ideile folosite din sursele bibliografice vor fi indicate aparte în 
+lucrare, cu referințele respective. Lipsa în lucrare a referințelor la materialele în cauză este o 
+încălcare a drepturilor de autor, se considera faptul de plagiat, care se pedepsește conform legislației 
+în vigoare. 
+7. Prezentarea tezei de licenţă conducătorului ştiinţific. La fiecare etapă de elaborare, conform 
+termenilor prevăzuți în Planul calendaristic de executare a tezei de licență , pentru ca acesta să aibă 
+posibilitatea să facă observațiile ce impun completări şi/sau modificări ce ar îmbunătăți calitatea 
+tezei. După corectări,  teza se semnează de student pe pagina de titlu  și se prezintă  conducătorului 
+științific pentru avizare. 
+8. Depunerea tezei, în format electronic, în Repozitoriul ASEM, în scopul testării antiplagiat - cu 
+cel puţin 3 săptămâni înaintea perioadei de examen; 
+9. Imprimarea şi copertarea unui exemplar al tezei de licenţă,  cu anexarea obligatorie: a Planului 
+calendaristic de executare a tezei de licență și a Raportului privind plasarea tezei de licență în 
+sistemul Antiplagiat; 
+10. Predarea tezei în original  la departament avizată de conducătorul științific, și înregistrarea în 
+Registrul evidenței tezelor de licență - cu cel puţin 3 săptămâni înaintea perioadei de examen; 
+11. Pregătirea unei comunicări însoțite de prezentarea în Power Point/Prezi ș.a. pentru susținerea 
+publică a tezei; 
+12. Susținerea publică a tezei de licenţă, însoţite de avizul conducătorului ştiinţific şi vizate de şeful 
+de departament, va avea loc în conformitate cu orarul stabilit. 
+Studentul, în calitate de autor, este integral răspunzător pentru exactitatea şi 
+veridicitatea tuturor datelor prezentate în lucrare.  
+2.2. Structura, conţinutul şi volumul tezei de licenţă 
+Teza de licenţă este structurată pe capitole şi include următoarele elemente obligatorii: 
+I. Pagina de titlu -  se perfectează conform Anexei 3.2 și va conține: 
+ sigla și denumirea instituției de învățământ (Academia de Studii Economice din Moldova); 
+ denumirea facultății și departamentului de specialitate; 
+ numele şi prenumele studentului; 
+ denumirea (titlul) tezei de licență; 
+ mențiunea ‖Teză de licență‖; 
+ cifrul şi denumirea specialităţii; 
+
+=== PAGE 20 ===
+20 
+ 
+ avizul de admitere la susținere a șefului de depa rtament (cu spațiul rezervat pentru 
+semnătură); 
+ menţiunea „Autor‖ cu indicarea numelui, prenumelui studentului, grupa academică şi forma 
+de studii (cu spațiul rezervat pentru semnătură); 
+ date despre conducătorul științific (nume, prenume, titlul științific o-didactic) (cu spațiul 
+rezervat pentru semnătură); 
+ localitatea (Chișinău) și anul elaborării tezei de licență. 
+Dacă teza este scrisă în altă limbă decât limba română, se vor perfecta două pagini de titlu, prima 
+fiind în limba română. 
+II. Declaraţia pe propria  răspundere - teza de licență trebuie să reflecte integral munca 
+autorului, de aceea studentul va semna în original  ‖Declaraţia pe propria răspundere‖ (Anexa 
+5.1), din care rezultă că teza îi aparține şi sunt respectate drepturile de autor. Declarația de 
+propria răspunderea va fi semnată și de conducătorul științific care admite plasarea tezei în 
+Repozitoriul ASEM. 
+III. Cuprins - în „Cuprins‖ sunt menţionate toate capitolele şi subcapitolele tezei de licență cu 
+precizarea paginilor la care acestea pot fi găsite. În Anexa 4.2 este prezentat model de Cuprins. 
+„Cuprins‖-ul este întocmit aplicându -se opţiunile Microsoft Word (Insert, References, Index 
+and Tables). Volumul „Cuprinsului‖ este de 1 – 2 pagini. 
+IV. Lista abrevierilor (opţional) - în ordinea alfabetică sunt listate toate acronimele folosite în text, 
+împreună cu semnificaţia iniţialelor şi traducerea în limba română (dacă este cazul). 
+De exemplu: 
+AI - Artificial Intelligence 
+DNS – Domain Name System 
+DoS – Deny of Service 
+IP – Internet Protocol  
+JVM - Java Virtual Machine 
+NAT - Network Address Translation 
+RADIUS - Remote Authentication Dial In User Service 
+SGBD – Sistem de gestiune a bazelor de date 
+VoIP - Voice over Internet Protocol 
+V. Lista figurilor şi lista tabelelor  (opţional) - în cazul în care te za de licenţă conţine figuri 
+(imagini, diagrame) şi/sau tabele numeroase, acestea pot fi prezentate sub forma unor liste (pentru 
+figuri şi tabele) care conţin numele fiecărui element şi numărul paginii la care se află acesta.  
+VI. Introducere - aceasta va conține în mod obligatoriu, următoarele elemente: 
+- Importanţa şi actualitatea temei; 
+- Scopul şi obiectivele cercetării; 
+
+=== PAGE 21 ===
+21 
+ 
+- Obiectul investigat. Drept obiect de studiu al tezei de licență servește întreprinderea, 
+organizația, instituția de proiectare și de cerce tare la care studentul a realizat practica de 
+licență. Ca excepție, în cazuri justificate, la decizia departamentului, studentul poate folosi 
+drept obiect de studiu o altă entitate. 
+- Suportul metodologic al lucrării (metodele de cercetare aplicate, precum: analiza cantitativ-
+calitativă, analiza comparativă, studiul de caz, sondajul, interviul etc.) 
+- Baza informaţională; 
+- Structura lucrării - descrierea concisă a fiecărui dintre capitolele tezei; 
+- Prezentarea cantitativă a elementelor adiacente (bibliografie, anexe).  
+Introducerea nu se numerotează ca un capitol separat, iar volumul maxim al acesteia este de 2 -3 
+pagini.  
+VII. Conţinutul de bază al tezei -  teza de licență este expusă în 3-4 capitole, fiecare având câte 2 - 
+4 subcapitole. Studentul, împreună cu co nducătorul ştiinţific, decide, în funcție  de tema tezei, dacă 
+aceasta va conţine 2 sau 3 capitole practice/aplicative/studiu de caz etc. În anumite situaţii obiective , 
+teza poate avea şi mai mult de 3 capitole, dacă tematica abordată de autor are un caract er specific şi 
+nu există soluţia de structurare logico-analitică în maxim 3-4 capitole. 
+Conţinutul de bază al tezei de licenţă poate avea următoarea structură: 
+– partea teoretică sau de analiză a domeniului de studii 
+În primul capitol se prezintă cadrul te oretic al problemei cercetate sau se realizează a analiză 
+a unui domeniu, probleme de studiu. Studentul, studiind literatura de specialitate sau analizând o 
+problemă practică ce urmează să fie soluționată, descrie concepţiile/teoriile/modelele de bază, 
+efectuează analiza  acestora, prezentând avantajele şi limitele, formulează obiectivele implementării 
+practice a unor soluții și identifică instrumentele și metodele ce vor fi utilizate în continuare. 
+În această parte a tezei, studentul trebuie să demonstreze  capacitatea de analiză comparativă 
+a informațiilor din sursele bibliografice studiate, de analiză a unui domeniu  sau a unei probleme ce 
+urmează să fie soluționată prin mijloace IT, de formulare și argumentare a propriul punct de vedere 
+asupra problemei studiate, de formulare a obiectivele de cercetare în partea practică a tezei. Volumul 
+părţii teoretice constituie cca. 30 % din volumul tezei.  
+– partea practică /aplicativă 
+Partea practică/aplicativă prezintă contribuția autorului tezei, care se poate conc retiza într-o 
+cercetare cantitativă sau calitativă empirică, un proiect informatic, elaborare a unui model, elaborare 
+a unei aplicații, soluționarea unei probleme cu ajutorul unor metode sau mijloace din domeniul IT, 
+etc. Ca regulă, în capitolul 2 al tezei  vor fi descrise activitățile specifice proiectării generale a 
+realizării informatice a unei probleme de studii, iar capitolele 3 și 4 (opțional) vor conține activitățile 
+specifice proiectării de detaliu, elaborării codului aplicației, testării și estimări i eficientei produsului 
+programat elaborat. 
+Volumul materialului ilustrativ din teză (figuri, tabele, etc.) nu va depăși 30 % din volumul 
+părții de bază. 
+
+=== PAGE 22 ===
+22 
+ 
+VIII. Concluzii - în cadrul acestei părţi, sunt formulate cele mai importante concluzii ale cercetării , 
+precum şi recomandările obținute în rezultatul cercetărilor.  
+ Concluziile nu se numerotează ca un capitol aparte și are un volum de cca. 2-3 pagini. 
+IX. Referințe bibliografice –acest compartiment  indică volumul şi calitatea documentării teoretice 
+a studentului. În lista bibliografică vor fi inserate doar lucrările consultate, indiferent de natura lor 
+primară. Nu se permite indicarea titlurilor care nu au fost consultate.  
+De asemenea, toate sursele citate în textul lucrării trebuie să se regăsească în lista 
+bibliografiei.  
+Lista cu referințe bibliografice va conține până la 30 de titluri bibliografice, care vor fi 
+expuse în ordinea alfabetică a numelui autorului.  
+În cazul referințelor bibliografice de pe Internet, se indică adresa de Internet completă cu 
+precizare între paranteze a datei accesării adresei respective. 
+Regulile privind asigurarea bibliografică a tezei sunt prezentate în Anexa 6.  
+X. Anexe - conțin materialele care pot completa ideile din teza de licență, la ele făcându -se referințe 
+cel puțin o dată în textul tezei. Anexele nu se includ în volumul lucrării, sunt expuse în ordinea în 
+care sunt făcute referințe la acestea în textul de bază. Anexele se numerotează. La fiecare Anexă se 
+indică titlu și sursa de unde a fost preluat documentul/tabelul respectiv. 
+Volumul tezei de licență  este de 50 - 60 pagini. 
+Tabelul 2.1. Volumul compartimentelor tezei de licență  
+Nr. 
+crt. 
+Denumirea compartimentului Volumul, pagini 
+1. Pagina de titlu  1 
+2. Declaraţia pe propria răspundere 1 
+3. Cuprins   1 
+4. Lista abrevierilor (opţional) 1 
+5. Lista figurilor şi lista tabelelor (opţional) 1 
+6. Introducere 2-3 
+7. Capitolul I. 17 - 18 
+8. Capitolul II. 18 - 20 
+9. Capitolul III. 15 - 18 
+10. Concluzii 2 - 3 
+Total, pagini Max. 60 
+11. Referințe bibliografice până la 5 
+12. Anexe nu mai mult de 
+1/3 din volumul 
+tezei 
+
+=== PAGE 23 ===
+23 
+ 
+2.3. Cerințe specifice către tezele în domeniul IT 
+Structura orientativă a conținutului de bază al tezelor de licență orientate spre proiectarea 
+sistemelor/subsistemelor informatice poate să cuprindă următoarele capitole şi paragrafe: 
+INTRODUCERE 
+1. ANALIZA SISTEMULUI INFORMAŢIONAL AL UNITĂȚII ECONOMICE 
+1.1. Caracteristica unităţii social economice 
+1.2. Analiza sistemului informațional al unității economice 
+1.3. Esența problemei și justificarea necesității soluționării ei 
+2. PROIECTAREA DE ANSAMBLU A SISTEMULUI INFORMATIC 
+2.1. Obiectivele sistemului/subsistemului  informatic preconizat 
+2.2. Definirea ieşirilor 
+2.3. Determinarea intrărilor 
+2.4. Determinarea bazei informaționale 
+2.5. Resursele matematice 
+2.6. Estimarea necesarului de resurse hard si soft 
+3. PROIECTAREA DE DETALIU A SISTEMULUI INFORMATIC 
+3.1. Proiectarea fișierelor de intrare  
+3.2. Proiectarea fișierelor de ieșire 
+3.3. Proiectarea bazei informaţionale 
+3.4. Realizarea  și testarea programelor 
+3.5. Procesul tehnologic de prelucrare a datelor 
+CONCLUZII 
+REFERINȚE BIBLIOGRAFICE 
+ANEXE 
+Această structură este orientativă şi poate fi concretizată şi modificată în conformitate cu 
+specificul temei tezei. 
+Analiza sistemului informaţional  (SIF) are scopul d e a efectua un studiu complex asupra 
+activităţilor şi fluxurilor informaţionale existente, a volumului de date supuse prelucrării, a ariei de 
+cuprindere a SIF şi a dotării existente cu tehnică de calcul, precum şi a cadrului legislativ -normativ 
+impus funcţionării SIF (legi, hotărâri, decrete, normative, instrucţiuni etc.). 
+Analiza se efectuează pentru a evidenţia calităţile, limitele şi deficienţele actualului SIF în 
+vederea necesităţii realizării sistemului/subsistemului informatic (SI/SSI) ce urmează a fi proiectat. 
+1. Caracteristica unității social -economice (USE)  trebuie să descrie: obiectul de activitate, 
+personalul de conducere şi de control, verigile organizatorice de execuţie şi funcţionale 
+(secţii, compartimente, ateliere, oficii, etc.). De asemenea, s e prezintă schema structurii 
+organizatorice a USE. Se concretizează toate activităţile specifice ale USE cu scoaterea în 
+
+=== PAGE 24 ===
+24 
+ 
+evidenţă a activităţii care include problema examinată.  
+2. Analiza sistemului informațional scoate în evidență resursele existente: perso nalul, 
+documentele, resursele programate, resursele tehnice, resursele matematice și cele 
+tehnologice. Sunt evidenţiate circuitele şi fluxurile informaţionale care reflectă relaţiile 
+informaţionale legate de realizarea problemei, atât pe plan intern, cât ş i pe plan extern. Se 
+analizează activităţile şi operaţiilor de culegere, transmitere şi prelucrare a datelor specifice 
+SIF existent prin descrierea detaliată a acestora sub formă de schemă-bloc.  
+3. Esența problemei și justificarea necesității soluționării  ei presupune argumentarea 
+modificărilor ce se impun in organizarea şi funcţionarea SIF în viziunea conceperii şi 
+realizării SI/SSI nou şi fundamentarea unei noi soluţii de principiu care să precizeze 
+activităţile şi operaţiile ce urmează a fi informatizate. 
+Proiectarea generală  (de ansamblu) asigură modelarea conceptuală a noului 
+sistem/subsistem/aplicație şi are ca obiectiv strategic elaborarea concepţiei generale definită din 
+punct de vedere structural şi funcţional, prin stabilirea componentelor de sistem (subsisteme şi 
+unităţi funcţionale), a legăturilor dintre acestea şi a funcţionalităţii structurii sale. 
+1. Obiectivele sistemului/ aplicației preconizat/e  presupun abordarea şi rezolvarea 
+informatică a unor probleme concrete, într -o manieră sistemică. Posibi lele obiective 
+manageriale: rentabilitatea activităţii economice; planificarea investiţiilor; perfecţionarea 
+activităţii de conducere; fundamentarea deciziilor de conducere; asigurarea unei coordonări a 
+întregului sistem informaţional -decizional; furnizare a eficientă a informaţiilor necesare 
+conducerii etc. Obiectivele funcţionale  se determină în conformitate cu anumite funcţii 
+privind problema abordată: studierea rețelelor de distribuție; primirea şi centralizarea 
+comenzilor de la clienţi; livrarea către c lienţii interni şi externi a producţiei contractate;  
+urmărirea ritmicităţii livrărilor în scopul onorării contractelor etc. 
+2. Definirea ieşirilor presupune, în primul rând, concretizarea tipologiei acestora care pot fi: 
+indicatori economico-financiari; liste/situaţii de ieşire; grafice; ecrane de interfață; ieşiri către 
+alte sisteme informatice. Specificarea ieşirilor trebuie să includă, de asemenea, denumirea şi 
+scopul fiecăreia, volumul, frecvenţa de emitere, modul de obţinere, suportul, destinaţia, etc. 
+3. Definirea intrărilor presupune concretizarea naturii şi specificului, denumirilor intrărilor 
+(fișiere, linie de comandă, interfață grafică etc.), precum şi conţinutului şi volumului de date, 
+frecvenţa fiecărui document, tipurilor de suport, criteriilor de validare a datelor, etc.  
+4. Determinarea bazei informaţionale  (BI) presupune concretizarea tuturor atributelor 
+conform indicatorilor structurali din cadrul ieşirilor şi intrărilor aferente viitorului sistem. 
+Aceste atribute trebuie să includă următoarele cara cteristici: denumirea atributului stabilit în 
+raport de semantica acestuia; natura atributului (numeric, alfanumeric, logic, etc.); lungimea 
+atributului (reprezentat de numărul de caractere ocupat de către acesta); interconexiunea cu 
+alte atribute. 
+5. Resursele matematice  reprezintă algoritmii de calcul utilizați în cadrul proiectului 
+informatic. Tot aici se vor include sistemele de codificare ale entităților din baza 
+
+=== PAGE 25 ===
+25 
+ 
+informațională. Codificarea intrărilor, ieșirilor si entităților structurii bazei informațion ale 
+presupune realizarea codurilor care vor fi utilizate pentru identificarea acestora și pentru 
+referința  în toate etapele de realizare a sistemului informatic. 
+6. Estimarea necesarului de resurse hard si soft  presupune concretizarea  condiţiilor sau 
+restricţiilor tehnice (după caz) necesare realizării şi punerii în funcţiune a noului sistem ca de 
+exemplu: tipuri de echipamente, caracteristici, configuraţii; schema de amplasare; mijloacele 
+soft necesare; facilităţi/restricţii ale sistemului de operare; modur ile de exploatare alese sau 
+impuse; standarde de programare impuse etc. 
+Proiectarea de detaliu  a sistemului/subsistemului informatic presupune transformarea 
+modelului conceptual al noului sistem, elaborat în capitolul 2, într-un model operaţional. 
+1. Proiectarea ieşirilor  presupune determinarea formatului (structurii) şi conţinutului tuturor 
+tipurilor de ieşiri definite în p.2.2 şi pe care le va furniza viitorul sistem. Proiectele 
+(machetele) ieşirilor trebuie să fie prezentate într -o formă simplă, inteligibil ă care să asigure 
+şi facilitatea în utilizare. De exemplu, în componenţa listelor/situaţiilor de ieşire trebuie să fie 
+incluse atât formatul propriu -zis (titlul, indicatorii, natura şi lungimea maximă a fiecărui 
+indicator, căile de determinare şi de contro l a indicatorilor), cât şi legenda (destinaţia, 
+numărul de exemplare frecvenţa, termenele şi dispozitivul periferic de obţinere, etc.). 
+Graficele trebuie să fie însoţite de următoarele elemente complementare: titlul şi subtitlul, 
+legende privind reprezenta rea indicatorilor, grile pentru redarea graficului, reprezentarea 
+cromatică, definirea unor formate corespunzătoare pentru valorile indicatorilor etc. 
+Videoformatele de ieşire, la rândul lor, trebuie să includă toate componentele necesare 
+pentru reflectare a eficientă a indicatorilor economico -financiari: numele activităţii de 
+referinţă a indicatorilor; denumirea indicatorilor cu explicaţiile privind semnificaţiile şi 
+modul de calcul al acestora; valoarea reală a indicatorilor, cu precizarea intervalului de 
+referinţă în timp (lună, trimestru etc.) sau în spaţiu (secţie, unitate economică, complex etc.); 
+afişarea eventualelor neconcordanţe  economice dintre indicatori şi natura apariţiei 
+neconcordanţei; furnizarea automată a unor variante de decizie pentru con ducere;  data 
+editării videoformatului, etc. 
+2. Proiectarea intrărilor  subînţelege, de regulă, adaptarea documentelor de intrare  la 
+cerinţele noului SI, adică formalizarea documentelor din punct de vedere al conţinutului şi al 
+formei prin anumite modificări. Modificările de conţinut  se referă la: adăugarea în 
+documente a rubricilor pentru coduri (dacă nu a fost prevăzută). În acest sens, se au în vedere 
+codurile ce specifică natura operaţiilor reflectate şi cele ce servesc pentru identificarea şi 
+asocierea colecţiilor de date (ex. cod material, cod produs, etc.); eliminarea atributelor ce se 
+obțin prin calcule (ex. valoare); regruparea într -o zona comuna a rubricilor de date ce vor fi 
+introduse în noul sistem; Modificările de format  se refera la cele ce sunt i mpuse de 
+necesitatea sporirii facilitaților de preluare directa a datelor prin intermediul 
+videoterminalelor. Pe lângă modificările de conținut si format se impune si stabilirea 
+regulilor de completare si utilizare  a documentelor de intrare, precizarea num ărului de 
+exemplare, frecventa si termenele de introducere a datelor în colecțiile de date, aspectele 
+
+=== PAGE 26 ===
+26 
+ 
+privind validarea acestora, etc. 
+3. Proiectarea bazei informaționale presupune implicarea următoarelor aspecte: determinarea 
+categoriilor de atribute (prelua te sau reproduse si complexe: obținute ca rezultat al utilizării 
+unui algoritm de calcul sau grup de algoritmi); determinarea algoritmilor utilizați (expresii 
+aritmetice/algebrice, tabele de valori, tabele de decizii, tabele cu acțiuni condiționate si 
+organigrame); structurarea bazei informaționale în entități care reprezintă gruparea 
+atributelor si reflectarea corespondentelor dinte acestea. Se reprezentă modelele/diagramele 
+fluxului de date fizic (DFDF) si logic (DFDL). DFDF presupune o reprezentare schem atica a 
+sistemului prin care sunt scoase în evidenta entitățile interne si externe ale sistemului, 
+precum si fluxul datelor în sistem si din aceste entități.  DFDL subînțelege o scoatere în 
+evidenta a proceselor sistemului, precum si intrările sau ieșirile  de date în/din procese, o 
+analiza logica a sistemului: ce activități/funcții efectuează sistemul. 
+4. Realizarea și testarea programelor - presupune identificarea resurselor program necesare 
+de realizat si utilizat pentru viitorul SI, cu justificarea  soluției alese (limbajul de programare, 
+sistemul de gestiune a datelor, prin prezentarea performantelor pe care le prezintă si 
+avantajelor variantei propuse fata de alte variante posibile. De asemenea, presupune 
+descrierea modulelor -program cu prezentarea unei sc heme de interacțiune a acestora si 
+anexarea textului sursa al programelor realizate (listingul autodocumentat). Se specifică 
+procedurile, funcțiile și structura acestora. Se concretizarea structura fișierelor si bazelor de 
+date specifice viitorului SI prin lista acestora, caracteristicile generale (identificatori, mod de 
+organizare, suport, dimensiuni, factor de blocaj, etc.) si de conținut (descrierea structurii 
+înregistrărilor cu precizarea atributelor, a naturii si mărimii acestora). De asemenea, sunt 
+concretizate mesajele solicitate, cerințele de tipizare a mesajelor, modul de exploatare, 
+protecție, indicațiile pentru testare, alte cerințe/restricții necesare realizării procedurilor. 
+Rezultatul realizării corecte a programelor trebuie sa fie confirmate p rin anexarea ieșirilor SI 
+(printscreen-uri) cu date prelucrate, bazate pe un exemplu concret. 
+5. Proces tehnologic de prelucrare a datelor  subînțelege proiectarea unei variante a 
+procesului tehnologic de proiectare a datelor pentru SI nou care, bine înțeles, trebuie să difere 
+de varianta existenta până la proiectarea viitorului SI. Aceasta activitate va include o 
+descriere detaliata și o organigrama a PTPD care sa corespunda, atât cerințelor viitorului 
+sistem, cât si cerințelor de realizare și reprezentare a ac estui proces. Pe lângă acestea, vor fi 
+prezentate tabelele de dialog (scheme) și instrucțiunile-utilizator. 
+În continuare este prezentat un exemplu de conținut de teză de licență în domeniul 
+securității informaționale și aplicațiilor Web (în limba rusă).  
+ВВЕДЕНИЕ  
+I. ОСНОВНЫЕ ПРИНЦИПЫ РАБОТЫ И ОБЕСПЕЧЕНИЯ БЕЗОПАСНОСТИ ВЕБ-
+ПРИЛОЖЕНИЙ 
+1.1. Создание заметок. Использование веб-приложения для заметок.  
+1.2. Безопасность веб-приложений. Основные риски и угрозы  
+
+=== PAGE 27 ===
+27 
+ 
+1.3. Управление рисками в веб-приложениях  
+1.4. Аудит и тестирование 
+1.5. Процедура аутентификации и авторизации  
+II. ОСНОВНЫЕ ТЕХНОЛОГИИ, ИСПОЛЬЗУЕМЫЕ В СОВРЕМЕННЫХ ВЕБ- 
+ПРИЛОЖЕНИЯХ УГРОЗЫ ВЕБ-ПРИЛОЖЕНИЙ И СПОСОБЫ ЗАЩИТЫ  
+2.1. Инструменты, используемые для создания и работы веб-приложений и этапы  
+разработки веб-приложений  
+ 2.2. Основные уязвимости веб-приложений. 
+2.3. Цифровые сертификаты. Безопасное соединение по HTTPS 
+2.4. Аутентификация и авторизация. Работа с сессиями и cookie-файлами.  
+2.5. Защита на стороне браузера. Хранение паролей. 
+III. РЕАЛИЗАЦИЯ ПРОЕКТА ПО СОЗДАНИЮ ВЕБ-ПРИЛОЖЕНИЯ ДЛЯ  
+РАБОТЫ С ЗАМЕТКАМИ 
+3.1. Разметка страницы 
+3.2. Разработка базы данных и серверной части приложения 
+3.3. Организация хранения данных в сессиях HTTP и cookie-файлах 
+3.4. Обфускация кода 
+ВЫВОДЫ И РЕКОМЕНДАЦИИ  
+БИБЛИОГРАФИЯ 
+ПРИЛОЖЕНИЯ  
+Un posibil conținut al tezei de licență în domeniul tehnologiei informației este prezentat mai jos. 
+INTRODUCERE 
+I. ASPECTELE TEORETICE ALE TESTĂRII PRODUSELOR SOFTWARE 
+1.1. Conceptele generale ale testării produselor software 
+1.2. Procesul de testare 
+1.3. Tipuri de testare 
+1.4. Nivele de testare 
+II. TESTAREA AUTOMATIZATĂ 
+2.1. Conceptul de testare automatizată 
+2.2. Principiile testării automatizate 
+2.3. Avantajele și dezavantajele automatizării 
+2.4. Bunele practici ale testării automatizate  
+III. CREAREA FRAMEWORKULUI DE TESTARE AUTOMATIZATĂ A UNEI APLICAȚII WEB 
+3.1. Analiza web-aplicației și alegerea strategiei 
+3.2. Modelarea framework-ului de testarea automatizată 
+3.3. Adăugarea instrumentelor adiționale 
+3.4. Analiza rezultatelor 
+CONCLUZII 
+BIBLIOGRAFIE 
+ANEXE 
+
+=== PAGE 28 ===
+28 
+ 
+2.4. Cerinţe referitoare la redactarea tezei de licenţă 
+Teza de licență constituie un text științific, care necesită ordonarea coerentă și succintă a 
+ideilor, evitându -se orice greșeli gramaticale. Frazele trebuie să fie concise și clare, e vitându-se 
+folosirea unui stil prea metaforic. Se recomandă a utiliza așa exprimări ca: ‖prin urmare‖, ‖cu toate 
+că‖, ‖așa cum rezultă din cele menționate anterior‖ etc. 
+Expunerea materialului în teza de licență se face de la persoana a treia , folosindu -se un 
+limbaj impersonal. Astfel, vor fi evitate expresiile ‖eu consider‖, ‖în opinia mea‖ etc. 
+ Redactarea tezei de licență trebuie să corespundă următoarelor cerinţe: 
+ Teza de licență se editează computerizat pe hârtie albă, format A4, pe o singură parte a foii. 
+ Teza de licență se perfectează folosindu -se fontul Times New Roman cu dimensiunea de 12 
+pt. Spaţiul între rânduri este de 1,5 intervale. Textul se nivelează după ambele câmpuri 
+laterale. 
+ Paginile tezei au următorul câmp: în stânga – 30 mm, sus – 25 mm, în dreapta – 15 mm, jos 
+– 25 mm.  
+ Toate paginile tezei se numerotează, începând cu pagina de titlu şi terminând cu ultima 
+pagina, fără a admite lipsa acestora sau repetarea lor. Pe pagina de titlu nu se indică numărul 
+paginii. Numărul paginii se indică pe câmpul de jos, în centru.  
+ Titlul capitolelor sunt scrise cu litere majuscule (font 12 -14 pt., bold, centrat), a 
+subcapitolelor — cu litere mici, în afară de prima literă (font 12 pt., bold, centrat). După 
+denumirea capitolului sau a subcapitolului nu se  pune punct. Capitolele se numerotează cu 
+cifre romane, iar subcapitolele cu arabe.  
+ Fiecare capitol începe din pagină nouă, subcapitolele urmează succesiv. Sublinierea titlurilor 
+nu se admite.   
+ Toate tabelele, formulele, figurile (desene, diagrame etc.) se numerotează, indicându -se 
+numărul capitolului şi numărul de ordine a acesteia. De exemplu, Tabelul 1.2 ( tabelul doi din 
+capitolul întâi). (Anexa 7) 
+ Denumirea tabelului se amplasează deasupra tabelului, iar a figurii – sub figură. În mod 
+obligatoriu este necesar de indicat unitățile de măsură și sursele bibliografice.  
+ Tabelele şi figurile din anexe se numerotează luând în considerare numărul anexei, de 
+exemplu, Tabelul A 1.2 (tabelul 2 din Anexa 1).  
+ Tabelul ce ocupă mai mult de 2/3 din pagină se plasează la Anexe. 
+ Formulele/ecuațiile vor fi centrate, iar numerotarea acestora se va plasa la sfârșitul rândului. 
+Explicaţia simbolurilor utilizate se prezintă sub formulă în ordinea în care ele urmează. 
+Modele de prezentare şi numerotare a tabelelor, figurilor  şi formulelor sunt prezentate în 
+Anexa 7. 
+ Citările și referințele se indicată în paranteze pătrate, înserate în text, indicându -se numărul 
+sursei din Bibliografie și pagina, de exemplu [5, p. 77]. 
+
+=== PAGE 29 ===
+29 
+ 
+ În mod obligatoriu, se utilizează literele cu diacritice s pecifice limbii române (ă, â, î, ş, ţ şi 
+majusculele lor). 
+ Semnele de punctuație (".", ";", ",", "?", "!") sunt urmate în mod obligatoriu de un spațiu. 
+ Nu sunt acceptate prescurtări ale cuvintelor. 
+ În teză nu se admit însemnări, corecţii, conturări de lite re, ştersături, pete, adăugări la pagină 
+etc. 
+ Imprimarea tezei pe hârtie trebuie să fie calitativă. Literele, semnele, formulele, figurile 
+trebuie să aibă aceeaşi intensitate pe parcursul rândului, paginii, lucrării în ansamblu, iar 
+indicii formulelor trebuie să fie lizibili. 
+ Copertarea tezei de licență se efectuează prin copertare euro cu arc plastic și se prezintă la 
+departament într-un singur exemplar. 
+2.5. Exigenţe etice 
+Teza de licență trebuie să reflecte integral munca studentului. Toate sursele bibliograf ice 
+utilizate vor fi menţionate în lista bibliografică, în caz contrar, studentul va fi învinuit de plagiat. 
+În scopul depistării cazurilor de plagiat, de susținere repetată a aceleiași teze de licență 
+precum și a copierii a unor pasaje integrale din difer ite surse prin decizia Senatului ASEM a fost 
+aprobat Regulamentul privind prevenirea plagiatului în rândul studenților/masteranzilor  [3]. În 
+conformitate cu regulamentul dat, prin plagiat academic se înțelege ‖acţiunea de preluare a unor 
+produse de muncă i ntelectuală şi presupune expunerea, într -o operă scrisă sau o comunicare orală, 
+inclusiv în format electronic, a unor creaţii intelectuale originale extrase din opere scrise, inclusiv în 
+format electronic, ale altor autori, fără a menţiona acest lucru şi f ără a face trimitere la sursele 
+originale.‖ 
+Pentru a fi evitate învinuirile în plagiat, studentul trebuie să facă citări și referinţe la sursele 
+bibliografice. Citările şi referinţele bibliografice sunt componente obligatorii pentru orice lucrare 
+ştiinţifică. Citarea permite identificarea publicației din care s -a extras citatul sau ideea comentată. 
+Prin citare se realizează obligaţiile drepturilor de autor, plagiatul fiind considerat o încălcare a eticii 
+profesionale a savantului.  
+Citările și referințele pot fi indicate: 
+- în paranteze pătrate, înserate în text, indicându -se numărul sursei din Bibliografie și pagina, 
+de exemplu [7, p. 33], sau 
+- în subsolul paginii, folosind aplicațiile Microsoft Word (Insert, Reference, Footnote) şi 
+conţinând datele bibliograf ice cu indicarea paginii. Pentru scrierea referințelor în subsol se 
+utilizează Times New Roman, 10pt. 
+Fiecare student este obligat, cu acordul conducătorului științific, să depună teza de licenţă în 
+format electronic, în Repozitoriul ASEM (sistemul anti -plagiat), până la prezentarea la departament, 
+în scopul stabilirii gradului de coincidenţă a tezei cu alte surse. În cazul în care aceasta conţine mai 
+puţin de 60% text original se constată o situaţie de plagiat.  
+
+=== PAGE 30 ===
+30 
+ 
+Şeful de departament va întocmi un proces -verbal de constatare a plagiatului pe care îl va 
+înainta Juriului Facultăţii. 
+Juriul va analiza cazul presupus de plagiat şi va lua una din următoarele decizii: 
+- teza este admisă pentru susţinere, dacă nu s -a adeverit faptul plagiatului sau au fost stabilite 
+fapte minore, involuntare de plagiat, 
+- teza nu este admisă pentru susţinere, dacă s-a adeverit faptul plagiatului. 
+Studentul va fi informat, prin afişare pe panoul departamentului, referitor la decizia luată, în 
+curs de 24 de ore. 
+În cazul depistării plagia tului de către Comisia pentru examenul de licenţă/masterat, în 
+cadrul examenului de susţinere a tezei, teza va fi apreciată cu nota 1 ‖unu‖. 
+Studentul care a fost depistat, a doua oară, că a plagiat teza nu va fi admis pe viitor la 
+examenul de susţinere a tezei. 
+Plagiatul în cazul unei teze de licenţă reprezintă o fraudă intelectuală majoră, care 
+atrage imediat eliminarea din examenul de susţin ere a tezei respective, fapta fiind consemnată 
+în Dosarul personal al studentului. 
+2.6.  Procedura de admitere la susţinerea tezei de licenţă 
+1. Depunerea în Sistemul Anti Plagiat ASEM  
+Cu cel puţin 3 săptămâni înaintea examenului de finalizare a studiilor , fiecare absolvent 
+este obligat să depună , conform prevederilor Instrucțiunii privind plasarea tezelor de 
+licență/masterat pentru verificarea gradului de plagiat  [3], teza de licență, în format electronic, în 
+Repozitoriul ASEM. 
+2. Depunerea tezei de licență la departamentul de specialitate 
+Teza de licență copertată și perfectată conform prevederilor capitolului 2 al prezentului Ghid, 
+însoțită de Planul calendaristic avizat de conducătorul științific se prezintă spre înregistrare la 
+departamentul de profil nu mai după  ce a fost înregistrat în Sistemul Anti Plagiat. Depunerea și 
+înregistrarea în Registrul evidenței tezelor de licență la departamentul de specialitate este posibilă 
+doar în cazul în care teza este semnată de conducătorul științific și student pe pagina de titlu și este 
+însoțită de Raportul privind plasarea tezei în Repozitoriu ASEM. 
+3. Admiterea la susținerea tezei de licență 
+Șeful departamentului admite la susținere teza de licență în următoarele condiții: 
+ Avizul favorabil al conducătorului științific (Anexa 8.1); 
+ Rezultatele Raportului privind gradul de coincidență al lucrărilor încărcate de către 
+utilizatori, care atestă nivelul redus de coincidență (până la 60% text original). 
+ 
+
+=== PAGE 31 ===
+31 
+ 
+2.7.  Susţinerea tezei de licenţă 
+Tezele de licență admise spre susținere sunt prezentate în faţa Comisiilor pentru examenul de 
+licență, componența căreia este aprobată prin ordinul rectorului ASEM. Orarul susținerii tezelor se 
+va afișa la Avizierul departamentului/facultății de specialitate și/sau pagina web a 
+departamentului/facultății. Neprezentarea absolventului la data, ora și locația stabilite poate atrage 
+eliminarea acestuia din examenul de licență. 
+Susținerea tezei de licență este publică. Studentului i se oferă 10 - 15 min. pentru prezentarea 
+acesteia. Comunicarea verbală este îns oțită de prezentarea în MS Power Point. În scopul utilizării 
+eficiente a timpului rezervat prezentării, se recomandă ca studentul să elaboreze un plan de expunere 
+a raportului, care ar avea următoarea structură: 
+ Titlul tezei de licență; 
+ Importanţa şi actualitatea temei; 
+ Scopul şi obiectivele tezei; 
+ Obiectul investigat şi subiectul cercetat; 
+ Rezultatele cercetării; 
+ Aplicația elaborată (după caz); 
+ Concluzii. 
+Prezentarea PowerPoint va conține în mod obligatoriu următoarele: 
+ Slide 1. Denumirea tezei de licență, numele și prenumele autorului și conducătorului; 
+ Slide 2. Cuprinsul lucrării; 
+ Slide 3. Obiectivele cercetării; 
+ Slide 4, .... Slide n-1. Principalele rezultate ale cercetării; 
+ Slide n Concluzii și recomandări. 
+În timpul expunerii raportului poate fi demonstrată funcționalitatea de bază a aplicației 
+elaborate. 
+După prezentarea raportului, studentul răspunde la întrebările membrilor Comisiei pentru 
+examenul de licență. Răspunsurile trebuie să fie clare, succinte şi la subiect, iar studentul  trebuie să 
+demonstreze atât o bună pregătire generală la profil, cât şi o pregătire bună la tema tezei de licenţă. 
+Ulterior, se dă citire Avizul conducătorului științific, studentul urmând să -și expună propriul 
+punct de vedere față de obiecțiile indicate. 
+2.8. Evaluarea studentului la examenul de licenţă 
+Examenul de licenţă în ASEM include o singură probă: susţinerea publică a tezei de 
+licenţă. 
+Decizia Comisiei privind aprecierea studentului are la bază evaluarea nivelul de realizare a 
+finalităţilor de studii, competenţelor gener ice şi specifice dobândite de către absolvent pe parcursul 
+studiilor și competenţelor de a efectua cercetări, de a aplica cunoştinţele teoretice în procesul de 
+elaborare a unor soluţii practice specifice domeniului de formare profesională.  
+
+=== PAGE 32 ===
+32 
+ 
+Nota propusă de  conducătorul ştiinţific este orientativă. Nota finală reprezintă media 
+aritmetică a notelor membrilor Comisiei, care se stabileşte de comun acord la şedinţa închisă a 
+Comisiei pentru examenul de licenţă. 
+Pentru evaluarea studenților, membrii Comisiei vor folosi criteriile specificate în Tabelul 2.2. 
+Tabelul 2.2 Criteriile de evaluare a studenților la examenul de licență  
+şi ponderea fiecărui criteriu 
+Nr. 
+crt. 
+Criteriu de evaluare Ponderea 
+1.  Înţelegerea critică a noțiunilor, conceptelor, teoriilor şi princi piilor specifice 
+domeniului de formare 0,1 
+2.  Demonstrarea competenţelor generice şi specifice dobândite de către 
+absolvent pe parcursul studiilor (în conformitate cu Cadrul Național al 
+Calificărilor) 
+0,2 
+3.  Demonstrarea capacității de a aplica cunoştinţele teoretice și metodologice în 
+procesul cercetării și elaborării unor soluţii practice specifice domeniului de 
+formare profesională (problema cercetării, obiectivele și metodologia 
+cercetării, relevanţa practică) 
+0,2 
+4.  Utilizarea cunoştinţelor relevante dome niului de formare în constituirea şi 
+susţinerea argumentelor, concluziilor în procesul elaborării și susținerii tezei 
+de licență (bibliografie, analiza și sinteza datelor, răspunsuri prompte și 
+adecvate la întrebări) 
+0,3 
+5.  Demonstrarea competențelor de com unicare în procesul elaborării și 
+susținerii tezei de licență (redactarea tezei, mesaj bine structurat, limbaj 
+adecvat, utilizarea mijloacelor tehnice, politețe) 
+0,2 
+Nota finală (NF) se va calcula conform formulei: 
+NF = ∑ ki  pi      (2.1) 
+unde: 
+ki  –  ponderea criteriului ―i‖; 
+pi - nota criteriului ―i‖, calculată ca media aritmetică a notelor atribuite de către membrii comisiei. 
+*** Nota finală se rotunjește la nota întreagă cea mai apropiată, fracţiunile de 50 sutimi se 
+rotunjesc în favoarea studentului. 
+Rezultatul obținut la examenul de licență se comunică studenților în aceeași zi, după ședința 
+Comisiei pentru examenul de licență. 
+
+=== PAGE 33 ===
+33 
+ 
+În cazul depistării plagiatului în procesul de susţinere a tezei, Comisia pentru examenul de 
+licenţă apreciază teza cu nota 1 (unu). 
+Studentul are dreptul să conteste rezultatele evaluării tezei de licenţă. Cererile pentru 
+contestare se depun  în scris la secretariatul Comisiei pentru examenul de licenţă, în termen de 
+maximum 24 ore de la comunicarea rezultatelor. Contestaţiile  vor fi examinate de către Comisia de 
+licenţă în termen de 48 de ore de la depunerea cererii, în prezenţa unui membru a Comisiei de 
+supraveghere a examinării contestațiilor, desemnate prin ordinul rectorului ASEM. Comisia pentru 
+examenul de licenţă, după r everificarea tezei de licenţă, decide schimbarea sau nu a notei prin 
+creşterea sau prin micşorarea acesteia. Decizia Comisiei rămâne definitivă. 
+2.9. Susținerea repetată 
+În cazul în care studentul nu a susţinut teza de licenţă în sesiunea stabilită, acesta are dreptul 
+să o susţină repetat, de cel mult două ori în decursul a 5 ani de la absolvire, cu suportarea 
+cheltuielilor de examinare, stabilite de ASEM. La a doua susţinere, studentul va solicita confirmarea 
+temei tezei de licenţă, cu cel puțin 6 luni până la începerea examenului de licență, prin depunerea 
+cererii pe numele rectorului, avizată de către şeful departamentului de specialitate şi decanul 
+facultăţii respective. 
+
+=== PAGE 34 ===
+34 
+ 
+III. ELABORAREA ȘI SUSȚINEREA TEZEI DE MASTER 
+Acest c apitol este elaborat în baza „Regulament ului cu privire la organizarea  studiilor 
+superioare de masterat, ciclul II‖ (HG nr. 1455 din 24 decembrie 2007), Regulamentul de organizare 
+a studiilor în învățământul superior în baza Sistemului Național de Credite de Studii, Regulamentul 
+privind prevenir ea plagiatului în rândul studenților/masteranzilor, Standardul SM ISO 690:2012 
+Informare și documentare, Reguli pentru prezentarea referințelor bibliografice și citarea resurselor 
+de informare (ISO 690:2010, IDT), Ghidul privind elaborarea și susținerea te zei de master 
+(GD.0.ESTM, ASEM 2018). 
+Capitolul este adresat masteranzilor, conducătorilor științifici, șefilor de departament, 
+membrilor comisiilor pentru susținerea tezei de master și stabilește regulile generale privind 
+elaborarea și susținerea tezei de master în cadrul Academiei de Studii Economice din Moldova. 
+Finalizarea studiilor superioare de masterat, conform legislației Republicii Moldova prevede 
+susținerea tezei de master. 
+Teza de master  (TM) este о lucrare originală, fundamentată științific, car e conține rezultate 
+teoretice și/sau experimentale în domeniul respectiv de studiu și cercetare, efectuată de masterand. 
+Teza de master poate reprezenta: 
+ un studiu teoretic  - masterat de cercetare, care vizează dezvoltarea capacităților de 
+cercetare științifică ale masterandului; 
+ о cercetare aplicativă  - masterat profesional, ce asigură aprofundarea unei specializări 
+într-un domeniu, fiind axate, în primul rând, pe competențe cu conținut aplicativ. 
+Spre deosebire de teza de licență, teza de master este о lucrare științifică care: 
+ conține о analiză aprofundată a aspectelor teoretice de bază, ce se finalizează cu о sinteză 
+la tema abordată și о expunere a opiniei personale; 
+ prevede aplicarea diverselor metode cantitative și calitative de cercetare științifică 
+(comparația, analiza datelor, chestionarul, observația etc.); 
+ include un studiu de caz aprofundat; 
+ reflectă contribuția și aportul autorului în realizarea unor sarcini concrete. 
+Prin realizarea tezei masterandul trebuie să demonstreze: 
+ competențe de aplica re a cunoștințelor și capacități de înțelegere și de soluționare a 
+problemelor atât în domeniul de formare, cât și în domeniile înrudite sau 
+multidisciplinare; 
+ capacități de realizare a analizelor bazate pe cercetare în vederea soluționării problemelor 
+prin integrarea cunoștințelor; 
+ deprinderi de studiu autonom, în baza unui nivel ridicat de înțelegere a proceselor de 
+învățare; 
+ capacități de soluționare a problemelor prin integrarea surselor de informații complexe, 
+în contexte noi, necunoscute, de utilizare  a experienței într -un mediu de muncă 
+interactiv; 
+
+=== PAGE 35 ===
+35 
+ 
+ abilitatea de comunicare orală și prezentare a rezumatului lucrării, de elaborare a 
+concluziilor și recomandărilor. 
+Perioada de elaborare a tezei de master, conform planului de învățământ, urmează după 
+stagiul de practică și se finalizează cu susținerea tezei de master, care este о condiție obligatorie 
+pentru acordarea titlului de master. 
+3.1. Alegerea temei tezei de master 
+Tematica orientativă a tezelor de master este elaborată și aprobată de departamentele de 
+profil în anul de învățământ precedent celui în care se elaborează teza propriu -zisă. După avizarea 
+tematicii de către Directorul Școlii Masterale , respectiva se plasează pe paginile WEB ale 
+departamentelor și a Școlii Masterale pentru informarea masteranzilor. 
+Tema concretă a tezei de master se stabilește de către masteranzi și conducătorii de teze, 
+fiind aprobată de către Șeful departamentului și avizat de Directorul Școlii Masterale de Excelență 
+în Economie și Business, drept urmare, fiind elaborat Ordinul cu privire la aprobarea temelor tezelor 
+de master. 
+În vederea aprobării temei - până la 30 octombrie (2 ani de studii)/ până la 30 aprilie (1,5 ani 
+de studii) - masterandul completează și prezintă șefului departamentului de profil cererea (Anexa 1), 
+în c are se indică tema tezei de master aleasă și opțional conducătorul științific. După studierea 
+cererilor depuse, șeful departamentului desemnează conducătorul științific. 
+Masterandul poate solicita schimbarea temei tezei o singură dată în timpul studiilor d e 
+masterat, dar nu mai târziu de 3 luni până la susținerea tezei. Schimbarea temei se aprobă de către 
+șeful departamentului de profil, este avizată de directorul Școlii Masterale și se aprobă prin Ordin de 
+modificare a temelor tezelor de master avizat de P rim Prorector cu activitate didactică. Schimbarea 
+temei nu implică modificarea duratei studiilor sau elaborării tezei. 
+ 
+3.2. Responsabilitățile masterandului pentru elaborarea 
+și prezentarea tezei de master 
+Odată cu aprobarea temei și desemnarea conducătorul șt iințific, începe procesul de elaborare 
+a tezei de master, care include următoarele etape de bază: 
+ studierea resurselor bibliografice disponibile la tema aleasă . Analizând actele 
+normative și literatura de specialitate, masterandul urmează să selecteze informațiile care 
+se înscriu în tema de cercetare și să le structureze logic. Adăugător, este necesar să fie 
+selectată informația indispensabilă pentru alcătuirea ulterioară a bibliografiei: denumirea 
+revistei, articolului, numele și prenumele autorului, denum irea cărții, locul editării, anul 
+de ediție, paginile de unde s-a colectat informația etc.; 
+ elaborarea planului tezei și întocmirea Planul calendaristic de elaborare a tezei de 
+master (Anexa 2 .2). Planul se elaborează sub egida conducătorului științific. U lterior, 
+odată cu documentarea detaliată pe tema respectivă, se va întocmi planul definitiv. 
+Planul calendaristic de executare a tezei de master se aprobă de șefului de departament; 
+
+=== PAGE 36 ===
+36 
+ 
+ culegerea, prelucrarea și sistematizarea informațiilor cu caracter practic. Acestea pot fi 
+obținute atât din sursele interne ale întreprinderilor și organizațiilor care constituie 
+obiectul de studiu în lucrare (note, informări, rapoarte, facturi, comenzi, evidențe, dări 
+de seamă ale diferitelor compartimente, servicii etc.), cât  și din diferite surse externe de 
+informații secundare (materiale ale diferitelor întreprinderi, instituții, asociații, camere 
+de comerț, centre și instituții de cercetări etc.); 
+ elaborarea părții textuale a tezei , elaborarea capitolelor, conform cerințelo r prezentului 
+compartiment din Ghid; 
+ prezentarea tezei de master conducătorului științific  înainte de copertare, pentru 
+observații, completări și/sau modificări; 
+ imprimarea și copertarea unui exemplar al tezei de master; 
+ depunerea. Depunerea tezei de master prevede parcurgerea următoarelor etape:  
+I. Înregistrarea și depunerea la departamentul de profil, a unui exemplar al tezei de 
+master; 
+II. Înregistrarea tezei de masterat în Sistemul Anti Plagiat al ASEM conform 
+Instrucțiunii accesibilă la departament. 
+Masterandul, în calitate de autor, este singurul răspunzător pentru exactitatea și 
+veridicitatea tuturor rezultatelor prezentate în lucrare. 
+3.3. Activitatea conducătorului științific 
+Pe parcursul elaborării tezei de master, masterandul este îndrumat de un conducător științific, 
+desemnat de șeful departamentului. Conducător al tezei de master poate fi desemnat un profesor 
+universitar, conferențiar universitar sau lector universitar (care deține grad științific) al 
+departamentului de specialitate, cercetător științific d e înaltă calificare din instituțiile de cercetare -
+proiectare, precum și de un specialist practician. Este recomandabil ca tema propusă sau aleasă de 
+masterand să se încadreze în sfera activității didactice, științifice sau practice a conducătorului 
+științific. 
+Conducătorului științific al tezei de master îi revine următoarele activități: 
+ informarea masterandului cu privire la etapele de realizare și prezentare a Planului 
+calendaristic de elaborare a tezei de master (Anexa 2);  
+ asistarea la determinarea direcțiilor și metodelor de cercetare și analiză; 
+ examinarea și aprobarea planului tezei de master; 
+ consultarea masterandului privind conținutul tezei, în orele de serviciu; 
+ oferirea unor sugestii cu privire la conținutul tezei, inclusiv observații critice și 
+recomandări de corecție;  
+ recomandarea surselor bibliografice la tema cercetată; 
+ monitorizarea și avizarea periodică a stadiului îndeplinirii obiectivelor de etapă; 
+ analiza conținutului integral și a formei finale a tezei; 
+ admiterea tezei de master pentru plasare în Sistemul Anti Plagiat; 
+
+=== PAGE 37 ===
+37 
+ 
+ analizarea conținutului tezei, depuse la departament, și corespunderea acesteia cu 
+cerințele expuse în acest capitol al Ghidului, după care întocmește Avizul la teza de 
+master (Anexa 8 .2), nu mai târziu de o săptămână înai nte de începerea sesiunii de 
+susținere a tezelor de master. 
+Conducătorul științific nu este în drept să efectueze în locul masterandului activitățile legate 
+de elaborarea tezei și/sau să impună unele idei sau soluții, împotriva celor preferate în mod expli cit 
+de masterand. 
+3.4. Atribuțiile șefului departamentului de profil 
+În scopul facilitării procesului elaborării, prezentării și susținerii tezei de master, șeful 
+departamentului de profil va întreprinde următoarele măsuri: 
+ avizează tematica tezelor de master elaborate în cadrul departamentului în anul de studii 
+precedent celui în care se elaborează și se susține teza; 
+ prezintă pe suport de hârtie spre avizare directorului Școlii Masterale a tematicii tezelor 
+de master aprobate la departament și plasarea ac esteia pe pagina WEB a 
+departamentului; 
+ desemnează coordonatorul științific în timp de până la 2 săptămâni după încheierea 
+termenului de depunere a cererii de către masteranzi; 
+ prezintă directorului ȘM proiectul de ordin privind aprobarea temelor și coordo natorilor 
+tezelor de master și plasează informația respective pe pagina WEB a departamentului 
+sau pe panoul de avize a departamentului; 
+ aprobă/ respinge solicitarea de modificare a temei tezei de master și transmite, cu 3 luni 
+până la începutul sesiunii de  susținere a tezelor de master, proiectul ordinului de 
+modificare a temelor tezelor de master, 
+ aprobă/ respinge cererea cu privire la tema tezei de master pentru masteranzii ce solicit 
+susținere repetată; 
+ plasează pe pagina WEB a departamentului a Indicați ilor metodice privind elaborarea 
+tezei de master; 
+ se înregistrează ca utilizator în sistemul de gestiune a cursurilor ASEM – MOODLE 
+(vle.ase.md) pentru a verifica ulterior nivelul de coincidența a Tezelor de Master; 
+ informează coordonatorul științific și m asterandul cu privire la Instrucțiunea privind 
+intenția de elaborare a tezei și a Instrucțiunii privind plasarea tezei de master în sistemul 
+Anti Plagiat; 
+ înaintează directorului ȘMEEB demersul privind componența Comisiei pentru evaluarea 
+tezelor de master; 
+ admite/respinge spre susținere teza de master în baza raportului din Sistemul Anti 
+Plagiat și a avizului la teza de master întocmit de coordonatorul științific; 
+ prezintă spre avizare directorului ȘM a raportului președintelui comisiei de evaluare a 
+TM și a registrului privind salarizarea președintelui. 
+
+=== PAGE 38 ===
+38 
+ 
+3.5.  Structura, conținutul și volumul tezei de master 
+Teza de master are următoarea structură: Pagina de titlu, Declarația pe propria răspundere, 
+Lista de abrevierilor, Lista figurilor și lista tabelelor, Cupri ns, Introducere, Conținutul de bază a 
+tezei, Concluzii și recomandări, Bibliografie, Adnotare, Anexe. 
+Pagina de titlu 
+Pagină de titlu se perfectează conform Anexei 3.3 și va conține: 
+ mențiunea „Academia de Studii Economice din Moldova‖; 
+ mențiunea „Școala Masterală de Excelență în Economie și Business‖; 
+ denumirea departamentului „Tehnologia Informației și Management Informațional‖; 
+ CZU (codul zecimal universal) – stabilit de Serviciul Clasificare și catalogare al Bibliotecii 
+ASEM; 
+ numele și prenumele masterandului; 
+ denumirea (titlul) tezei de master; 
+ mențiunea ‖Teză de master‖; 
+ denumirea programei de masterat: Managementul Informațional, Securitatea Sistemelor 
+Informatice sau Tehnologii Informaționale în Economie; 
+ avizul de admitere la susținere a șefului de departament (cu spațiul rezervat pentru 
+semnătură); 
+ mențiunea „Autor‖ cu indicarea numelui, prenumelui studentului, grupa academică și forma 
+de studii (cu spațiul rezervat pentru semnătură); 
+ date despre conducătorul științific (nume, prenume, titlul științ ifico-didactic) (cu spațiul 
+rezervat pentru semnătură); 
+ locul (Chișinău) și anul elaborării tezei de master.   
+*Notă: Pagina de titlu la teza elaborată în limba rusă trebuie să fie prezentată și în limba 
+română. 
+Cuprins 
+În „Cuprins‖ sunt menționate toate c apitolele și subcapitolele tezei de master cu precizarea 
+paginilor la care acestea pot fi găsite. În Anexa 4.3 este prezentat un model de Cuprins. „Cuprinsul‖ 
+este întocmit aplicând opțiunile Microsoft Word-ului (Insert, References, Index and Tables).  
+Lista abrevierilor 
+În ordinea alfabetică sunt listate toate acronimele folosite în text, împreună cu semnificația 
+inițialelor și traducerea în limba română. 
+De exemplu: 
+ASCII - American Standard Code for Information Interchange 
+AAA - Authentication Authorization, Accounting 
+AI - Artificial Intelligence 
+CAPTCHA - Completely Automated Public Turing Test to tell Computers and Humans Apart 
+FLOPS - FLoating-Point Operations Per Second 
+
+=== PAGE 39 ===
+39 
+ 
+JVM - Java Virtual Machine 
+NAT - Network Address Translation 
+RADIUS - Remote Authentication Dial In User Service 
+VoIP - Voice over Internet Protocol 
+Lista figurilor și lista tabelelor  
+În cazul în care teza de master conține figuri (imagini, grafice) și/sau tabele, acestea sunt 
+prezentate, imediat după cuprins, sub forma unor liste (se parat pentru figuri și tabele) care conțin 
+numele fiecărei figuri și/sau tabel și numărul paginii la care se află acesta. 
+Rezumat (pentru tezele elaborate într-o limbă de circulație internațională) 
+Rezumatul tezei de master va fi elaborat în limba română, în volum de minim 3 pagini și va 
+include informația privind: scopul și sarcinile cercetării, obiectul studiului, baza științifico -
+metodologică, elemente de inovație științifică, sumarul capitolelor tezei, concluziile și rezultatele 
+cercetării.  
+Introducere 
+În „Introducere‖ se argumentează importanța și actualitatea temei cercetate, gradul de 
+studiere a acesteia în literatura de specialitate, se definește scopul și sarcinile tezei, obiectul 
+studiului, se indică baza științifico -metodologică, elemente de inov ație științifică, sumarul 
+capitolelor tezei.  
+„Introducerea‖ nu se numerotează ca un capitol separat. 
+Conținutul tezei 
+Teza  de master este expusă în 2 - 4 capitole, fiecare având câte 2 - 4 subcapitole. 
+Masterandul, împreună cu coordonatorul științific, d ecide, în dependență de tematica tezei, dacă 
+aceasta va conține 1 sau 2 capitole practice. În anumite situații obiective teza poate avea și mai mult 
+de 3 capitole dacă tematica abordată de autor are un caracter specific și nu există soluția de 
+structurară logico-analitică în maxim 3 capitole. Fiecare capitol se recomandă a fi finalizate cu 
+concluzii.  
+Conținutul de bază al tezei de master este elaborat în strictă conformitate cu prezentul capitol 
+din Ghid și corelează în totalitate cu tema enunțată și refle ctată în cuprinsul tezei. Structura generală 
+recomandată pentru conținutul de bază constă din 2 compartimente fundamentale:  
+ compartimentul teoretic sau conceptual;  
+ compartimentul aplicativ.  
+Compartimentul teoretic  va avea un volum de 30 -40% din toată lu crarea și va conține o 
+analiză a situației în domeniul abordat în teză, se descrie metodologia și obiectivele cercetării 
+realizate. Compartimentul conține de obicei un capitol, în care reflectă profunzimea pătrunderii de 
+către masterand în tematica temei, identificarea aspectelor necesare pentru fundamentarea problemei 
+abordate și a soluțiilor formulate în lucrare, analiză literaturii de specialitate, a materialelor 
+științifice, a standardelor tehnice și a legislației la tema tezei, acestea fiind reflectate  în articole, 
+monografii, documentație tehnică, standarde, brevete de invenție etc., publicate sau aprobate la nivel 
+național sau internațional. În mod obligatoriu studiul va include și publicații din ultimii ani. În 
+
+=== PAGE 40 ===
+40 
+ 
+rezultat se va prezenta o analiză compa rativă a situației (soluțiilor) existente în domeniu, se vor 
+formula scopul și obiectivele tezei.  
+Compartimentul aplicativ  (practic) va avea un volum de 30 -40% din toată lucrarea și va 
+reflecta o soluționare practică a problemei abordate în teză. Comparti mentul conține de obicei 2 
+capitole, în care se cercetează/investighează/analizează ipoteza/ipotezele formulate, se argumentează 
+elaborările realizate de către autor (algoritmi, metode, dispozitive, sisteme, paradigme, modele etc.).  
+Componenta practică a tezei de master este reflectată, de obicei, într -o aplicație sau proiect 
+realizat de autor, care răspunde obiectivelor lucrării și are ponderea cea mai mare la evaluarea 
+lucrării. Compartimentul conține etapele elaborării aplicației/proiectului, rezultatel e realizărilor 
+practice, descrierea diverșilor parametri (rapiditatea, fiabilitatea etc.). Se vor ilustra rezultatele 
+utilizării în cadrul unor companii sau aplicații a rezultatelor practice realizate sau posibilitățile de 
+utilizare a elaborărilor personale în diverse domenii concrete.  
+Pentru a evidenția capacitatea masterandului de a aplica în mod creativ cunoștințele sale 
+teoretice, compartimentul aplicativ va conține descrierea contribuției personale a autorului la tema 
+abordată. 
+Concluzii și recomandări  
+În cadrul acestei părți, sunt formulate concluziile generale ale cercetării, precum și unele 
+recomandări. În mod special, urmează a fi evidențiată contribuția proprie a autorului.  
+ Concluziile și recomandările tezei nu se numerotează ca un capitol aparte. 
+Bibliografie 
+În „Bibliografie‖ se indică toate sursele de informare utilizate aranjate conform cerințelor 
+‖SM ISO 690:2012. Informare și documentare. Reguli pentru prezentarea referințelor bibliografice 
+și citarea resurselor de informare‖ (anexa 6) ce sunt reflectate în Indicațiile privind elaborarea TM 
+elaborate de departamentul de profil.  
+Anexe 
+Conținutul anexelor tezei de master sunt prezentate în conformitate cu Indicațiile privind 
+elaborarea TM elaborate de departamentul de profil și plasate pe pagina WEB a acesteia.  
+Adnotare 
+Adnotarea constituie o prezentare succintă a conținutului tezei de master și include 
+informația privind: titlul lucrării, numele autorului,  structura tezei (de exemplu, introducere, patru 
+capitole, concluzii generale și recomandări, bibliografie din 160 titluri, 6 anexe, 80 pagini de text de 
+bază (până la Bibliografie), 37 figuri, 10 tabele), cuvintele -cheie (până la 10 cuvinte, într -un rând 
+separat). Se descriu, în mod separat, următoarele compartimente: domeniul de studiu, s copul și 
+obiectivele lucrării, obiectivele cercetării, metodologia cercetării, elementele de inovație și 
+originalitatea științifică, contribuția personală a autorului, concluzii și recomandările.  
+Adnotarea se prezintă în 2 limbi: română și engleză, fiecar e fiind prezentată pe o singură 
+pagină a foii. 
+În cazul tezelor de master elaborate în limba rusă, ‖Adnotarea‖ va fi scrisă în limbile: rusă, 
+română și engleză.  
+
+=== PAGE 41 ===
+41 
+ 
+Declarația pe propria răspundere 
+Teza de master trebuie să reflecte integral munca autorului, de aceea masterandul va semna 
+Declarația pe propria răspundere (Anexa 5.2) și își va asumă răspunderea privind respectarea 
+drepturilor de autor.  
+Pentru a fi evitate învinuirile în plagiat, masterandul trebuie să facă referințe la sursele citate, 
+precum și  să indice sursa de informare, în subsolul paginii, folosind Microsoft Word -ul (Insert, 
+Reference, Footnote în TNR, 10) și conținând datele bibliografice cu indicarea paginii.  
+Volumul tezei de master, conform Deciziei Senatului ASEM nr. 4/8 din 25 martie 2009, este de 
+până la 70 - 80 pagini. 
+Tabelul 3.1 Compartimentele tezei de master și volumul lor 
+Nr. 
+crt. 
+Denumirea compartimentului Volumul, pagini 
+1.  Pagina de titlu  1/2 
+2.  Cuprins  1 
+3.  Lista abrevierilor  1 
+4.  Lista figurilor și lista tabelelor  1 
+5.  Rezumat  3 
+6.  Introducere 3 - 4 
+7.  Conținutul tezei Până la 60-70 
+8.  Concluzii și recomandări 2 - 3 
+9.  Bibliografie până la 3-4 
+10.  Anexe nu mai mult de 1/3 din 
+volumul tezei 
+11.  
+Adnotare (română) 
+Adnotare (engleză) 
+Adnotare (rusă), pentru tezele elaborate în l. rusă 
+1 
+1 
+1 
+12.  Declarația pe propria răspundere 1 
+3.6. Cerințe referitoare la perfectarea tezei de master 
+3.6.1. Exigențe de perfectare 
+Redactarea tezei de master trebuie să corespundă următoarelor cerințe: 
+ Teza se editează computerizat pe hârtie albă, format A4, pe o singură parte a foii. 
+ Teza de master se perfectează folosindu -se fontul Times New Roman cu dimensiunea de 12 
+pt. Spațiul între rânduri este de 1,5 intervale. Textul se nivelează după ambele câmpuri 
+laterale. 
+ Paginile tezei au câmp: în stânga – 30 mm, sus – 25 mm, în dreapta – 15 mm, jos – 25 mm.  
+ Toate paginile tezei se numerotează, începând cu pagina de titlu și terminând cu ultima 
+pagină, fără a admite lipsa acestora sau repetarea lor. Pe pagina de titlu nu se pune numărul 
+
+=== PAGE 42 ===
+42 
+ 
+paginii. Numărul paginii se indică în câmpul din dreapta jos al paginii.   
+ Titlul capitolelor sunt scrise cu litere majuscule (font 14 -16 pt., bold, centrat), a 
+subcapitolelor — cu litere mici, în afară de prima literă (font 14 pt., bold, centrat). După 
+denumirea capitolului sau a subcapitolul ui nu se pune punct. Capitolele se numerotează prin 
+cifre romane, iar subcapitolele cu cele arabe.  
+ Fiecare capitol începe din pagină nouă, subcapitolele urmează succesiv. Sublinierea titlurilor 
+nu se admite.  
+ Toate tabelele, formulele, figurile (desene, d iagrame etc.) se numerotează, indicându -se 
+numărul capitolului și numărul de ordine a acestora. De exemplu, Tabelul 1.2 (tabelul doi din 
+capitolul întâi). (Anexa 7) 
+ Denumirea tabelului se amplasează deasupra tabelului, iar a figurii – sub figură. În mod 
+obligatoriu este necesar de indicat unitățile de măsură, și sursa. 
+ Tabelele și figurile din anexe se numerotează luând în considerare numărul anexei, de 
+exemplu, Tabelul A 1.2 (tabelul 2 din Anexa 1).  
+ Formulele/ecuațiile vor fi centrate, iar numerotarea ace stora se va plasa la sfârșitul rândului, 
+indicându-se numărul capitolului și numărul de ordine a acestora. Explicația simbolurilor 
+utilizate se prezintă sub formulă în ordinea în care ele urmează. Modele de prezentare și 
+numerotare a tabelelor, figurilor și formulelor sunt prezentate în Anexa 7. 
+ În mod obligatoriu se utilizează literele cu diacritice specifice limbii române (ă, â, î, ș, ț și 
+majusculele lor). 
+ Semnele de punctuație (".", ";", ",", "?", "!") sunt urmate în mod obligatoriu de un spațiu. 
+ Nu sunt acceptate prescurtări ale cuvintelor. 
+ Imprimarea tezei pe hârtie trebuie să fie calitativă. Literele, semnele, formulele, figurile 
+trebuie să aibă aceeași intensitate pe parcursul rândului, paginii, lucrării în ansamblu, indicii 
+formulelor lizibili. Se recomanda a tipări teza la imprimantă laser. 
+ Teza se leagă prin copertare cu spirală într-un singur exemplar. 
+3.6.2. Recomandări stilistice 
+Teza de master constituie un text științific, care necesită ordonarea coerentă și succintă a 
+ideilor, evitându -se orice greș eli gramaticale. Frazele trebuie să fie concise și clare, evitându -se 
+folosirea unui stil prea metaforic. Se recomandă a utiliza așa exprimări ca: ‖prin urmare‖, ‖cu toate 
+că‖, ‖ așa cum rezultă din cele menționate anterior etc.‖  
+Expunerea materialului în  teza de master se face de la persoana a treia, folosindu -se un 
+limbaj impersonal. Astfel, vor fi evitate expresiile ‖eu consider‖, ‖în opinia mea‖ etc. 
+3.6.3. Exigențe etice 
+Teza de master trebuie să reflecte integral munca masterandului. Toate sursele bi bliografice 
+utilizate vor fi menționate în lista bibliografică, în caz contrar, masterandul va fi învinuit de plagiat.   
+
+=== PAGE 43 ===
+43 
+ 
+În scopul neadmiterii susținerii unor teze plagiate (susținerea repetată a aceleiași teze de 
+master, precum și a copierii a unor pasaje  integrale din diferite surse) Senatul ASEM a aprobat 
+Regulamentul privind prevenirea plagiatului în rândul studenților/masteranzilor [3]. 
+În conformitate cu regulamentul dat prin plagiat academic se înțelege ‖acțiunea de preluare a 
+unor produse de muncă i ntelectuală și presupune expunerea, într -o operă scrisă sau o comunicare 
+orală, inclusiv în format electronic, a unor creații intelectuale originale extrase din opere scrise, 
+inclusiv în format electronic, ale altor autori, fără a menționa acest lucru și f ără a face trimitere la 
+sursele originale.‖ 
+Plagiatul în cazul unei teze de master reprezintă o fraudă intelectuală majoră, de aceea în 
+cazul depistării acestuia: 
+- în sistemul Antiplagiat ASEM,  masterandul nu va fi admis la susținerea publică a tezei; 
+- în cadrul examenului de susținere a tezei, Comisia de evaluare a tezelor de master, va aprecia 
+teza considerată a fi plagiată cu nota 1 ‖unu‖. 
+Masterandul care a fost depistat, a doua oară, că a plagiat teza nu va fi admis pe viitor la 
+examenul de susținere a tezei. Fapta de plagiat va fi consemnată în Dosarul personal al 
+masterandului.  
+3.7. Procedura de înregistrare și admitere la susținerea tezei de master 
+I. Depunerea în Sistemul Anti Plagiat.  
+În baza avizului favorabil a coordonatorului științific vizat î n Planul calendaristic de 
+elaborare a TM (Anexa 2 .2)masterandul plasează teza de master în Sistemul Anti Plagiat al ASEM, 
+urmând Instrucțiunea (pagina WEB a departamentului de profil) cu trei săptămâni până la începerea 
+sesiunii de susținere a TM. Dovada î nregistrării este Raportul privind gradul de coincidență al 
+lucrărilor încărcate de către utilizatori. 
+II. Depunerea tezei de master la departamentul de profil 
+Teza de master copertată și perfectată conform prevederilor punctului 3.6 al prezentului 
+Ghid, însoțită de Planul calendaristic avizat de coordonatorul științific și Raportul privind gradul de 
+coincidență al lucrărilor încărcate de către utilizatori se prezintă spre înregistrare la departamentul de 
+profil în ziua înregistrării în Sistemul Anti Plagiat. Depunerea și înregistrarea TM în registrul tezelor 
+de master la departamentul de profil este posibilă doar în cazul în care teza este semnată de 
+coordonatorul științific și masterand pe pagina de titlu. 
+III. Admiterea la susținerea tezei de master 
+Șeful departamentului de profil admite la susținere teza de master în următoarele condiții: 
+- avizul favorabil al coordonatorului științific (Anexa 8.2); 
+- rezultatele Raportului privind gradul de coincidență al lucrărilor încărcate de către 
+utilizatori, care atestă nivelul redus de coincidență (până la 60% text original). 
+
+=== PAGE 44 ===
+44 
+ 
+3.8. Susținerea tezei de master 
+Tezele de master sunt susține public, în fața comisiilor de evaluare stabilite prin ordinul 
+rectorului ASEM. Comisiile de evaluare a tezelor de master sunt constitu ite din cel puțin trei 
+membri, inclusiv reprezentanți ai angajatorilor.  
+Orarul susținerii tezelor se va stabili prealabil în conformitate cu Planul de studii pentru 
+programele de masterat respective și se va da publicității pe pagina WEB sau pe panoul de avize a 
+Școlii Masterale de Excelență în Economie și Business. 
+Pentru prezentarea tezei de master masterandului i se oferă până la 20 min. Pentru a depăși 
+problema limitării în timp masterandul este obligat să prezinte sinteza cercetării efectuate în programul 
+Power Point/ Prezi/ PDF cu utilizarea tehnicii de calcul și de proiectare. De asemenea, se recomandă să se 
+formuleze succint textul comunicării, prin expunerea esenței problemei, a rezultatelor obținute în urma 
+cercetării, concluziile și recomandările elaborate.  
+Prezentarea conține în mod obligatoriu următoarele: 
+Slide 1. Denumirea tezei de masterat și nume, prenume al autorului și conducătorului; 
+Slide 2. Cuprinsul lucrării; 
+Slide 3. Obiectivele cercetării; 
+Slide 4, .... Slide n-1. Principalele rezultate ale cercetării; 
+Slide n Concluzii și recomandări. 
+Conținutul comunicării nu trebuie să repete informațiile prezentate în slide. 
+Comunicarea trebuie să reflecte următoarele: 
+ scopul și obiectivele; 
+ baza științifico-metodologică; 
+ rezultatele cercetării; 
+ contribuția proprie; 
+ concluzii și recomandări. 
+După prezentarea raportului, masterandul răspunde la întrebările adresate de membrii 
+comisiei de evaluare a tezelor de master. Răspunsurile trebuie să fie clare, succinte și la subiect, iar 
+masterandul trebuie să demonstreze atât o bună pregătire generală la profil, cât și o pregătire bună la 
+tema tezei. 
+Ulterior, se dă citire ‖Avizul conducătorului științific‖, masterandul urmând să -și expună 
+propriul punct de vedere față de obiecțiile indicate. 
+3.9. Criteriile de evaluare 
+Decizia Comisiei de evaluare a tezelor de master privind aprecierea tezei de master are la 
+bază calitatea lucrării, rezultatele susținerii și concluziile conducătorului științific.  Nota propusă de 
+conducătorul științific este orientativă. 
+Nota finală reprezintă media aritmetică a notelor membrilor Comisiei, care se stabilește de 
+comun acord la ședința închisă a Comisiei de evaluare a tezelor de master.  
+Membrii Comisiei vor aprecia teza de master după criteriile specificate în Tabelul 3.2. 
+
+=== PAGE 45 ===
+45 
+ 
+Tabelul 3.2. Criteriile de evaluare a tezei de master și ponderea fiecărui criteriu 
+Nr. 
+crt. 
+Criteriu de evaluare Ponderea 
+1.  Calitatea/complexitatea metodologiei cercetării 0,1 
+2.  Calitatea fundamentării științifice 0,2 
+3.  Relevanța practică a studiului efectuat 0,2 
+4.  Realizarea obiectivelor cercetării 0,2 
+5.  Calitatea (lizibilitate) grafică și elocința prezentării; 
+corectitudinea și promptitudinea răspunsurilor.  0,3 
+Nota finală ( NF) se va calcula, fiind rotunjită până la cifră întreaga conform regulilor genera le 
+aplicate, conform formulei: 
+NF = 
+  ,                                                                                                (3.1) 
+unde: 
+ – ponderea criteriului ―I‖; 
+ - nota criteriului ―i‖, calculată ca media aritmetică a notelor atribuite de către membrii comisiei. 
+Rezultatul susținerii tezei de master se comunică masteranzilor în aceeași zi, după ședința 
+Comisiei de evaluare a tezelor de master. 
+În cazul în care nu sunt de acord cu nota stabilită, masteranz ii au dreptul să conteste 
+rezultatele evaluării tezei de master. Eventualele contestații se depun în scris, la secretariatul Școlii 
+Masterale de Excelență în Economie și Business, în termen de maximum 24 ore de la comunicarea 
+rezultatelor. Contestațiile se examinează, în termen de 48 de ore de la depunere, de către comisia de 
+contestație aprobată prin ordinul rectorului ASEM și comisia de evaluare a tezelor de master. 
+Prezența masterandului la ședința de examinare a contestației este solicitată de către mem brii 
+comisiei de contestare. 
+3.10. Susținerea repetată 
+Masteranzii care n -au susținut teza de master în sesiunea stabilită, au dreptul la o susținere 
+repetată de cel mult două ori în următorii 3 ani. Cheltuielile de examinare vor fi suportate de către 
+solicitant, mărimea acestora fiind stabilite de Senatul ASEM.  
+La a doua susținere, masterandul va solicita reconfirmarea temei tezei de master  printr-o 
+cerere pe numele rectorului, avizată de către șeful departamentului de profil și directorul Școlii 
+Masterale de Excelență în Economie și Business. Dacă și la a doua susținere a tezei masterandul nu 
+obține nota de promovare, acestuia i se eliberează un certificat de absolvire a programului de 
+masterat și certificatul academic respectiv. 
+
+=== PAGE 46 ===
+46 
+ 
+REFERINȚE BIBLIOGRAFICE 
+1. Regulamentul de organizare a studiilor superioare de licenţă  (ciclul I) şi integrare , 
+Ordinul Ministerului Educaţiei, Culturii şi Cercetării nr. 1625 din 12.12.2019 
+2. Codul de Etică universitară al ASEM, Decizia Senatului ASEM nr. 7 din 21.02.2007 
+3. Regulamentul ASEM privind prevenirea plagiatului în rândul  studenţilor/masteranzilor, 
+Decizia Senatului ASEM, Proces verbal nr. 5 din 27.02.2013 
+4. Ghid privind elaborarea şi susţinerea tezelor de licenţă , red. 3. Decizia Senatului ASEM 
+nr. 4 din 21.12. 2018 
+5. Ghid de redactare a tezei de doctor / doctor habilitat . Anexă la Decizia CC al ANACEC 
+nr. 5 din 18 decembrie 2018 
+6. Decizia Senatului ASEM nr. 4/8 din 25.03.2009 
+7. Şerbănescu, A. Cum să scrii un text . Ed.-a 3 –a, Iaşi: Polirom,  2007. 260 p. ISBN 978-
+973-46-0674-0. 
+8. Graff, G., Birkenstein, C. Manual pentru scrierea academică: Eu spun/Eu Spun; trad.: 
+Poantă L. Piteşti: Paralele 45, 2015. 247 p. ISBN 978-973-47-2207-5 
+
+=== PAGE 47 ===
+47 
+ 
+ANEXE 
+Anexa 1. Cererea privind aprobarea temei 
+Anexa 1.1. Cererea privind aprobarea temei proiectului de an 
+Șefului departamentului 
+“Tehnologia Informației și 
+Management Informațional” 
+__________________ 
+__________________ 
+(titlul științific, numele și prenumele) 
+ 
+ 
+Subsemnatul (a) ______________________________________, student (ă) la facultatea 
+„Tehnologii Informaționale și Statistică Economică‖, 
+specialitatea „__________________________________‖, forma de învăţământ (frecvenţă/frecvență 
+redusă)___________________, anul de studii ___ ____, grupa _________, rog să dispuneți 
+aprobarea temei proiectului de an:  
+______________________________________________________________________________ 
+______________________________________________________________________________ 
+______________________________________________________________________________ 
+Solicit să-l desemnați în calitate de conducător științific pe dl./dna 
+______________________________________________________________________________ 
+(titlul științific nume și prenume) 
+Data_______________            _____________________ 
+(semnătura studentului) 
+E-mail___________________________ 
+Telefon__________________________ 
+Se desemnează în calitate de conducător ştiinţific 
+______________________________________________________________________________ 
+(titlul științific nume și prenume) 
+Data_______________         ____________________________ 
+(semnătura şefului de departament) 
+Data_______________         ____________________________ 
+(semnătura conducătorului științific) 
+
+=== PAGE 48 ===
+48 
+ 
+Anexa 1.2. Cererea privind aprobarea temei tezei de licență 
+ 
+Şefului departamentului 
+__________________ 
+__________________ 
+(titlul științific, numele și prenumele) 
+ 
+Subsemnatul (a)__________________________________________________________________ 
+student (ă)  gr.____________, forma de învățământ (frecvență/ frecvență redusă) 
+________________________________, rog să dispuneți aprobarea temei tezei de licenţă: 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+(pe baza materialelor ______________________________________________________________) 
+tema tradusă în limba engleză______________________________________________________ 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+Solicit să-l desemnați în calitate de conducător ştiinţific pe dl./dna 
+________________________________________________________________________________ 
+(titlul științific, numele și prenumele) 
+ 
+Data ___________                                                                   _______________________________ 
+(semnătura studentului) 
+E-mail _____________________________ 
+Telefon______________________ 
+Se desemnează în calitate de conducător ştiinţific 
+________________________________________________________________________________ 
+(titlul științific, numele și prenumele) 
+Data ___________                                                                   _______________________________ 
+                     (semnătura şefului de departament) 
+Data ___________                                                                    _______________________________ 
+ (semnătura conducătorului ştiinţific) 
+Solicit schimbarea temei tezei susnumite pe: 
+________________________________________________________________________________
+________________________________________________________________________________ 
+tema tradusă în limba engleză______________________________________________________ 
+________________________________________________________________________________ 
+Data     ____________________________ 
+(acordul şefului de departament) 
+Data     ____________________________ 
+(acordul conducătorului ştiinţific) 
+ 
+
+=== PAGE 49 ===
+49 
+ 
+Anexa 1.3. Cerere privind solicitarea temei tezei de master 
+Școala Masterală de Excelență în Economie și Business 
+Directorului Școlii Masterale de 
+Excelență în Economie și Business, 
+__________________ 
+__________________ 
+(titlul științific, numele și prenumele) 
+Subsemnatul (a)__________________________________________________________________ 
+masterand (ă) la programul de studiu________________________________________________ 
+gr.________________rog să dispuneți aprobarea temei tezei de master: 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+(pe baza materialelor ______________________________________________________________) 
+tema tradusă în limba engleză______________________________________________________ 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+Solicit în calitate de conducător științific 
+________________________________________________________________________________ 
+Data                                                             ____________________________ 
+                                                                                                                  (semnătura masterandului) 
+Telefonul de contact al masterandului:                                 ____________________________ 
+Adresa e-mail:                                                           ____________________________ 
+Se desemnează în calitate de conducător științific________________________________________ 
+Data                                                              ____________________________ 
+                                                                                                        (semnătura șef departament) 
+Data                                                              ____________________________ 
+                                                                                                        (semnătura coord. științific) 
+________________________________________________________________________________ 
+Solicit schimbarea temei tezei susnumite pe: 
+________________________________________________________________________________
+________________________________________________________________________________
+________________________________________________________________________________ 
+tema tradusă în limba engleză______________________________________________________ 
+________________________________________________________________________________ 
+________________________________________________________________________________ 
+Data                                                             ____________________________ 
+                                                                                                      (acordul  șefului de departament) 
+Data                                                             ____________________________ 
+                                                                                                    (acordul coord. științific) 
+
+=== PAGE 50 ===
+50 
+ 
+Anexa 2. Planul calendaristic de elaborare a lucrării 
+Anexa 2.1. Planul calendaristic de executare a tezei de licență 
+APROBAT 
+Șef departament 
+_________________________ 
+_________________________ 
+Proces verbal nr. ___,  
+din _______________ 20__ 
+Planul calendaristic de elaborare a tezei de licență 
+ 
+(numele şi prenumele studentului) 
+Tema tezei ______________________________________________________________________ 
+________________________________________________________________________________ 
+Etapele elaborării și prezentării tezei: 
+Nr.  Etapele  
+Termenul de realizare   
+PLAN  
+(data limită)  
+REALIZAT  
+(data realizării) 
+1.  Studierea surselor bibliografice   
+2.  Stabilirea obiectivelor   
+3.  Aprobarea planului tezei   
+4.  Elaborarea și prezentarea capitolului I   
+5.  Elaborarea și prezentarea capitolului II   
+6.  Elaborarea și prezentarea capitolului III   
+7.  Prezentarea variantei finale a tezei 
+coordonatorului 
+  
+8.  
+Acceptul coordonatorului pentru plasarea 
+tezei în Sistemul Antiplagiat și prezentarea la 
+departament 
+  
+9.  Predarea tezei în original la departament   
+10.  Plasarea tezei, în format electronic, în 
+Repozitoriu ASEM 
+  
+Subsemnatul(a), îmi asum responsabilitatea să realizez toate activitățile planificate în cadrul 
+elaborării tezei de licență în termenii specificați mai sus. În cazul nerespectării termenilor nu 
+voi pretinde a fi admis(ă) la susținerea tezei de licență în cadrul Comisiei. 
+Data ___________ 
+ Student ________________ 
+       semnătura 
+Conducător științific ________________________________________    _____________________ 
+                                   numele, prenumele, funcţia, titlul ştiinţific                                 semnătura    
+
+=== PAGE 51 ===
+51 
+ 
+Anexa 2. Planul calendaristic de elaborare a tezei de master 
+APROBAT: 
+Șef departament 
+__________________________ 
+Proces Verbal nr. ___________ 
+  „_____‖_____________ 20___ 
+Planul calendaristic de elaborare a tezei de master 
+ 
+(numele și prenumele masterandului) 
+Tema tezei de master _____________________________________________________________ 
+________________________________________________________________________________
+________________________________________________________________________________ 
+Etapele elaborării și prezentării tezei de master: 
+Nr. 
+crt. Etapele  
+Data limită  
+(aprobat de  
+departamentul 
+de profil)  
+Data realizării/ 
+semnătura 
+coordonatorului 
+1.  Studierea surselor bibliografice   
+2.  Aprobarea planului tezei   
+3.  Elaborarea și prezentarea capitolului I   
+4.  Elaborarea și prezentarea capitolului II   
+5.  Elaborarea și prezentarea capitolului III   
+6.  Prezentarea variantei finale a tezei   
+7.  Înregistrarea tezei de master la departament   
+8.  Acceptul coordonatorului pentru plasarea în 
+Sistemul Anti Plagiat   
+ Masterand (a)  ________________________________________  
+ (semnătura) 
+ Coordonator științific  __________________________________  
+ (semnătura) 
+
+=== PAGE 52 ===
+52 
+ 
+Anexa 3. Foaie de titlu 
+Anexa 3.1. Foaie de titlu (Proiect de An) 
+ 
+FACULTATEA TEHNOLOGII INFORMAȚIONALE ȘI  
+STATISTICĂ ECONOMICĂ 
+DEPARTAMENTUL  
+TEHNOLOGIA INFORMAȚIEI ȘI MANAGEMENT INFORMAȚIONAL 
+(Times New Roman, bold, 14 pt., centrat) 
+PROIECT DE AN 
+(Times New Roman, bold, 18 pt., centrat) 
+Tema Proiectului de an 
+Specialitatea       (cod, denumirea) 
+(Times New Roman, bold, 16 pt., centrat) 
+Autor: 
+Student gr. ________, 
+(învăţământ cu frecvenţă/frecvență redusă) 
+Prenumele NUMELE 
+__________________ 
+(semnătura) 
+Conducător ştiinţific: 
+grad științific, Prenumele NUMELE 
+___________________ 
+(semnătura) 
+Chişinău – 202__ 
+(Times New Roman, bold, 14 pt., centrat)
+
+=== PAGE 53 ===
+53 
+ 
+Anexa 3.2. Foaie de titlu (Teză de Licență) 
+ 
+FACULTATEA TEHNOLOGII INFORMAȚIONALE ȘI  
+STATISTICĂ ECONOMICĂ 
+DEPARTAMENTUL  
+TEHNOLOGIA INFORMAȚIEI ȘI MANAGEMENT INFORMAȚIONAL 
+(Times New Roman, bold, 14 pt., centrat) 
+Prenumele NUMELE autorului 
+(Times New Roman, bold, 18 pt., centrat) 
+DENUMIREA TEZEI DE LICENȚĂ 
+(Times New Roman, bold, 18 pt., centrat) 
+TEZĂ DE LICENȚĂ 
+(Times New Roman, bold, 16 pt., centrat) 
+Specialitatea        (cod, denumirea) 
+ (Times New Roman, bold, 14 pt., centrat) 
+Autor: 
+Student gr. ________, 
+(învăţământ cu frecvenţă/frecvență redusă) 
+Prenumele NUMELE 
+__________________ 
+(semnătura) 
+Conducător ştiinţific: 
+grad științific, Prenumele NUMELE 
+___________________ 
+(semnătura) 
+Chişinău – 202__ 
+(Times New Roman, bold, 14 pt., centrat)
+ADMIS la susţinere 
+Şef departament „Tehnologia 
+informației și management 
+informațional‖  
+conf. univ. Prenumele Numele  
+________________________ 
+‖___‖______________20__ 
+(Times New Roman, 12 pt.) 
+
+=== PAGE 54 ===
+54 
+ 
+Anexa 3.3. Foaia de titlu (Teza de Master) 
+FACULTATEA ACADEMIA DE STUDII ECONOMICE DIN MOLDOVA  
+(Times New Roman, bold, 18 pt., centrat) 
+ȘCOALA MASTERALĂ DE EXCELENȚĂ ÎN ECONOMIE ȘI BUSINESS 
+(Times New Roman, bold, 16 pt., centrat) 
+DEPARTAMENTUL TEHNOLOGIA INFORMAȚIEI  
+ȘI MANAGEMENT INFORMAȚIONAL 
+(Times New Roman, bold, 16 pt., centrat) 
+C.Z.U.: ....................................... 
+NUMELE, PRENUMELE AUTORULUI 
+(Times New Roman, bold, 16 pt., centrat) 
+DENUMIREA TEZEI DE MASTER 
+(Times New Roman, bold, 20 pt., centrat) 
+TEZA DE MASTER 
+(Times New Roman, bold, 16 pt., centrat) 
+Domeniul general de studii ………….(cod,denumirea) 
+Domeniul de formare profesională………….(cod,denumirea) 
+Programul de masterat ………….(denumirea) 
+(Times New Roman, bold, 14 pt., centrat) 
+Conducător științific: 
+Numele, prenumele, gradul științific 
+(Times New Roman, bold, 12 pt.) 
+_________________________________ 
+semnătura 
+Autor: 
+__________________________ 
+semnătura 
+Chișinău – 202_ 
+(Times New Roman, bold, 12 pt., centrat) 
+Admis la susținere 
+Șef departament:  
+conf. univ. Numele Prenumele 
+________________________ 
+‖___‖______________20__ 
+(Times New Roman, 12 pt.) 
+
+=== PAGE 55 ===
+55 
+ 
+Anexa 4. Cuprins (Model) 
+Anexa 4.1. Model de cuprins (Proiect de An) 
+CUPRINS 
+Introducere......................................................................................................................................3 
+1. Titlul primului capitol................................................................................................................5 
+1.1. Titlul subcapitolului............................................................................................................5 
+1.2. Titlul subcapitolului..........................................................................................................10 
+1.3. Titlul subcapitolului..........................................................................................................15 
+2. Titlul capitolului doi................................................................................................................20 
+2.1. Titlul subcapitolului..........................................................................................................20 
+2.2. Titlul subcapitolului..........................................................................................................25 
+2.2. Titlul subcapitolului..........................................................................................................35 
+Concluzii.......................................................................................................................................40 
+Referințe bibliografie...................................................................................................................43 
+Anexe.............................................................................................................................................46 
+
+=== PAGE 56 ===
+56 
+ 
+Anexa 4.2. Model de cuprins (Teză de Licență) 
+CUPRINS 
+Declarația de propria răspundere ………………………................……………………………….3 
+Lista abrevierilor (opţional) ……………………………….............……………………………….4 
+Lista figurilor (opţional) …………………………………….………………………….............…..5 
+Lista tabelelor (opţional) …………………………………...............……………………….………6 
+INTRODUCERE ………..……………………………………………………............................…..7 
+1. TITLUL PRIMULUI CAPITOL …………………….………….…………………………......10 
+1.1. Subcapitolul ………………………….…………………………….……..............................10 
+1.2. Subcapitolul ……………………………….........................………………………….…......15 
+1.3. Subcapitolul …………………………………………………………….….……..................20 
+2. TITLUL CAPITOLULUI DOI………………………………….………………………….......28 
+2.1. Subcapitolul ...........................................................................................................................28 
+2.2. Subcapitolul ...........................................................................................................................35 
+2.3. Subcapitolul ...........................................................................................................................42 
+3. TITLUL CAPITOLULUI TREI .................................................................................................48 
+3.1. Subcapitolul .........................................................................................................................48 
+3.2. Subcapitolul .........................................................................................................................54 
+3.3. Subcapitolul .........................................................................................................................60 
+CONCLUZII …………………………………………………..……………….…..........................66 
+BIBLIOGRAFIE …………………………………………………………..………........................69 
+ANEXE …………………………………………..............................................................................74 
+
+=== PAGE 57 ===
+57 
+ 
+Anexa 4.3. Model de cuprins (Teză de Master) 
+CUPRINS 
+Lista abrevierilor.................................................................................................................................2 
+Lista tabelelor și lista figurilor...........................................................................................................3 
+Rezumat................................................................................................................................................4 
+Introducere...........................................................................................................................................7 
+I. TITLUL CAPITOLULUI.............................................................................................................10 
+1.1. Titlul subcapitolului.................................................................................................................10 
+1.2. Titlul subcapitolului.................................................................................................................20 
+II. TITLUL CAPITOLULUI............................................................................................................30 
+2.1. Titlul subcapitolului.................................................................................................................30 
+2.2. Titlul subcapitolului.................................................................................................................35 
+2.3. Titlul subcapitolului.................................................................................................................40 
+III. TITLUL CAPITOLULUI..........................................................................................................50 
+3.1. Titlul subcapitolului.................................................................................................................50 
+3.2. Titlul subcapitolului.................................................................................................................60 
+3.3. Titlul subcapitolului.................................................................................................................70 
+Concluzii și recomandări..................................................................................................................80 
+Bibliografie.........................................................................................................................................83 
+Anexe..................................................................................................................................................85 
+Adnotare (în română)  
+Adnotare (în engleză)  
+Declarația privind propria răspundere 
+
+=== PAGE 58 ===
+58 
+ 
+Anexa 5. Declarația privind propria răspundere 
+Anexa 5.1. Declarația privind propria răspundere (Teza de Licență) 
+a). studentul 
+Subsemnatul (a),______________________________________________________________ 
+absolvent al Facultăţii ________ _________________________________ al Academiei de Studii 
+Economice din Moldova, specialitatea (denumirea specialității), declar pe propria răspundere că 
+teza de licență pe tema: ____________________________________________________________ 
+________________________________________________________________________________
+____________________________________________________________________________a fost 
+elaborată de mine şi nu a mai fost prezentată niciodată la o altă facultate sau instituţie de 
+învăţământ super ior din ţară sau din străinătate, iar exemplarul prezentat şi înregistrat la 
+departament corespunde integral cu varianta electronică plasată în sistemul Anti-plagiat. 
+De asemenea, declar că sursele utilizate în teză, inclusiv cele din Internet, sunt indica te cu 
+respectarea regulilor de evitare a plagiatului: 
+- fragmentele de text sunt reproduse întocmai şi sunt scrise în ghilimele, deţinând referinţa 
+precisă a sursei; 
+- redarea/reformularea în cuvinte proprii a textelor altor autori conţine referinţa precisă; 
+- rezumarea ideilor altor autori conţine referinţa precisă a originalului. 
+_______________________ 
+Semnătura 
+b). conducătorul științific 
+Subsemnatul(a), _____________________________________________________ la 
+departamentul ____________, în calitate de conduc ător științific a tezei de licență a studentului 
+_________________________________________________________________________, cu tema 
+________________________________________________________________________________
+___________, declar, că teza prezentată core spunde după structură și conținut planului aprobat și 
+obiectivelor stipulate și admit, pe această cale, plasarea tezei în Repozitoriul ASEM. 
+______________________ 
+Data 
+______________________ 
+Semnătura 
+
+=== PAGE 59 ===
+59 
+ 
+Anexa 5.2. Declarația privind propria răspundere (Teza de Master) 
+Declarația privind propria răspundere 
+Subsemnatul (a),_____________________________________________________________ 
+absolvent al Academiei de Studii Economice din Moldova, programul de masterat__________ 
+________________________________________________________________________________, 
+declar pe propria răspundere că teza de master pe tema _________________________ 
+________________________________________________________________________________ 
+___________________________________________________________________________a fost 
+elaborată de mine și nu a mai fost prezentată niciodată la un alt program de masterat sau 
+instituție de învățământ superior din țară sau din străinătate , iar exemplarul prezentat și 
+înregistrat la departament corespunde integral cu varianta electronică plasată în sistemul Anti-plagiat. 
+De asemenea, declar că sursele utilizate în teză, inclusiv cele din Internet, sunt indicate cu 
+respectarea regulilor de evitare a plagiatului: 
+- fragmentele de text sunt reproduse întocmai și sunt  scrise în ghilimele, deținând referința 
+precisă a sursei; 
+- redarea/reformularea în cuvinte proprii a textelor altor autori conține referința precisă; 
+- rezumarea ideilor altor autori conține referința precisă a originalului. 
+________________________ 
+Numele Prenumele 
+___________________ 
+Semnătura 
+ 
+ 
+ 
+___________________ 
+Data 
+
+=== PAGE 60 ===
+60 
+ 
+Anexa 6. Modele de prezentare a referințelor bibliografice în conformitate cu standardul SM 
+ISO 690:2012 Informare și documentare. Reguli pentru prezentarea referinţelor bibliografice 
+şi citarea resurselor de informare 
+(ISO 690:2010, IDT) 
+Pentru ACTE NORMATIVE 
+1. Legea cu privire la Centrul Naţional Anticorupţie: nr. 1104 -XV din 06.06.2002. Monitor 
+Oficial al Republicii Moldova. 2012, nr. 209-211, 6-13. 
+2. Hotărârea Guvernului Republicii Moldova cu privire la organizarea şi funcţionarea 
+Ministerului Justiţiei: nr. 736 din 03.10.2012. Monitor Oficial al Republicii Moldova . 2012, 
+nr. 212-215, 13-16. 
+3. SM EN ISO/IEC 27001:2017. Tehnologia informației. Tehnici de securitate. Sisteme de 
+management al securității informației. Cerințe. 
+4. Codul cu privire la ştiinţă şi inovare al Republicii Moldova: nr. 259 -XV din 15 iulie 2004. 
+In: Monitorul Oficial al Republicii Moldova, 2004, nr. 125-129, pp. 12-70.  
+Referinţele bibliografice trebuie să includă elementele n ecesare de identificare a documentului, 
+prezentate conform următoarelor scheme:  
+1. Cărţi tipărite, publicaţii monografice, teze, autoreferate, materiale ale conferinţelor: 
+Exemplul 1 (publicații cu autori) 
+1. BELOSTECINIC, Gr., SAKOVICI, V., MOISEENCO, E. Securitatea economică a statului: 
+teorie, metodologie, practică. Chişinău: ASEM, 2011. ISBN 978-9975-75-574-0. 
+2. COSTAȘ, Ilie. Tehnologii de procesare a informaț iei tehnologice. Chișinău: ASEM, 2015. 
+284 p. ISBN: 978-9975-75-553-5. 
+3. OPREA, Serghei. Rețele informatice. Chișinău: UCCM, 2012. 141 p. ISBN 978 -9975-114-
+18-9 
+4. SCHULMEYER, Gordon . Handbook of Software Quality Assurance. Norwood: ARTECH 
+HOUSE, 2008. 485 p. ISBN: 978-1-59693-186-2. 
+5. ZGUREANU, Aureliu. Bazele securității informației . Manual. Chișinău: ASEM, 2018, 242 
+p. ISBN 978-9975-75-912-0.  
+6. СОЛОМОН, Д.И. Дробное программирование и недифференцируемая оптимизация . 
+Кишинев: Эврика, 2010. ISBN 978-9975-941-53-2. 
+Exemplul 2 (publicații fără autor) 
+1. Anuarul Statistic al Republicii Moldova 2021 . Chișinău: Statistică, 2021. 470 p. ISBN 978 -
+9975-78-932-5.  
+2. Global Cybersecurity Index (GCI) 2017, Geneva: ITU, 2017. 78 p. ISBN: 978 -92-61-25061-
+4.  
+AUTOR(I). Titlu. Loc apariţie: Editura, an apariţie. Paginaţia (opţional). Număr stand ardizat 
+(ISBN) 
+
+=== PAGE 61 ===
+61 
+ 
+Exemplul 3 (teze, autoreferate)  
+1. ANDRONATIEV, Victor. Elaborarea și cercetarea modelelor și algoritmilor de 
+eficientizare a utilizării resurselor rețelelor informatice locale: autoref. al tz. de doct. în 
+economie. Chișinău, 2009. 30 p 
+2. COJOCARU, I gor. Suportul informațional al ev aluării cercetării ştiinţifice în Republica 
+Moldova: tz. de doct. în informatică. Chişinău, 2014. 160 p.  
+3. DAVID, Constantin. Raționalizarea sistemului informațional din Republica Moldova în 
+perspectiva integrării în Uniunea Europeană : autoref. al tz. de do ct. în economie. Chișinău, 
+2013. 30 p. 
+4. ZGUREANU, Aureliu. Securitatea informațională și metode de criptare bazate pe mulțimi 
+de relații multiare: tz. de doct. în șt. fiz-matem. Chișinău, 2011. 164 p 
+Materialele conferinţelor științifice 
+1. OPREA, Serghei. The concept of the information system for monitoring the epidemiological 
+situation in the Republic of Moldova. În: Conference proceeding of the Online International 
+Scientific-Practical Conference ‖Economic security in the  context of sustainable  
+development‖, 2nd Edition, December 17, 2021.  Chișinău:ASEM, 2022, pp. 21 -26.   ISBN 
+978-9975-155-73-1 
+2. PRISĂCARU, Anatolie. Reducerea problemei de acoperire a unui gra f cu mulţimi convexe 
+la problema de colorare a unui hipergraf . In: Competitivitatea și Inovarea în Economia 
+cunoașterii: conf. șt. intern., 28 -29 sept. 2018. Ch ișinău: ASEM, 2018, pp. 53 -54. E-ISBN 
+978-9975-75-934-2. 
+3. SECU, Andrei. Asigurarea în regim cont inu a calității produselor software. In: Simpozion 
+Științific Internațional al Tinerilor Cercetători . 16 -17 apr. 2021. Chișinău: ASEM, 2021, 
+vol. 1, pp. 26-32. e-ISBN 978-9975-155-41-0. 
+4. TARLAPAN M., ZGUREANU, A. Neuronal efficiency in security surveillance  and 
+prediction. In: Society Consciousness Computers, vol. 6, Alma Mater Pub., Bacău, 2020, pp. 
+39-43. ISSN 2359-7321.  
+5. ZGUREANU, Aureliu. Probleme de securitate ale aplicațiilor de software IP. In: Modelare 
+matematică, optimizare și tehnologii informațion ale: Materiale ale conf. șt. intern., 22 -25 
+martie 2016, Ch.: Evrica, 2016. pp. 389-399. ISBN 978-9975-941-88-4. 
+2. Publicații seriale:  
+AUTOR (I). Titlul articolului. In: ( opțional) Titlul publicaţiei seriale. Anul, volumul, numărul 
+serialului, paginile unde este amplasată lucrarea. Număr standardizat (ISBN/ISSN). 
+1. COSTAȘ, I., GODONOAGĂ, A., VARANIȚA, G. Metode și modele de eficientizare a 
+costurilor de dezvoltare a rețelelor de telecomunicații. Economica. 2020, nr. 1(111), pp. 113-
+130. ISSN 1810-9136. 
+2. COTELNIC, Ala. Quality in higher education: current situation and perspectives (case of the 
+Republic of Moldova). Review of General Management . 2012, 16(2), 76 -86. ISSN 1841-
+818x. 
+
+=== PAGE 62 ===
+62 
+ 
+3. HOLMSTROM, B., MILGROM, P. The firm as an incentive system. American Economic 
+Review. 1994. 84(4), 972-991. ISSN 0002-8282. 
+4. ZGUREANU, Aureliu. Information encryption systems based on Boolean functions. The 
+Computer Science Journal of Moldova , vol.18, no. 3(54), 2010, pp. 319 -335. ISSN 1561 -
+4042. 
+Resurse electronice  
+1. National Institute o f Standards and Technology (NIST), Federal Information Processing 
+Standards (FIPS) Publication 180 -4, Secure Hash Standard (SHS) [online], [citat 26 martie 
+2021]. Disponibil: https://doi.org/10.6028/NIST.FIPS.180-4.  
+2. Selenium Official Technical  Documentat ion [online]. Selenium software testing framework 
+for web applications [citat  13 februarie 2021]. Disponibil: 
+https://www.selenium.dev/documentation/.  
+3. BAZENIUC, Ivan, ZGUREANU, Aureliu. Security features of information system that use 
+microservice archit ecture. In: ARA Journal of Sciences , nr. 4 (2021), ARA Publisher 
+Academic Press, USA, 2021, pp., pp. 160 -164, ISSN: 0896-1018 [citat 13 februarie 2021], 
+Disponibil: https://www.americanromanianacademy.org/_files/ugd/754172_ a75e26b7694 
+c4b1aac12b2d21dea1017.pdf. 
+
+=== PAGE 63 ===
+63 
+ 
+Anexa 7. Modele de reprezentare și numerotare a tabelelor, figurilor și formulelor 
+ 
+Model de prezentare a tabelului 
+Tabelul 1.3 Numărul de utilizatori cu acces la Internet 
+mii unități 
+ 2014 2015 2016 2017 2018 2019 2020 
+puncte fixe 509,2 534,4 557,4 584,3  623,1  670,5  719,0 
+puncte mobile 1688,4 1761,1 1 893,6  2 430,1  2 168,2  2 381,1  2 371,1 
+bandă largă 1216,1 1875,5 2 451,0  3 014,4  2 791,3  3 051,6  3 090,1  
+Sursa: Biroul Național de Statistică al Republicii Moldova, Tehnologii Informați onale și Comunicații 
+„Situația privind informatizarea și conexiunea la Internet ”. Disponibil: 
+https://statistica.gov.md/public/files/publicatii_electronice/Anuar_Statistic/2021/19_AS.pdf (accesat 
+07.01.2022) 
+Tabelul 2.1 Planul calendaristic pentru automatizare testelor manuale 
+Nr Operația 
+tmin 
+(zile) 
+tmax 
+(zile) 
+toptim 
+(zile) 
+Numărul 
+de 
+persoane 
+implicate 
+1. Analiza pachetelor de teste manuale și a 
+documentației 1 2 1,5 2 
+2. Automatizarea fiecărui caz de testare 1 4 2,5 2 
+3. Identificarea și documentarea defectelor 0,5 1 0,75 2 
+Total 2,5 7 4,75 2 
+Sursa: Documentația tehnică internă din cadrul companiei „MacPrim SRL” (citat 02.09.2021) 
+ 
+
+=== PAGE 64 ===
+64 
+ 
+Model de prezentare a figurii 
+ 
+ 
+Figura 2.1. Evoluția modurilor de acces la Internet a utilizatorilor din Republica Moldova,  
+mii unități (2014-2020)  
+Sursa: Elaborat de autor în baza datelor Biroului Național de Statistică [9] 
+ 
+ 
+Figura 2.2. Interconexiunea proceselor pe nivelele modelului ISO/OSI 
+Sursa: https://www.geeksforgeeks.org/working-of-iso-osi-model  (citat la data de 01.02.2022) 
+ 
+
+=== PAGE 65 ===
+65 
+ 
+Model de prezentare a formulei 
+,                                                      (2.1) 
+unde: 
+E - efectul economic anual 
+ - investițiile cu elaborarea și implementarea produsului informatic 
+ – coeficientul normativ de eficiență a investițiilor 
+ – economia anuală 
+ ,                                                   (4.4) 
+unde 
+R – suma de bani totală oferită drept remunerare, 
+Nzile – numărul de zile în care este livrat framework-ul, 
+Szi – remunerarea zilnică, 
+Nsal – numărul de salariați implicați la dezvoltare și automatizare. 
+
+=== PAGE 66 ===
+66 
+ 
+Anexa 8. Avizul conducătorului științific 
+Anexa 8.1. Avizul conducătorului științific (Teza de Licență) 
+Academia de Studii Economice din Moldova 
+Facultatea ___________________________________ 
+Departamentul ____________________________________ 
+AVIZ 
+asupra tezei de licenţă cu tema 
+________________________________________________________________________________
+________________________________________________________________________________ 
+elaborată de studentul (a) ______________________, gr.               , învățământ_______________, 
+Referitor la conţinutul tezei de licență propunem următoarele aprecieri: 
+Nr. 
+crt. 
+Criteriu de apreciere Nota propusă 
+Foarte 
+bine 
+(10-9) 
+Bine 
+(8-7) 
+Satisfăcător 
+(6-5) 
+Nesatisfăcător 
+(4-1) 
+1. Structura lucrării: coerenţa conceptuală şi 
+modalitatea de prezentare 
+    
+2. Abordarea teoretică a temei     
+3. Transpunerea problematicii pe o aplicaţie 
+practică 
+    
+4. Corespunderea conţinutului lucrării cu 
+scopul şi obiectivele propuse 
+    
+5. Utilizarea informaţiei analitice în 
+expunerea materialului 
+    
+6. Diversitatea, relevanța şi actualitatea 
+surselor bibliografice 
+    
+7. Contribuţia personală a autorului 
+(cercetarea proprie (cercetare calitativă, 
+cercetare cantitativă), interpretarea corectă 
+a rezultatelor) 
+    
+8. Corespunderea tezei cu prevederile 
+Ghidului 
+    
+9. Relevanţa concluziilor      
+Suplimentar menţionăm: 
+________________________________________________________________________________ 
+În concluzie, considerăm că teza de licenţă întruneşte integral/parţial/nu întruneşte (de subliniat) 
+condiţiile pentru a fi susţinută în faţa Comisiei pentru examenele de licenţă. 
+Nota propusă de conducător:____________________________ 
+Conducător ştiinţific: _________________________________                   _____________ 
+                                                    (titlul științific, numele și prenumele)                                   (semnătura) 
+Data _____________________ 
+
+=== PAGE 67 ===
+67 
+ 
+Anexa 8.2. Avizul conducătorului științific (Teza de Master) 
+Academia de Studii Economice din Moldovei 
+Școala Masterală de Excelență în Economie și Business 
+Departamentul Tehnologia Informației și Management Informațional 
+AVIZ 
+Asupra tezei de master cu tema_____________________________________________________ 
+________________________________________________________________________________ 
+Elaborată de masterandul (a) ________________________________________, gr. ___________ 
+Referitor la conținutul lucrării formulăm următoarele aprecieri: 
+Nr. 
+crt. Criteriu de apreciere 
+Calificativ 
+Nesatis-
+făcător 
+Satisfă-
+cător Bine Foarte  
+bine 
+1. Structura lucrării: coerența conceptuală și 
+modalitatea de prezentare 
+    
+2. Abordarea teoretică a temei     
+3. Transpunerea problematicii pe o aplicație 
+practică 
+    
+4. Corespunderea conținutului lucrării cu 
+scopul și obiectivele propuse 
+    
+5. Utilizarea informației analitice în 
+expunerea materialului 
+    
+6. Diversitatea și actualitatea  surselor 
+bibliografice 
+    
+7. Contribuția personală a autorului     
+8. Corespunderea tezei cu prevederile 
+Ghidului 
+    
+9. Relevanța concluziilor      
+Suplimentar menționăm: 
+________________________________________________________________________________
+________________________________________________________________________________
+________________________________________________________________________________ 
+În concluzie, considerăm că teza de master întrunește/integral/parțial/nu întrunește (de subliniat) 
+condițiile pentru a fi susținută în fața Comisiei pentru evaluarea tezelor de master. 
+Nota propusă de coordonatorul științific______________________ 
+Conducător științific: _____________________________________Semnătura______________ 
+                                                  (titlul științific, numele, prenumele) 
+Data ______________________ 
+
+=== PAGE 68 ===
+68 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+GHID METODIC 
+privind elaborarea și susținerea 
+proiectului de an, tezei de licență și tezei de master 
+ 
+ 
+ 
+ 
+ 
+ 
+În redacția autorilor 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+ 
+Coli editoriale 3,65. Coli de autor 3,60. Comanda 34.  
+______________________________________________________ 
+ 
+Serviciul Editorial-Poligrafic al ASEM 
+Chișinău, str. Mitropolit G. Bănulescu-Bodoni 59, MD 2005 
+Telefon: (022) 402-936, 402-910 

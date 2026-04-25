@@ -1,0 +1,3 @@
+Figura A2 - Rezumat
+Exemplu predictie: U1-I3 = 1.24
+Model: R ~ P·Q^T (2 factori latenti)

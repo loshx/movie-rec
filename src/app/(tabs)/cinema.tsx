@@ -2,10 +2,12 @@ import Constants from 'expo-constants';
 import { Ionicons } from '@expo/vector-icons';
 import { LinearGradient } from 'expo-linear-gradient';
 import { router } from 'expo-router';
+import * as ScreenOrientation from 'expo-screen-orientation';
 import { VideoView, useVideoPlayer } from 'expo-video';
 import React, { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import {
   ActivityIndicator,
+  AppState,
   FlatList,
   Image,
   Keyboard,
@@ -15,7 +17,9 @@ import {
   StyleSheet,
   Text,
   TextInput,
+  TouchableOpacity,
   View,
+  type LayoutChangeEvent,
   type ListRenderItemInfo,
   type NativeScrollEvent,
   type NativeSyntheticEvent,
@@ -191,13 +195,16 @@ export default function CinemaScreen() {
   const isFocused = useIsFocused();
 
   const wsRef = useRef<WebSocket | null>(null);
-  const videoViewRef = useRef<VideoView | null>(null);
   const chatListRef = useRef<FlatList<ChatMessage> | null>(null);
+  const overlayHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const chromeHideTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const shouldAutoscrollRef = useRef(true);
   const lastLiveSyncMsRef = useRef(0);
   const lastSentRef = useRef<{ text: string; at: number }>({ text: '', at: 0 });
+  const pendingMessageRef = useRef<string | null>(null);
   const phaseGuardTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
   const wsConnectMetaRef = useRef<{ key: string; at: number }>({ key: '', at: 0 });
+  const appStateRef = useRef(AppState.currentState);
   const userSnapshotRef = useRef<{ userId: number | null; nickname: string; avatarUrl: string | null }>({
     userId: null,
     nickname: 'guest',
@@ -214,14 +221,21 @@ export default function CinemaScreen() {
   const [likes, setLikes] = useState(0);
   const [likedByMe, setLikedByMe] = useState(false);
   const [failedAvatarUris, setFailedAvatarUris] = useState<Record<string, true>>({});
-  const [isFullscreen, setIsFullscreen] = useState(false);
+  const [isAppActive, setIsAppActive] = useState(true);
   const [poll, setPoll] = useState<CinemaPoll | null>(null);
   const [pollLoading, setPollLoading] = useState(false);
   const [pollSubmittingId, setPollSubmittingId] = useState<string | null>(null);
   const [pollMessage, setPollMessage] = useState<string | null>(null);
   const [eventMeta, setEventMeta] = useState<CinemaEventMeta | null>(null);
   const [eventMetaLoading, setEventMetaLoading] = useState(false);
-  const [keyboardHeight, setKeyboardHeight] = useState(0);
+  const [showLiveOverlay, setShowLiveOverlay] = useState(true);
+  const [overlayMessage, setOverlayMessage] = useState<ChatMessage | null>(null);
+  const [isOverlayMessageVisible, setIsOverlayMessageVisible] = useState(false);
+  const [showPlayerChrome, setShowPlayerChrome] = useState(true);
+  const [liveVolume, setLiveVolume] = useState(1);
+  const [isLandscapeOrientation, setIsLandscapeOrientation] = useState(false);
+  const [androidKeyboardInset, setAndroidKeyboardInset] = useState(0);
+  const [immersiveViewport, setImmersiveViewport] = useState({ width: 0, height: 0 });
 
   const eventId = Number(event?.id ?? 0);
   const eventStartAt = String(event?.start_at ?? '');
@@ -249,6 +263,82 @@ export default function CinemaScreen() {
   }, [currentUserId, currentUserNickname, currentUserAvatar]);
 
   useEffect(() => {
+    if (!isFocused) return;
+    let mounted = true;
+    const updateOrientation = async () => {
+      try {
+        const orientation = await ScreenOrientation.getOrientationAsync();
+        if (!mounted) return;
+        setIsLandscapeOrientation(
+          orientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+            orientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT
+        );
+      } catch {
+      }
+    };
+    void updateOrientation();
+    const sub = ScreenOrientation.addOrientationChangeListener((event) => {
+      const orientation = event.orientationInfo.orientation;
+      const isLandscapeNext =
+        orientation === ScreenOrientation.Orientation.LANDSCAPE_LEFT ||
+        orientation === ScreenOrientation.Orientation.LANDSCAPE_RIGHT;
+      setIsLandscapeOrientation(
+        isLandscapeNext
+      );
+      if (isLandscapeNext) {
+        Keyboard.dismiss();
+        setAndroidKeyboardInset(0);
+      }
+    });
+    void ScreenOrientation.unlockAsync().catch(() => {});
+    return () => {
+      mounted = false;
+      ScreenOrientation.removeOrientationChangeListener(sub);
+      void ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP).catch(() => {});
+    };
+  }, [isFocused]);
+
+  useEffect(() => {
+    const sub = AppState.addEventListener('change', (nextState) => {
+      const wasActive = appStateRef.current === 'active';
+      const nowActive = nextState === 'active';
+      appStateRef.current = nextState;
+      setIsAppActive(nowActive);
+      if (wasActive && !nowActive) {
+        try {
+          videoPlayer.pause();
+        } catch {
+        }
+      }
+    });
+    return () => {
+      sub.remove();
+    };
+  }, [videoPlayer]);
+
+  useEffect(() => {
+    if (Platform.OS !== 'android') return;
+    const showSub = Keyboard.addListener('keyboardDidShow', (event) => {
+      if (isLandscapeOrientation) return;
+      const rawHeight = Math.max(0, event.endCoordinates?.height ?? 0);
+      const adjusted = Math.max(0, rawHeight - insets.bottom);
+      setAndroidKeyboardInset(adjusted);
+    });
+    const hideSub = Keyboard.addListener('keyboardDidHide', () => {
+      setAndroidKeyboardInset(0);
+    });
+    return () => {
+      showSub.remove();
+      hideSub.remove();
+    };
+  }, [insets.bottom, isLandscapeOrientation]);
+
+  useEffect(() => {
+    if (!isLandscapeOrientation) return;
+    setAndroidKeyboardInset(0);
+  }, [isLandscapeOrientation]);
+
+  useEffect(() => {
     let mounted = true;
     const loadEvent = async () => {
       const next = await getCinemaEventByStatusNow();
@@ -272,22 +362,6 @@ export default function CinemaScreen() {
     return () => {
       mounted = false;
       clearInterval(refreshTimer);
-    };
-  }, []);
-
-  useEffect(() => {
-    if (Platform.OS === 'web') return;
-    const showEvent = Platform.OS === 'ios' ? 'keyboardWillShow' : 'keyboardDidShow';
-    const hideEvent = Platform.OS === 'ios' ? 'keyboardWillHide' : 'keyboardDidHide';
-    const showSub = Keyboard.addListener(showEvent, (event) => {
-      setKeyboardHeight(event.endCoordinates?.height ?? 0);
-    });
-    const hideSub = Keyboard.addListener(hideEvent, () => {
-      setKeyboardHeight(0);
-    });
-    return () => {
-      showSub.remove();
-      hideSub.remove();
     };
   }, []);
 
@@ -368,6 +442,7 @@ export default function CinemaScreen() {
   }, [event, nowIso]);
 
   const [phase, setPhase] = useState<'upcoming' | 'live' | 'ended' | 'none'>(rawPhase);
+  const isImmersiveLive = phase === 'live' && isLandscapeOrientation;
 
   useEffect(() => {
     if (phaseGuardTimerRef.current) {
@@ -413,7 +488,7 @@ export default function CinemaScreen() {
 
   const syncVideoToLive = useCallback(
     (force = false) => {
-      if (!isFocused || phase !== 'live' || !eventId) return;
+      if (!isFocused || !isAppActive || phase !== 'live' || !eventId) return;
       const targetMs = getLiveTargetPositionMs();
       const currentMs = Math.round((Number(videoPlayer.currentTime) || 0) * 1000);
       const drift = Math.abs(currentMs - targetMs);
@@ -424,11 +499,11 @@ export default function CinemaScreen() {
         }
       }
     },
-    [eventId, isFocused, phase, getLiveTargetPositionMs, videoPlayer]
+    [eventId, isFocused, isAppActive, phase, getLiveTargetPositionMs, videoPlayer]
   );
 
   useEffect(() => {
-    if (!isFocused || phase !== 'live' || !eventId) return;
+    if (!isFocused || !isAppActive || phase !== 'live' || !eventId) return;
     const sub = videoPlayer.addListener('timeUpdate', (payload) => {
       const now = Date.now();
       if (now - lastLiveSyncMsRef.current < 2200) return;
@@ -443,10 +518,10 @@ export default function CinemaScreen() {
     return () => {
       sub.remove();
     };
-  }, [eventId, isFocused, phase, getLiveTargetPositionMs, syncVideoToLive, videoPlayer]);
+  }, [eventId, isFocused, isAppActive, phase, getLiveTargetPositionMs, syncVideoToLive, videoPlayer]);
 
   useEffect(() => {
-    if (!isFocused || phase !== 'live' || !eventId) {
+    if (!isFocused || !isAppActive || phase !== 'live' || !eventId) {
       lastLiveSyncMsRef.current = 0;
       try {
         videoPlayer.pause();
@@ -460,7 +535,7 @@ export default function CinemaScreen() {
       clearTimeout(timer);
       clearInterval(interval);
     };
-  }, [eventId, isFocused, phase, syncVideoToLive, videoPlayer]);
+  }, [eventId, isFocused, isAppActive, phase, syncVideoToLive, videoPlayer]);
 
   useEffect(() => {
     if (!isFocused || !eventId || phase !== 'live' || !WS_URL) {
@@ -581,25 +656,140 @@ export default function CinemaScreen() {
     return () => clearTimeout(timer);
   }, [messages.length]);
 
-  const sendMessage = () => {
+  useEffect(() => {
+    const clampedVolume = Math.max(0, Math.min(1, liveVolume));
+    videoPlayer.volume = clampedVolume;
+    videoPlayer.muted = clampedVolume <= 0.01;
+  }, [liveVolume, videoPlayer]);
+
+  useEffect(() => {
+    if (!messages.length) return;
+    const latestMessage = [...messages]
+      .reverse()
+      .find((item) => String(item?.text ?? '').trim().length > 0);
+    if (!latestMessage) return;
+    setOverlayMessage(latestMessage);
+    setIsOverlayMessageVisible(true);
+    if (overlayHideTimerRef.current) {
+      clearTimeout(overlayHideTimerRef.current);
+      overlayHideTimerRef.current = null;
+    }
+    overlayHideTimerRef.current = setTimeout(() => {
+      setIsOverlayMessageVisible(false);
+      overlayHideTimerRef.current = null;
+    }, 12000);
+  }, [messages]);
+
+  useEffect(() => {
+    return () => {
+      if (overlayHideTimerRef.current) {
+        clearTimeout(overlayHideTimerRef.current);
+        overlayHideTimerRef.current = null;
+      }
+      if (chromeHideTimerRef.current) {
+        clearTimeout(chromeHideTimerRef.current);
+        chromeHideTimerRef.current = null;
+      }
+    };
+  }, []);
+
+  const clearPlayerChromeTimer = useCallback(() => {
+    if (!chromeHideTimerRef.current) return;
+    clearTimeout(chromeHideTimerRef.current);
+    chromeHideTimerRef.current = null;
+  }, []);
+
+  const schedulePlayerChromeAutoHide = useCallback(
+    (delayMs = 2200) => {
+      if (!isImmersiveLive) return;
+      clearPlayerChromeTimer();
+      chromeHideTimerRef.current = setTimeout(() => {
+        setShowPlayerChrome(false);
+        chromeHideTimerRef.current = null;
+      }, delayMs);
+    },
+    [clearPlayerChromeTimer, isImmersiveLive]
+  );
+
+  useEffect(() => {
+    if (!isImmersiveLive) {
+      clearPlayerChromeTimer();
+      setShowPlayerChrome(true);
+      return;
+    }
+    setShowPlayerChrome(true);
+    schedulePlayerChromeAutoHide();
+    return () => {
+      clearPlayerChromeTimer();
+    };
+  }, [clearPlayerChromeTimer, isImmersiveLive, schedulePlayerChromeAutoHide]);
+
+  const onPlayerSurfacePress = useCallback(() => {
+    if (!isImmersiveLive) return;
+    setShowPlayerChrome((prev) => {
+      const next = !prev;
+      if (next) {
+        schedulePlayerChromeAutoHide();
+      } else {
+        clearPlayerChromeTimer();
+      }
+      return next;
+    });
+  }, [clearPlayerChromeTimer, isImmersiveLive, schedulePlayerChromeAutoHide]);
+
+  const markPlayerChromeInteraction = useCallback(() => {
+    if (!isImmersiveLive) return;
+    setShowPlayerChrome(true);
+    schedulePlayerChromeAutoHide();
+  }, [isImmersiveLive, schedulePlayerChromeAutoHide]);
+
+  const sendMessageNow = useCallback(
+    (rawText?: string) => {
+      const text = String(rawText ?? chatText).trim();
+      const socket = wsRef.current;
+      if (!text || !eventId || !socket || socket.readyState !== WebSocket.OPEN) return false;
+      const now = Date.now();
+      if (lastSentRef.current.text === text && now - lastSentRef.current.at < 700) return true;
+      try {
+        socket.send(
+          JSON.stringify({
+            type: 'message',
+            room: `cinema:${eventId}`,
+            eventId,
+            userId: currentUserId > 0 ? currentUserId : null,
+            nickname: currentUserNickname,
+            text,
+          })
+        );
+        lastSentRef.current = { text, at: now };
+        setChatText((prev) => (String(prev).trim() === text ? '' : prev));
+        return true;
+      } catch {
+        return false;
+      }
+    },
+    [chatText, currentUserId, currentUserNickname, eventId]
+  );
+
+  const handleSendMessage = useCallback(() => {
     const text = chatText.trim();
-    const socket = wsRef.current;
-    if (!text || !eventId || !socket || socket.readyState !== WebSocket.OPEN) return;
-    const now = Date.now();
-    if (lastSentRef.current.text === text && now - lastSentRef.current.at < 900) return;
-    lastSentRef.current = { text, at: now };
-    socket.send(
-      JSON.stringify({
-        type: 'message',
-        room: `cinema:${eventId}`,
-        eventId,
-        userId: currentUserId > 0 ? currentUserId : null,
-        nickname: currentUserNickname,
-        text,
-      })
-    );
-    setChatText('');
-  };
+    if (!text) return;
+    const sent = sendMessageNow(text);
+    if (!sent) {
+      pendingMessageRef.current = text;
+      return;
+    }
+    pendingMessageRef.current = null;
+  }, [chatText, sendMessageNow]);
+
+  useEffect(() => {
+    if (chatStatus !== 'connected') return;
+    const pending = pendingMessageRef.current;
+    if (!pending) return;
+    if (sendMessageNow(pending)) {
+      pendingMessageRef.current = null;
+    }
+  }, [chatStatus, sendMessageNow]);
 
   const toggleLike = () => {
     const socket = wsRef.current;
@@ -613,12 +803,30 @@ export default function CinemaScreen() {
     );
   };
 
-  const openFullscreen = useCallback(async () => {
+  const toggleOrientationFullscreen = useCallback(async () => {
     try {
-      await videoViewRef.current?.enterFullscreen();
+      Keyboard.dismiss();
+      setAndroidKeyboardInset(0);
+      await new Promise((resolve) => setTimeout(resolve, 220));
+      if (isLandscapeOrientation) {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.PORTRAIT_UP);
+      } else {
+        await ScreenOrientation.lockAsync(ScreenOrientation.OrientationLock.LANDSCAPE);
+      }
     } catch {
     }
-  }, []);
+    markPlayerChromeInteraction();
+  }, [isLandscapeOrientation, markPlayerChromeInteraction]);
+
+  const lowerVolume = useCallback(() => {
+    setLiveVolume((prev) => Math.max(0, Math.round((prev - 0.1) * 10) / 10));
+    markPlayerChromeInteraction();
+  }, [markPlayerChromeInteraction]);
+
+  const raiseVolume = useCallback(() => {
+    setLiveVolume((prev) => Math.min(1, Math.round((prev + 0.1) * 10) / 10));
+    markPlayerChromeInteraction();
+  }, [markPlayerChromeInteraction]);
 
   const onChatScroll = useCallback((evt: NativeSyntheticEvent<NativeScrollEvent>) => {
     const { contentOffset, contentSize, layoutMeasurement } = evt.nativeEvent;
@@ -814,14 +1022,33 @@ export default function CinemaScreen() {
   const cinemaStartLabel = formatCinemaStartTime(event?.start_at);
   const cinemaDirectorLabel = eventMeta?.director ? `Director: ${eventMeta.director}` : null;
   const cinemaCastLabel = eventMeta?.cast?.length ? `Cast: ${eventMeta.cast.join(', ')}` : null;
-  const cinemaGenresLabel = eventMeta?.genres?.length ? eventMeta.genres.join(' · ') : null;
+  const cinemaGenresLabel = eventMeta?.genres?.length ? eventMeta.genres.join(' - ') : null;
   const cinemaFactsRow = [eventMeta?.year, eventMeta?.runtimeLabel, eventMeta?.voteAverage ? `${eventMeta.voteAverage.toFixed(1)} / 10` : null]
     .filter((item): item is string => !!item);
   const phasePosterImage = String(event?.poster_url ?? '').trim() || eventMeta?.backdrop || eventMeta?.poster || '';
   const phaseHeading = String(event?.title ?? '').trim() || eventMeta?.title || 'Cinema Event';
   const phaseSummary = String(event?.description ?? '').trim() || eventMeta?.overview || 'Live stream will begin soon.';
-  const composerLift = Platform.OS === 'android' ? Math.max(0, keyboardHeight) : 0;
-  const composerBottomInset = Math.max(8, insets.bottom) + composerLift;
+  const composerBottomInset =
+    Platform.OS === 'ios'
+      ? Math.max(8, insets.bottom + 6)
+      : Math.max(8, androidKeyboardInset + 8);
+  const liveVolumePct = `${Math.round(Math.max(0, Math.min(1, liveVolume)) * 100)}%`;
+  const overlayAvatarUri = resolveAvatarUri(overlayMessage?.avatarUrl ?? null);
+  const immersiveVideoSize = useMemo(() => {
+    const viewportW = immersiveViewport.width;
+    const viewportH = immersiveViewport.height;
+    if (viewportW <= 0 || viewportH <= 0) {
+      return { width: '100%' as const, height: '100%' as const };
+    }
+    const targetAspect = 16 / 9;
+    const viewportAspect = viewportW / viewportH;
+    if (viewportAspect > targetAspect) {
+      const width = Math.round(viewportH * targetAspect);
+      return { width, height: viewportH };
+    }
+    const height = Math.round(viewportW / targetAspect);
+    return { width: viewportW, height };
+  }, [immersiveViewport.height, immersiveViewport.width]);
 
   if (loading) {
     return (
@@ -871,8 +1098,13 @@ export default function CinemaScreen() {
   return (
     <KeyboardAvoidingView
       style={[styles.root, { backgroundColor: theme.background }]}
-      behavior={Platform.OS === 'ios' ? 'padding' : undefined}
-      keyboardVerticalOffset={Platform.OS === 'ios' ? insets.top + 4 : 0}>
+      enabled={Platform.OS === 'ios' && !isImmersiveLive}
+      behavior={
+        Platform.OS === 'ios' && !isImmersiveLive
+          ? 'padding'
+          : undefined
+      }
+      keyboardVerticalOffset={Platform.OS === 'ios' && !isImmersiveLive ? insets.top + 4 : 0}>
       {phase === 'upcoming' ? (
         <View style={[styles.phaseShell, { paddingTop: Math.max(insets.top + 10, Spacing.three + 8) }]}>
           <View style={styles.phasePosterWrap}>
@@ -949,101 +1181,179 @@ export default function CinemaScreen() {
       ) : null}
 
       {phase === 'live' ? (
-        <View style={styles.liveShell}>
+        <View style={[styles.liveShell, isImmersiveLive ? styles.liveShellImmersive : null]}>
           <LinearGradient colors={['#1a1f33', '#0f1423', '#090d18']} style={StyleSheet.absoluteFillObject} />
 
-          <View style={styles.playerCard}>
-            <VideoView
-              ref={videoViewRef}
-              player={videoPlayer}
-              style={styles.video}
-              nativeControls={false}
-              contentFit="contain"
-              fullscreenOptions={{ enable: true, orientation: 'landscape' }}
-              onFullscreenEnter={() => setIsFullscreen(true)}
-              onFullscreenExit={() => setIsFullscreen(false)}
-            />
-            <LinearGradient
-              colors={['rgba(0,0,0,0.66)', 'rgba(0,0,0,0.24)', 'rgba(0,0,0,0.0)']}
-              style={styles.playerTopFade}
-              pointerEvents="none"
-            />
-            <View style={[styles.playerOverlayTop, { top: Math.max(insets.top + 8, 14) }]}>
-              <View style={styles.liveBadge}>
-                <View style={styles.liveBadgeDot} />
-                <Text style={styles.liveBadgeText}>LIVE</Text>
-              </View>
-              <Pressable style={styles.fullscreenBtn} onPress={() => void openFullscreen()}>
-                <Ionicons name={isFullscreen ? 'contract-outline' : 'expand-outline'} size={18} color="#fff" />
-              </Pressable>
-            </View>
-          </View>
-
-          <View style={styles.statsRow}>
-            <View style={styles.statPill}>
-              <Ionicons name="eye-outline" size={18} color="#fff" />
-              <Text style={styles.statText}>{viewers}</Text>
-            </View>
-            <Pressable style={styles.statPill} onPress={toggleLike}>
-              <Ionicons name={likedByMe ? 'heart' : 'heart-outline'} size={18} color="#fff" />
-              <Text style={styles.statText}>{likes}</Text>
-            </Pressable>
-            <View style={styles.chatStatePill}>
-              <View style={[styles.chatStateDot, { backgroundColor: chatStateColor }]} />
-              <Text style={styles.chatStatePillText}>{chatStateLabel}</Text>
-            </View>
-          </View>
-
-          <View style={styles.chatPanel}>
-            <View style={styles.chatHeaderRow}>
-              <View>
-                <Text style={styles.chatTitle}>Cinema Chat</Text>
-                <Text style={styles.chatSubtitle}>Live reactions and comments</Text>
-              </View>
-              <Text style={styles.liveOnlyLabel}>Live only</Text>
-            </View>
-
-            <FlatList
-              ref={chatListRef}
-              data={messages}
-              keyExtractor={(item) => item.id}
-              renderItem={renderChatItem}
-              style={styles.chatList}
-              contentContainerStyle={[styles.chatListContent, { paddingBottom: 104 }]}
-              keyboardShouldPersistTaps="always"
-              onScroll={onChatScroll}
-              scrollEventThrottle={16}
-              onContentSizeChange={() => {
-                if (!shouldAutoscrollRef.current) return;
-                chatListRef.current?.scrollToEnd({ animated: false });
-              }}
-              ListEmptyComponent={<Text style={styles.emptyChatText}>No messages yet. Be first in chat.</Text>}
-            />
-
-            <View style={[styles.composerDock, { bottom: composerBottomInset }]}>
-              <View style={styles.composerRow}>
-                <TextInput
-                  value={chatText}
-                  onChangeText={setChatText}
-                  placeholder={chatStatus === 'connected' ? 'Write a message...' : 'Chat offline'}
-                  placeholderTextColor="rgba(255,255,255,0.55)"
-                  style={styles.input}
-                  editable={chatStatus === 'connected'}
-                  returnKeyType="send"
-                  blurOnSubmit={false}
-                  onSubmitEditing={sendMessage}
+          <View
+            style={[styles.playerCard, isImmersiveLive ? styles.playerCardImmersive : null]}
+            onLayout={
+              isImmersiveLive
+                ? (event: LayoutChangeEvent) => {
+                    const nextW = Math.round(event.nativeEvent.layout.width);
+                    const nextH = Math.round(event.nativeEvent.layout.height);
+                    if (nextW <= 0 || nextH <= 0) return;
+                    setImmersiveViewport((prev) =>
+                      prev.width === nextW && prev.height === nextH ? prev : { width: nextW, height: nextH }
+                    );
+                  }
+                : undefined
+            }>
+            {isImmersiveLive ? (
+              <View style={styles.videoImmersiveStage}>
+                <VideoView
+                  player={videoPlayer}
+                  style={[styles.videoImmersive, immersiveVideoSize]}
+                  nativeControls={false}
+                  contentFit="contain"
+                  surfaceType="surfaceView"
                 />
-                <Pressable
-                  onPressIn={sendMessage}
-                  onPress={sendMessage}
-                  hitSlop={8}
-                  disabled={chatStatus !== 'connected' || !chatText.trim()}
-                  style={[styles.sendBtn, (chatStatus !== 'connected' || !chatText.trim()) && styles.sendBtnDisabled]}>
-                  <Ionicons name="send" size={18} color="#fff" />
-                </Pressable>
               </View>
-            </View>
+            ) : (
+              <VideoView
+                player={videoPlayer}
+                style={styles.video}
+                nativeControls={false}
+                contentFit="contain"
+                surfaceType="surfaceView"
+              />
+            )}
+            {isImmersiveLive ? (
+              <Pressable style={styles.immersiveTapSurface} onPress={onPlayerSurfacePress} />
+            ) : null}
+            {!isImmersiveLive || showPlayerChrome ? (
+              <LinearGradient
+                colors={['rgba(0,0,0,0.66)', 'rgba(0,0,0,0.24)', 'rgba(0,0,0,0.0)']}
+                style={styles.playerTopFade}
+                pointerEvents="none"
+              />
+            ) : null}
+            {!isImmersiveLive || showPlayerChrome ? (
+              <View style={[styles.playerOverlayTop, { top: Math.max(insets.top + 8, 14) }]}>
+                <View style={styles.liveBadge}>
+                  <View style={styles.liveBadgeDot} />
+                  <Text style={styles.liveBadgeText}>LIVE</Text>
+                </View>
+                <View style={styles.playerToolsRight}>
+                  <Pressable
+                    style={styles.overlayToggleBtn}
+                    onPress={() => {
+                      setShowLiveOverlay((prev) => !prev);
+                      markPlayerChromeInteraction();
+                    }}>
+                    <Ionicons
+                      name={showLiveOverlay ? 'chatbubbles' : 'chatbubbles-outline'}
+                      size={15}
+                      color={showLiveOverlay ? '#93c5fd' : '#fff'}
+                    />
+                  </Pressable>
+                  <View style={styles.volumeCluster}>
+                    <Pressable style={styles.volumeBtn} onPress={lowerVolume}>
+                      <Ionicons name="remove" size={14} color="#fff" />
+                    </Pressable>
+                    <Text style={styles.volumeValue}>{liveVolumePct}</Text>
+                    <Pressable style={styles.volumeBtn} onPress={raiseVolume}>
+                      <Ionicons name="add" size={14} color="#fff" />
+                    </Pressable>
+                  </View>
+                  <Pressable style={styles.fullscreenBtn} onPress={() => void toggleOrientationFullscreen()}>
+                    <Ionicons name={isLandscapeOrientation ? 'contract-outline' : 'expand-outline'} size={18} color="#fff" />
+                  </Pressable>
+                </View>
+              </View>
+            ) : null}
+
+            {isImmersiveLive && showLiveOverlay && isOverlayMessageVisible && overlayMessage ? (
+              <View style={[styles.liveCommentOverlay, { bottom: Math.max(insets.bottom + 18, 24) }]}>
+                <View style={styles.liveCommentRow}>
+                  <View style={styles.liveCommentAvatarWrap}>
+                    {overlayAvatarUri ? (
+                      <Image source={{ uri: overlayAvatarUri }} style={styles.liveCommentAvatar} />
+                    ) : (
+                      <View style={styles.liveCommentAvatarFallback} />
+                    )}
+                  </View>
+                  <View style={styles.liveCommentMeta}>
+                    <Text style={styles.liveCommentUser} numberOfLines={1}>
+                      {overlayMessage.nickname || 'guest'} · {formatChatTime(overlayMessage.createdAt)}
+                    </Text>
+                    <Text style={styles.liveCommentText} numberOfLines={2}>
+                      {String(overlayMessage.text || '').trim() || '...'}
+                    </Text>
+                  </View>
+                </View>
+              </View>
+            ) : null}
           </View>
+
+          {!isImmersiveLive ? (
+            <>
+              <View style={styles.statsRow}>
+                <View style={styles.statPill}>
+                  <Ionicons name="eye-outline" size={18} color="#fff" />
+                  <Text style={styles.statText}>{viewers}</Text>
+                </View>
+                <Pressable style={styles.statPill} onPress={toggleLike}>
+                  <Ionicons name={likedByMe ? 'heart' : 'heart-outline'} size={18} color="#fff" />
+                  <Text style={styles.statText}>{likes}</Text>
+                </Pressable>
+                <View style={styles.chatStatePill}>
+                  <View style={[styles.chatStateDot, { backgroundColor: chatStateColor }]} />
+                  <Text style={styles.chatStatePillText}>{chatStateLabel}</Text>
+                </View>
+              </View>
+
+              <View style={styles.chatPanel}>
+                <View style={styles.chatHeaderRow}>
+                  <View>
+                    <Text style={styles.chatTitle}>Cinema Chat</Text>
+                    <Text style={styles.chatSubtitle}>Live reactions and comments</Text>
+                  </View>
+                  <Text style={styles.liveOnlyLabel}>Live only</Text>
+                </View>
+
+                <FlatList
+                  ref={chatListRef}
+                  data={messages}
+                  keyExtractor={(item) => item.id}
+                  renderItem={renderChatItem}
+                  style={styles.chatList}
+                  contentContainerStyle={[styles.chatListContent, { paddingBottom: 12 }]}
+                  keyboardShouldPersistTaps="always"
+                  onScroll={onChatScroll}
+                  scrollEventThrottle={16}
+                  onContentSizeChange={() => {
+                    if (!shouldAutoscrollRef.current) return;
+                    chatListRef.current?.scrollToEnd({ animated: false });
+                  }}
+                  ListEmptyComponent={<Text style={styles.emptyChatText}>No messages yet. Be first in chat.</Text>}
+                />
+
+                <View style={[styles.composerDock, { marginBottom: composerBottomInset }]}>
+                  <View style={styles.composerRow}>
+                    <TextInput
+                      value={chatText}
+                      onChangeText={setChatText}
+                      placeholder={chatStatus === 'connected' ? 'Write a message...' : 'Chat offline'}
+                      placeholderTextColor="rgba(255,255,255,0.55)"
+                      style={styles.input}
+                      editable={chatStatus === 'connected'}
+                      returnKeyType="send"
+                      blurOnSubmit={false}
+                      onSubmitEditing={handleSendMessage}
+                    />
+                    <TouchableOpacity
+                      onPress={handleSendMessage}
+                      activeOpacity={0.78}
+                      disabled={chatStatus !== 'connected'}
+                      style={[styles.sendBtn, chatStatus !== 'connected' && styles.sendBtnDisabled]}>
+                      <Ionicons name="send" size={17} color="#fff" />
+                      <Text style={styles.sendBtnText}>Send</Text>
+                    </TouchableOpacity>
+                  </View>
+                </View>
+              </View>
+            </>
+          ) : null}
         </View>
       ) : null}
     </KeyboardAvoidingView>
@@ -1456,19 +1766,48 @@ const styles = StyleSheet.create({
     backgroundColor: '#0a0f1c',
     minHeight: 0,
   },
+  liveShellImmersive: {
+    backgroundColor: '#000',
+    justifyContent: 'center',
+  },
   playerCard: {
     borderBottomWidth: 1,
     borderBottomColor: 'rgba(255,255,255,0.12)',
     backgroundColor: '#000',
     position: 'relative',
+    borderBottomLeftRadius: 16,
+    borderBottomRightRadius: 16,
+    overflow: 'hidden',
+  },
+  playerCardImmersive: {
+    flex: 1,
+    borderBottomWidth: 0,
+    borderRadius: 0,
+    justifyContent: 'center',
+  },
+  immersiveTapSurface: {
+    ...StyleSheet.absoluteFillObject,
+    zIndex: 1,
   },
   video: {
     width: '100%',
     aspectRatio: 16 / 9,
     backgroundColor: '#000',
   },
+  videoImmersiveStage: {
+    flex: 1,
+    width: '100%',
+    height: '100%',
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: '#000',
+  },
+  videoImmersive: {
+    backgroundColor: '#000',
+  },
   playerTopFade: {
     ...StyleSheet.absoluteFillObject,
+    zIndex: 2,
   },
   playerOverlayTop: {
     position: 'absolute',
@@ -1478,6 +1817,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
+    zIndex: 4,
+  },
+  playerToolsRight: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
   },
   liveBadge: {
     flexDirection: 'row',
@@ -1501,6 +1846,43 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 10,
   },
+  overlayToggleBtn: {
+    height: 36,
+    minWidth: 36,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(147,197,253,0.48)',
+    backgroundColor: 'rgba(4,13,24,0.62)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 10,
+  },
+  volumeCluster: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 2,
+    borderRadius: 10,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.28)',
+    backgroundColor: 'rgba(0,0,0,0.55)',
+    paddingHorizontal: 4,
+    height: 36,
+  },
+  volumeBtn: {
+    width: 26,
+    height: 26,
+    borderRadius: 13,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  volumeValue: {
+    minWidth: 42,
+    textAlign: 'center',
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+  },
   fullscreenBtn: {
     width: 36,
     height: 36,
@@ -1511,15 +1893,65 @@ const styles = StyleSheet.create({
     alignItems: 'center',
     justifyContent: 'center',
   },
+  liveCommentOverlay: {
+    position: 'absolute',
+    left: 12,
+    width: '78%',
+    maxWidth: 420,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(7,11,20,0.25)',
+    paddingHorizontal: 10,
+    paddingVertical: 8,
+    zIndex: 3,
+  },
+  liveCommentRow: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    gap: 8,
+  },
+  liveCommentAvatarWrap: {
+    width: 24,
+    height: 24,
+    borderRadius: 12,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.16)',
+  },
+  liveCommentAvatar: {
+    width: '100%',
+    height: '100%',
+  },
+  liveCommentAvatarFallback: {
+    width: '100%',
+    height: '100%',
+    backgroundColor: 'rgba(255,255,255,0.2)',
+  },
+  liveCommentMeta: {
+    flex: 1,
+    gap: 3,
+    minWidth: 0,
+  },
+  liveCommentUser: {
+    color: '#cbd5e1',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+  },
+  liveCommentText: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 12.5,
+    lineHeight: 17,
+  },
   statsRow: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
     paddingHorizontal: 12,
-    paddingVertical: 10,
+    paddingVertical: 12,
     borderBottomWidth: 0,
-    backgroundColor: 'rgba(0,0,0,0.18)',
+    backgroundColor: 'rgba(52,34,94,0.22)',
   },
   statPill: {
     flexDirection: 'row',
@@ -1530,8 +1962,8 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(16,20,34,0.82)',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -1549,8 +1981,8 @@ const styles = StyleSheet.create({
     minHeight: 42,
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.24)',
-    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderColor: 'rgba(255,255,255,0.2)',
+    backgroundColor: 'rgba(16,20,34,0.82)',
     paddingHorizontal: 12,
     paddingVertical: 8,
   },
@@ -1568,9 +2000,10 @@ const styles = StyleSheet.create({
     flex: 1,
     minHeight: 0,
     position: 'relative',
-    paddingHorizontal: 10,
-    paddingTop: 10,
+    paddingHorizontal: 12,
+    paddingTop: 12,
     gap: 8,
+    backgroundColor: 'rgba(8,10,20,0.92)',
   },
   chatHeaderRow: {
     flexDirection: 'row',
@@ -1599,8 +2032,8 @@ const styles = StyleSheet.create({
     minHeight: 0,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    borderColor: 'rgba(170,142,255,0.22)',
+    backgroundColor: 'rgba(10,13,25,0.76)',
   },
   chatListContent: {
     padding: 10,
@@ -1617,15 +2050,15 @@ const styles = StyleSheet.create({
   messageCard: {
     borderRadius: 12,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.12)',
-    backgroundColor: 'rgba(255,255,255,0.05)',
+    borderColor: 'rgba(149,120,255,0.28)',
+    backgroundColor: 'rgba(93,62,166,0.2)',
     paddingHorizontal: 10,
     paddingVertical: 8,
     gap: 5,
   },
   messageCardMine: {
-    borderColor: 'rgba(225,6,19,0.45)',
-    backgroundColor: 'rgba(225,6,19,0.15)',
+    borderColor: 'rgba(99,102,241,0.6)',
+    backgroundColor: 'rgba(79,70,229,0.3)',
   },
   messageMetaRow: {
     flexDirection: 'row',
@@ -1670,37 +2103,45 @@ const styles = StyleSheet.create({
     gap: 8,
     borderRadius: 16,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(5,8,16,0.92)',
+    borderColor: 'rgba(167,139,250,0.35)',
+    backgroundColor: 'rgba(10,12,22,0.95)',
     paddingHorizontal: 8,
     paddingVertical: 8,
+    zIndex: 5,
+    elevation: 5,
   },
   composerDock: {
-    position: 'absolute',
-    left: 0,
-    right: 0,
+    marginTop: 8,
   },
   input: {
     flex: 1,
     height: 46,
     borderRadius: 14,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(0,0,0,0.45)',
+    borderColor: 'rgba(167,139,250,0.35)',
+    backgroundColor: 'rgba(18,22,38,0.92)',
     paddingHorizontal: 12,
     color: '#fff',
     fontFamily: Fonts.serif,
     fontSize: 14,
   },
   sendBtn: {
-    width: 46,
+    minWidth: 84,
     height: 46,
-    borderRadius: 23,
+    borderRadius: 14,
+    paddingHorizontal: 12,
+    flexDirection: 'row',
+    gap: 6,
     alignItems: 'center',
     justifyContent: 'center',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.42)',
-    backgroundColor: '#0a0a0a',
+    borderColor: 'rgba(196,181,253,0.68)',
+    backgroundColor: '#6d28d9',
+  },
+  sendBtnText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
   },
   sendBtnDisabled: {
     opacity: 0.5,
@@ -1712,5 +2153,6 @@ const styles = StyleSheet.create({
     lineHeight: 18,
   },
 });
+
 
 

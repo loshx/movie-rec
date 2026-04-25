@@ -217,17 +217,40 @@ export type GenreDiscoverOptions = {
   year?: number | null;
 };
 
+export const SPECIAL_GENRE_ANIME = 100016;
+export const SPECIAL_GENRE_CARTOON_MOVIES = 100017;
+const TMDB_GENRE_ANIMATION = 16;
+
 export async function getMoviesByGenre(genreId: number, page = 1, options: GenreDiscoverOptions = {}) {
+  const isAnimeCategory = genreId === SPECIAL_GENRE_ANIME;
+  const isCartoonCategory = genreId === SPECIAL_GENRE_CARTOON_MOVIES;
   const params = new URLSearchParams();
   params.set('language', 'en-US');
   params.set('sort_by', options.sortBy ?? 'popularity.desc');
-  params.set('with_genres', String(genreId));
+  params.set('with_genres', String(isAnimeCategory || isCartoonCategory ? TMDB_GENRE_ANIMATION : genreId));
+  if (isAnimeCategory) {
+    // Anime bucket: animated movies in Japanese.
+    params.set('with_original_language', 'ja');
+  }
   params.set('page', String(Math.max(1, Number(page) || 1)));
   const year = Number(options.year ?? 0);
   if (Number.isFinite(year) && year >= 1900 && year <= 2100) {
     params.set('primary_release_year', String(Math.trunc(year)));
   }
-  return tmdbFetch<{ results: Movie[]; total_pages: number }>(`/discover/movie?${params.toString()}`);
+  const payload = await tmdbFetch<{ results: Movie[]; total_pages: number }>(`/discover/movie?${params.toString()}`);
+  if (!isAnimeCategory && !isCartoonCategory) {
+    return payload;
+  }
+  if (isAnimeCategory) {
+    return {
+      ...payload,
+      results: (payload.results ?? []).filter((movie) => String(movie.original_language ?? '').toLowerCase() === 'ja'),
+    };
+  }
+  return {
+    ...payload,
+    results: (payload.results ?? []).filter((movie) => String(movie.original_language ?? '').toLowerCase() !== 'ja'),
+  };
 }
 
 export type Movie = {
@@ -236,6 +259,7 @@ export type Movie = {
   overview: string;
   poster_path: string | null;
   backdrop_path: string | null;
+  original_language?: string;
   vote_average: number;
   vote_count?: number;
   popularity?: number;

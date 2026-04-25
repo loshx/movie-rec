@@ -47,7 +47,7 @@ type AuthContextValue = {
     name?: string | null;
     given_name?: string | null;
     family_name?: string | null;
-  }) => Promise<void>;
+  }) => Promise<{ isNewUser: boolean }>;
   checkNicknameAvailability: (nickname: string, excludeUserId?: number) => Promise<boolean>;
   updateProfile: (input: {
     name?: string | null;
@@ -241,7 +241,8 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await initDb();
         setError(null);
         clearBackendUserSession();
-        const u = await upsertAuth0User(profile);
+        const result = await upsertAuth0User(profile);
+        const u = result.user;
         const backendEnabled = hasBackendApi();
         const bootstrapUserId = Number(u.backend_user_id ?? u.id);
         await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
@@ -255,6 +256,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         setUser(u);
         void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
+        return { isNewUser: result.isNewUser };
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
         await initDb();

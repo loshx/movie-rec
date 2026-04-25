@@ -40,6 +40,11 @@ type OAuthProfile = {
   family_name?: string | null;
 };
 
+export type Auth0UpsertResult = {
+  user: User;
+  isNewUser: boolean;
+};
+
 const NICKNAME_RE = /^[a-zA-Z0-9._-]+$/;
 const EMAIL_RE = /^[^\s@]+@[^\s@]+\.[^\s@]+$/;
 
@@ -445,25 +450,31 @@ export async function upsertLocalUserFromBackend(input: {
   return user;
 }
 
-export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
+export async function upsertAuth0User(profile: OAuthProfile): Promise<Auth0UpsertResult> {
   const db = await getDb();
   const sub = profile.sub;
   const email = profile.email?.trim() || null;
   const name = profile.name?.trim() || null;
 
-  const existing = await db.getFirstAsync<User>(
+  const existingBySub = await db.getFirstAsync<User>(
     'SELECT * FROM users WHERE google_sub = ?',
     sub
   );
+  const existingByEmail =
+    !existingBySub && email
+      ? await db.getFirstAsync<User>('SELECT * FROM users WHERE lower(email) = lower(?) ORDER BY id ASC LIMIT 1', email)
+      : null;
+  const existing = existingBySub ?? existingByEmail;
   const shouldBeAdmin = ADMIN_AUTH0_SUBS.has(sub) || (!!email && ADMIN_EMAILS.has(email.toLowerCase()));
   const targetRole: 'user' | 'admin' = shouldBeAdmin ? 'admin' : 'user';
 
   if (existing) {
     await db.runAsync(
-      `UPDATE users SET email = ?, name = ?, role = ?, auth_provider = 'auth0', updated_at = ? WHERE id = ?`,
+      `UPDATE users SET email = ?, name = ?, role = ?, auth_provider = 'auth0', google_sub = ?, updated_at = ? WHERE id = ?`,
       email,
       name,
       targetRole,
+      sub,
       nowIso(),
       existing.id
     );
@@ -472,7 +483,18 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
       existing.id,
       nowIso()
     );
-    return { ...existing, email, name, role: targetRole, auth_provider: 'auth0', updated_at: nowIso() };
+    return {
+      user: {
+        ...existing,
+        email,
+        name,
+        role: targetRole,
+        auth_provider: 'auth0',
+        google_sub: sub,
+        updated_at: nowIso(),
+      },
+      isNewUser: false,
+    };
   }
 
   const base = slugify(
@@ -519,7 +541,7 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
     nowIso()
   );
 
-  return user;
+  return { user, isNewUser: true };
 }
 
 export async function updateUserProfile(

@@ -1,0 +1,3 @@
+Target user: U1
+Top-k neighbors: U2, U5
+Top recommendation: M3 (score=0.565)

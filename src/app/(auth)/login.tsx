@@ -2,7 +2,7 @@ import * as AuthSession from 'expo-auth-session';
 import * as WebBrowser from 'expo-web-browser';
 import Constants from 'expo-constants';
 import { router } from 'expo-router';
-import React, { useMemo, useState } from 'react';
+import React, { useMemo, useRef, useState } from 'react';
 import {
   Animated,
   Easing,
@@ -26,6 +26,7 @@ export default function LoginScreen() {
   const [nickname, setNickname] = useState('');
   const [password, setPassword] = useState('');
   const [localError, setLocalError] = useState<string | null>(null);
+  const handledAuth0ResponseRef = useRef<string | null>(null);
 
   const extra = Constants.expoConfig?.extra as
     | {
@@ -97,6 +98,9 @@ export default function LoginScreen() {
     (async () => {
       if (response?.type !== 'success') return;
       const accessToken = response.authentication?.accessToken;
+      if (handledAuth0ResponseRef.current && handledAuth0ResponseRef.current === accessToken) {
+        return;
+      }
       if (!accessToken || !discovery?.userInfoEndpoint) {
         setLocalError('Auth0 error.');
         return;
@@ -110,9 +114,11 @@ export default function LoginScreen() {
           setLocalError('Invalid Auth0 profile.');
           return;
         }
-        await loginWithAuth0(profile);
-        router.replace('/(tabs)');
+        handledAuth0ResponseRef.current = accessToken;
+        const result = await loginWithAuth0(profile);
+        router.replace(result.isNewUser ? '/onboarding-watched' : '/(tabs)');
       } catch {
+        handledAuth0ResponseRef.current = null;
         setLocalError('Auth0 error.');
       }
     })();

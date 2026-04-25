@@ -38,6 +38,11 @@ type OAuthProfile = {
   family_name?: string | null;
 };
 
+export type Auth0UpsertResult = {
+  user: User;
+  isNewUser: boolean;
+};
+
 type WebUser = User & { password_hash: string };
 
 type WebState = {
@@ -513,12 +518,17 @@ export async function upsertLocalUserFromBackend(input: {
   return user;
 }
 
-export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
+export async function upsertAuth0User(profile: OAuthProfile): Promise<Auth0UpsertResult> {
   const sub = profile.sub;
   const email = profile.email?.trim() || null;
   const name = profile.name?.trim() || null;
 
-  const existing = webState.users.find((u) => u.google_sub === sub);
+  const existingBySub = webState.users.find((u) => u.google_sub === sub);
+  const existingByEmail =
+    !existingBySub && email
+      ? webState.users.find((u) => String(u.email ?? '').trim().toLowerCase() === email.toLowerCase())
+      : undefined;
+  const existing = existingBySub ?? existingByEmail;
   const shouldBeAdmin = ADMIN_AUTH0_SUBS.has(sub) || (!!email && ADMIN_EMAILS.has(email.toLowerCase()));
   const targetRole: 'user' | 'admin' = shouldBeAdmin ? 'admin' : 'user';
   if (existing) {
@@ -530,10 +540,11 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
     existing.name = name;
     existing.role = targetRole;
     existing.auth_provider = 'auth0';
+    existing.google_sub = sub;
     existing.updated_at = nowIso();
     webState.sessionUserId = existing.id;
     saveState(webState);
-    return existing;
+    return { user: existing, isNewUser: false };
   }
 
   const base = slugify(
@@ -569,7 +580,7 @@ export async function upsertAuth0User(profile: OAuthProfile): Promise<User> {
   webState.sessionUserId = user.id;
   saveState(webState);
 
-  return user;
+  return { user, isNewUser: true };
 }
 
 export async function updateUserProfile(

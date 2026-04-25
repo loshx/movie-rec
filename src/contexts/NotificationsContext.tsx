@@ -23,6 +23,7 @@ import {
 import { getCurrentCinemaPoll, getCinemaEventByStatusNow, type CinemaEvent } from '@/db/cinema';
 import { getUserWatchlist } from '@/db/user-movies';
 import { hasBackendApi, backendGetCommentReplyNotifications } from '@/lib/cinema-backend';
+import { SPECIAL_GENRE_ANIME, SPECIAL_GENRE_CARTOON_MOVIES } from '@/lib/tmdb';
 import {
   cancelScheduledLocalNotification,
   configureForegroundNotificationBehavior,
@@ -93,14 +94,21 @@ function isEventLive(event: CinemaEvent | null, nowMs = Date.now()) {
 
 function pickDailyMood() {
   const moods = [
-    { genreId: 27, label: 'Horror', title: '👻 Want something terrifying?', body: 'Tap for 6 dark picks made for your vibe.' },
-    { genreId: 35, label: 'Comedy', title: '😂 Want to laugh tonight?', body: 'Tap for 6 comedy picks with strong audience response.' },
-    { genreId: 18, label: 'Drama', title: '🎭 Craving deep stories?', body: 'Tap for 6 drama picks tuned to your taste signals.' },
-    { genreId: 878, label: 'Sci-Fi', title: '🚀 Need a mind-bending trip?', body: 'Tap for 6 sci-fi picks with top quality signals.' },
-    { genreId: 53, label: 'Thriller', title: '🕵️ Want pure tension?', body: 'Tap for 6 thriller picks that keep pressure high.' },
-    { genreId: 14, label: 'Fantasy', title: '🪄 Ready for another world?', body: 'Tap for 6 fantasy picks with high community scores.' },
-    { genreId: 28, label: 'Action', title: '💥 Need adrenaline now?', body: 'Tap for 6 action picks with high momentum.' },
-    { genreId: 10749, label: 'Romance', title: '❤️ Want something romantic?', body: 'Tap for 6 romance picks blended with your profile.' },
+    { genreId: 27, label: 'Horror', title: 'Want something terrifying?', body: 'Tap for 6 dark picks made for your vibe.' },
+    { genreId: 35, label: 'Comedy', title: 'Want to laugh tonight?', body: 'Tap for 6 comedy picks with strong audience response.' },
+    { genreId: SPECIAL_GENRE_ANIME, label: 'Anime', title: 'Want anime tonight?', body: 'Tap for 6 anime picks tuned to your taste.' },
+    {
+      genreId: SPECIAL_GENRE_CARTOON_MOVIES,
+      label: 'Cartoon Movies',
+      title: 'Want cartoon movies?',
+      body: 'Tap for 6 cartoon movie picks tuned to your taste.',
+    },
+    { genreId: 18, label: 'Drama', title: 'Craving deep stories?', body: 'Tap for 6 drama picks tuned to your taste signals.' },
+    { genreId: 878, label: 'Sci-Fi', title: 'Need a mind-bending trip?', body: 'Tap for 6 sci-fi picks with top quality signals.' },
+    { genreId: 53, label: 'Thriller', title: 'Want pure tension?', body: 'Tap for 6 thriller picks that keep pressure high.' },
+    { genreId: 14, label: 'Fantasy', title: 'Ready for another world?', body: 'Tap for 6 fantasy picks with high community scores.' },
+    { genreId: 28, label: 'Action', title: 'Need adrenaline now?', body: 'Tap for 6 action picks with high momentum.' },
+    { genreId: 10749, label: 'Romance', title: 'Want something romantic?', body: 'Tap for 6 romance picks blended with your profile.' },
   ];
   const idx = Math.abs(new Date().getDate()) % moods.length;
   return moods[idx];
@@ -596,3 +604,4 @@ const styles = StyleSheet.create({
     lineHeight: 17,
   },
 });
+
