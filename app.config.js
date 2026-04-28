@@ -1,9 +1,29 @@
 const fs = require('fs');
 const path = require('path');
 
+function loadLocalEnv() {
+  const envPath = path.join(__dirname, '.env');
+  if (!fs.existsSync(envPath)) return;
+
+  const raw = fs.readFileSync(envPath, 'utf8').replace(/^\uFEFF/, '');
+  for (const line of raw.split(/\r?\n/)) {
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith('#')) continue;
+    const eqIndex = trimmed.indexOf('=');
+    if (eqIndex <= 0) continue;
+    const key = trimmed.slice(0, eqIndex).trim();
+    const value = trimmed.slice(eqIndex + 1);
+    if (!(key in process.env)) {
+      process.env[key] = value;
+    }
+  }
+}
+
 function resolveEnvValue(value, fallback = '') {
   return typeof value === 'string' ? value : fallback;
 }
+
+loadLocalEnv();
 
 module.exports = ({ config }) => {
   const extra = config?.extra ?? {};
