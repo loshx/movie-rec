@@ -226,6 +226,7 @@ export async function getMoviesByGenre(genreId: number, page = 1, options: Genre
   const isCartoonCategory = genreId === SPECIAL_GENRE_CARTOON_MOVIES;
   const params = new URLSearchParams();
   params.set('language', 'en-US');
+  params.set('include_adult', 'false');
   params.set('sort_by', options.sortBy ?? 'popularity.desc');
   params.set('with_genres', String(isAnimeCategory || isCartoonCategory ? TMDB_GENRE_ANIMATION : genreId));
   if (isAnimeCategory) {

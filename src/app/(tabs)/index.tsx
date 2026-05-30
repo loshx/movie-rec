@@ -31,6 +31,8 @@ import {
   getNewMovies,
   getPopularMovies,
   getPopularTv,
+  getTopRatedMovies,
+  getTopRatedTv,
   getSimilarMovies,
   getTvById,
   posterUrl,
@@ -67,7 +69,10 @@ type HomeSnapshot = {
   userId: number | null;
   featured: FeaturedDisplay | null;
   popular: Movie[];
+  popularTv: TvShow[];
   newMovies: Movie[];
+  topRatedMovies: Movie[];
+  topRatedTv: TvShow[];
   forYouSubtitle: string | null;
   forYouMovies: Movie[];
   forYouShows: TvShow[];
@@ -116,6 +121,36 @@ const ML_GRAPH_SYNC_MIN_MS = 10 * 60 * 1000;
 const GENRE_ANIMATION = 16;
 const GENRE_FAMILY_MOVIE = 10751;
 const GENRE_KIDS_TV = 10762;
+const HOME_SHELF_SENSITIVE_PATTERNS = [
+  /\bx[\s-]?rated\b/i,
+  /\berotic\b/i,
+  /\bporn(?:o|ography|ographic)?\b/i,
+  /\bsexploitation\b/i,
+  /\bsexual\b/i,
+  /\badult\b/i,
+  /\bplayboy\b/i,
+  /\bswing(?:ing|ers?)\b/i,
+  /\bsoftcore\b/i,
+  /\bhardcore\b/i,
+  /\bbrothel\b/i,
+  /\bnud(?:e|ity)\b/i,
+  /\bstrip(?:per|tease|club)?\b/i,
+  /\bfetish\b/i,
+];
+const HOME_SHELF_SUGGESTIVE_PATTERNS = [
+  /\btemptation\b/i,
+  /\bsensual\b/i,
+  /\bsteamy\b/i,
+  /\blust(?:ful)?\b/i,
+  /\bdesire\b/i,
+  /\bseduct(?:ion|ive|ress)?\b/i,
+  /\btemptress\b/i,
+  /\bmistress\b/i,
+  /\bescort\b/i,
+  /\bvmx\b/i,
+  /\bforbidden\s+(?:love|affair|desire|romance)\b/i,
+  /\bsecret\s+(?:affair|desire|lover|romance)\b/i,
+];
 
 type ForYouTastePolicy = {
   allowAnimation: boolean;
@@ -166,6 +201,45 @@ function hasListData(item: {
 }) {
   const title = String((item as any)?.title ?? (item as any)?.name ?? '').trim();
   return !!item.poster_path && title.length > 0;
+}
+
+function isHomeShelfSafe(item: {
+  adult?: boolean | null;
+  overview?: string | null;
+  title?: string | null;
+  name?: string | null;
+  vote_count?: number | null;
+  vote_average?: number | null;
+  popularity?: number | null;
+}) {
+  if ((item as any)?.adult === true) return false;
+  const title = String((item as any)?.title ?? (item as any)?.name ?? '').trim();
+  const overview = String((item as any)?.overview ?? '').trim();
+  const haystack = `${title} ${overview}`;
+  if (HOME_SHELF_SENSITIVE_PATTERNS.some((pattern) => pattern.test(haystack))) return false;
+
+  const suggestive = HOME_SHELF_SUGGESTIVE_PATTERNS.some((pattern) => pattern.test(haystack));
+  if (!suggestive) return true;
+
+  const voteCount = Number((item as any)?.vote_count ?? 0);
+  const voteAverage = Number((item as any)?.vote_average ?? 0);
+  const popularity = Number((item as any)?.popularity ?? 0);
+
+  if (Number.isFinite(voteCount) && voteCount <= 25) return false;
+  if (Number.isFinite(voteAverage) && voteAverage > 0 && voteAverage < 6.2) return false;
+  if (Number.isFinite(popularity) && popularity < 60) return false;
+  return true;
+}
+
+function hasHomeShelfData(item: {
+  poster_path: string | null;
+  vote_average: number;
+  overview: string;
+  title?: string;
+  name?: string;
+  adult?: boolean | null;
+}) {
+  return hasListData(item) && isHomeShelfSafe(item);
 }
 
 function excludeWatched<T extends { id: number }>(items: T[], watchedIdSet: Set<number>) {
@@ -274,7 +348,7 @@ function buildFallbackForYouMovies(options: {
   const { primary, secondary, tertiary = [], watchedIdSet, limit = 20 } = options;
   const dedup = new Map<number, Movie>();
   for (const item of [...primary, ...secondary, ...tertiary]) {
-    if (!item || watchedIdSet.has(item.id) || !hasListData(item)) continue;
+    if (!item || watchedIdSet.has(item.id) || !hasHomeShelfData(item)) continue;
     if (!dedup.has(item.id)) dedup.set(item.id, item);
   }
   return rankRecommendationCandidates(Array.from(dedup.values()), new Map<number, number>()).slice(0, limit);
@@ -289,7 +363,7 @@ function buildFallbackForYouShows(options: {
   const { primary, secondary, watchedIdSet, limit = 20 } = options;
   const dedup = new Map<number, TvShow>();
   for (const item of [...primary, ...secondary]) {
-    if (!item || watchedIdSet.has(item.id) || !hasListData(item)) continue;
+    if (!item || watchedIdSet.has(item.id) || !hasHomeShelfData(item)) continue;
     if (!dedup.has(item.id)) dedup.set(item.id, item);
   }
   return rankTvRecommendationCandidates(Array.from(dedup.values())).slice(0, limit);
@@ -373,7 +447,11 @@ type HeroSlide = {
   tmdbId?: number | null;
   title: string;
   subtitle?: string;
-  image: string | null;
+  description?: string | null;
+  poster: string | null;
+  backdrop: string | null;
+  eyebrow: string;
+  accent: string;
 };
 
 type SectionRowItem =
@@ -386,6 +464,13 @@ type SectionRowItem =
       kind: 'loadMore';
       key: string;
     };
+
+const HOME_ROW_CARD_WIDTH = 150;
+const HOME_ROW_CARD_HEIGHT = 220;
+const HOME_ROW_CARD_GAP = Spacing.two;
+const HOME_SEARCH_CARD_WIDTH = 120;
+const HOME_SEARCH_CARD_HEIGHT = 170;
+const HOME_SEARCH_CARD_GAP = Spacing.two;
 
 function isTvItem(item: SearchResultItem) {
   if ('media_type' in item) return item.media_type === 'tv';
@@ -485,7 +570,10 @@ export default function HomeScreen() {
 
   const [featured, setFeatured] = useState<FeaturedDisplay | null>(null);
   const [popular, setPopular] = useState<Movie[]>([]);
+  const [popularTv, setPopularTv] = useState<TvShow[]>([]);
   const [newMovies, setNewMovies] = useState<Movie[]>([]);
+  const [topRatedMovies, setTopRatedMovies] = useState<Movie[]>([]);
+  const [topRatedTv, setTopRatedTv] = useState<TvShow[]>([]);
   const [forYouSubtitle, setForYouSubtitle] = useState<string | null>(null);
   const [forYouMovies, setForYouMovies] = useState<Movie[]>([]);
   const [forYouShows, setForYouShows] = useState<TvShow[]>([]);
@@ -600,6 +688,8 @@ export default function HomeScreen() {
           newMovieRes,
           newEpisodeRes,
           dailyGenreRes,
+          topRatedMovieRes,
+          topRatedTvRes,
         ] = await Promise.all([
           user ? getUserWatched(user.id) : Promise.resolve([]),
           getFeaturedMovie(),
@@ -608,17 +698,21 @@ export default function HomeScreen() {
           getNewMovies(newMoviesStartPage),
           getNewEpisodes(newEpisodesStartPage),
           getMoviesByGenre(dailyGenre.id, dailyGenrePage),
+          getTopRatedMovies(1),
+          getTopRatedTv(1),
         ]);
 
         if (token !== refreshTokenRef.current) return;
         const watchedIdSet = new Set(watchedRows.map((row) => row.tmdbId));
         setWatchedIds(Array.from(watchedIdSet));
 
-        const popularMovies = excludeWatched((popularRes.results ?? []).filter(hasListData), watchedIdSet);
-        const popularTvShows = excludeWatched((popularTvRes.results ?? []).filter(hasListData), watchedIdSet);
-        const freshNewMovies = excludeWatched((newMovieRes.results ?? []).filter(hasListData), watchedIdSet);
-        const cleanOnTheAir = excludeWatched((newEpisodeRes.results ?? []).filter(hasListData), watchedIdSet);
-        const nextDailyGenreMovies = excludeWatched((dailyGenreRes.results ?? []).filter(hasListData), watchedIdSet).slice(0, 20);
+        const popularMovies = excludeWatched((popularRes.results ?? []).filter(hasHomeShelfData), watchedIdSet);
+        const popularTvShows = excludeWatched((popularTvRes.results ?? []).filter(hasHomeShelfData), watchedIdSet);
+        const freshNewMovies = excludeWatched((newMovieRes.results ?? []).filter(hasHomeShelfData), watchedIdSet);
+        const cleanOnTheAir = excludeWatched((newEpisodeRes.results ?? []).filter(hasHomeShelfData), watchedIdSet);
+        const nextDailyGenreMovies = excludeWatched((dailyGenreRes.results ?? []).filter(hasHomeShelfData), watchedIdSet).slice(0, 20);
+        const cleanTopRatedMovies = excludeWatched((topRatedMovieRes.results ?? []).filter(hasHomeShelfData), watchedIdSet).slice(0, 20);
+        const cleanTopRatedTv = excludeWatched((topRatedTvRes.results ?? []).filter(hasHomeShelfData), watchedIdSet).slice(0, 20);
         const quickFallbackForYou = buildFallbackForYouMovies({
           primary: freshNewMovies,
           secondary: popularMovies,
@@ -646,7 +740,10 @@ export default function HomeScreen() {
 
         // Show Home sections immediately; personalization keeps loading in background.
         setPopular(popularMovies);
+        setPopularTv(popularTvShows);
         setNewMovies(freshNewMovies);
+        setTopRatedMovies(cleanTopRatedMovies);
+        setTopRatedTv(cleanTopRatedTv);
         setDailyGenreTitle(`Today ${dailyGenre.name}`);
         setDailyGenreMovies(nextDailyGenreMovies);
         setNewEpisodes(cleanOnTheAir);
@@ -669,7 +766,10 @@ export default function HomeScreen() {
           userId: user?.id ?? null,
           featured: baseFeatured,
           popular: popularMovies,
+          popularTv: popularTvShows,
           newMovies: freshNewMovies,
+          topRatedMovies: cleanTopRatedMovies,
+          topRatedTv: cleanTopRatedTv,
           forYouSubtitle: user ? 'Building personalized picks...' : 'Popular and fresh picks for now',
           forYouMovies: quickFallbackForYou,
           forYouShows: [],
@@ -836,7 +936,7 @@ export default function HomeScreen() {
                       details
                         .filter((item): item is Movie => !!item)
                         .filter((item) => !watchedIds.has(item.id))
-                        .filter(hasListData),
+                        .filter(hasHomeShelfData),
                       seedGenreWeights
                     );
                     const filteredMlMovies = filterForYouByPolicy(mlMovies, forYouPolicy);
@@ -871,7 +971,7 @@ export default function HomeScreen() {
                       tvDetails
                         .filter((item): item is TvShow => !!item)
                         .filter((item) => !watchedIds.has(item.id))
-                        .filter(hasListData)
+                        .filter(hasHomeShelfData)
                     );
                     nextForYouShows = filterForYouByPolicy(rankedTv, forYouPolicy).slice(0, 20);
                   }
@@ -901,7 +1001,7 @@ export default function HomeScreen() {
                   for (const item of batch.items ?? []) {
                     if (seen.has(item.id)) continue;
                     if (watchedIds.has(item.id)) continue;
-                    if (!hasListData(item)) continue;
+                    if (!hasHomeShelfData(item)) continue;
                     seen.add(item.id);
                     merged.push(item);
                   }
@@ -944,7 +1044,7 @@ export default function HomeScreen() {
                 const pool = [...(similarRes.results ?? []), ...(recRes.results ?? [])];
                 const dedup = new Map<number, Movie>();
                 for (const item of pool) {
-                  if (!item || watchedIds.has(item.id) || !hasListData(item)) continue;
+                  if (!item || watchedIds.has(item.id) || !hasHomeShelfData(item)) continue;
                   if (!dedup.has(item.id)) dedup.set(item.id, item);
                 }
                 nextSimilarMovies = rankRecommendationCandidates(
@@ -1041,7 +1141,10 @@ export default function HomeScreen() {
           userId: user?.id ?? null,
           featured: baseFeatured,
           popular: popularMovies,
+          popularTv: popularTvShows,
           newMovies: freshNewMovies,
+          topRatedMovies: cleanTopRatedMovies,
+          topRatedTv: cleanTopRatedTv,
           forYouSubtitle: nextForYouSubtitle,
           forYouMovies: nextForYouMovies,
           forYouShows: nextForYouShows,
@@ -1073,7 +1176,10 @@ export default function HomeScreen() {
     if (homeSnapshot && homeSnapshot.userId === (user?.id ?? null)) {
       setFeatured(homeSnapshot.featured);
       setPopular(homeSnapshot.popular);
+      setPopularTv(homeSnapshot.popularTv ?? []);
       setNewMovies(homeSnapshot.newMovies);
+      setTopRatedMovies(homeSnapshot.topRatedMovies ?? []);
+      setTopRatedTv(homeSnapshot.topRatedTv ?? []);
       setForYouSubtitle(homeSnapshot.forYouSubtitle);
       setForYouMovies(homeSnapshot.forYouMovies);
       setForYouShows(homeSnapshot.forYouShows ?? []);
@@ -1259,8 +1365,8 @@ export default function HomeScreen() {
             const withPoster = typed.filter(hasSearchCardData);
             setSearchResults(rankByQueryMatch(withPoster, q));
           } else {
-            const cleaned = (res.results ?? []).filter(hasListData);
-            const filtered = excludeWatched(cleaned.filter(hasListData), watchedIdSet);
+            const cleaned = (res.results ?? []).filter(hasHomeShelfData);
+            const filtered = excludeWatched(cleaned.filter(hasHomeShelfData), watchedIdSet);
             setSearchResults(rankByTaste(filtered as SearchResultItem[], searchTasteSignalsRef.current));
           }
         }
@@ -1403,32 +1509,69 @@ export default function HomeScreen() {
 
   const heroSlides = useMemo<HeroSlide[]>(() => {
     const candidates = [
-      ...(featured ? [featured] : []),
-      ...forYouMovies.slice(0, 16),
-      ...newMovies.slice(0, 24),
-      ...dailyGenreMovies.slice(0, 16),
-      ...popular.slice(0, 24),
-    ] as (FeaturedDisplay | Movie)[];
+      ...(featured
+        ? [
+            {
+              item: featured,
+              eyebrow: 'Featured Tonight',
+              subtitle: 'A hand-picked spotlight for your next watch.',
+              accent: '#C1121F',
+            },
+          ]
+        : []),
+      ...forYouMovies.slice(0, 16).map((item) => ({
+        item,
+        eyebrow: 'For You',
+        subtitle: 'Blended from your favorites, watched titles and recent signals.',
+        accent: '#60A5FA',
+      })),
+      ...newMovies.slice(0, 24).map((item) => ({
+        item,
+        eyebrow: 'Fresh Release',
+        subtitle: 'New on the radar and worth opening first.',
+        accent: '#F59E0B',
+      })),
+      ...dailyGenreMovies.slice(0, 16).map((item) => ({
+        item,
+        eyebrow: 'Daily Spotlight',
+        subtitle: 'A sharper daily shelf with more mood and less filler.',
+        accent: '#A78BFA',
+      })),
+      ...popular.slice(0, 24).map((item) => ({
+        item,
+        eyebrow: 'Popular Now',
+        subtitle: 'High-traction picks the wider audience is watching now.',
+        accent: '#34D399',
+      })),
+    ] as {
+      item: FeaturedDisplay | Movie;
+      eyebrow: string;
+      subtitle: string;
+      accent: string;
+    }[];
 
-    const mapped = candidates.map((item) => {
+    const mapped = candidates.map(({ item, eyebrow, subtitle, accent }) => {
       const tmdbId = Number((item as any).tmdb_id ?? (item as any).id ?? 0) || null;
       const title = String((item as any).title ?? '').trim();
-      const image =
-        posterUrl((item as any).poster_path ?? null, 'w500') ||
-        backdropUrl((item as any).backdrop_path ?? null, 'w780') ||
-        null;
+      const description = String((item as any).overview ?? '').trim();
+      const poster = posterUrl((item as any).poster_path ?? null, 'w500') || null;
+      const backdrop = backdropUrl((item as any).backdrop_path ?? null, 'w1280') || poster;
       return {
         id: String(tmdbId ?? title),
         tmdbId,
         title: title || 'Movie',
-        subtitle: 'Recommended for you',
-        image,
+        subtitle,
+        description: description || null,
+        poster,
+        backdrop,
+        eyebrow,
+        accent,
       };
     });
 
     const dedup = new Map<string, HeroSlide>();
     for (const it of mapped) {
-      if (!it.image) continue;
+      if (!it.poster && !it.backdrop) continue;
       if (!dedup.has(it.id)) dedup.set(it.id, it);
     }
 
@@ -1449,28 +1592,21 @@ export default function HomeScreen() {
   const heroPrimarySlide = heroSlides[heroIndex] ?? heroSlides[0] ?? null;
   const heroTopImage =
     cinemaPhase === 'none'
-      ? heroPrimarySlide?.image || null
+      ? heroPrimarySlide?.backdrop || heroPrimarySlide?.poster || null
       : cinemaEvent?.poster_url?.trim() || cinemaMeta?.backdrop || cinemaMeta?.poster || backdropUrl(featured?.backdrop_path, 'w780');
 
   const isWeb = Platform.OS === 'web';
   const heroCardGap = 0;
   const heroItemWidth = heroSlideWidth > 0 ? Math.max(1, heroSlideWidth) : 320;
   const heroHorizontalInset = 0;
-  const heroPosterHeight = isWeb ? 336 : Math.round(heroItemWidth * 1.48);
-  const heroCarouselHeight = heroPosterHeight + 22;
+  const heroPosterHeight = isWeb ? 360 : Math.round(heroItemWidth * 1.12);
+  const heroCarouselHeight = heroPosterHeight + 18;
   const heroStep = Math.max(1, heroSlideWidth || heroItemWidth || 1);
   const openCinemaPosterDetails = useCallback(() => {
     if (cinemaPhase === 'none') return;
-    const tmdbId = Number(cinemaEvent?.tmdb_id ?? 0);
-    if (Number.isFinite(tmdbId) && tmdbId > 0) {
-      router.push({
-        pathname: '/movie/[id]',
-        params: { id: String(tmdbId), type: cinemaMeta?.mediaType ?? 'movie' },
-      });
-      return;
-    }
     router.push('/cinema');
-  }, [cinemaEvent?.tmdb_id, cinemaMeta?.mediaType, cinemaPhase]);
+  }, [cinemaPhase]);
+
 
   const forYouSectionItems = useMemo<(Movie | TvShow)[]>(() => {
     const movieBase = forYouMovies.slice(0, 20);
@@ -1491,7 +1627,13 @@ export default function HomeScreen() {
     ? `We saw that you like ${similarSeedTitle}`
     : 'Similar Movies';
 
-  const hasData = popular.length > 0 || newMovies.length > 0 || newEpisodes.length > 0;
+  const hasData =
+    popular.length > 0 ||
+    popularTv.length > 0 ||
+    newMovies.length > 0 ||
+    topRatedMovies.length > 0 ||
+    topRatedTv.length > 0 ||
+    newEpisodes.length > 0;
   if ((loading && !hasData) || !minDelayDone) {
     return (
       <View style={[styles.loaderScreen, { backgroundColor: theme.background }]}>
@@ -1520,7 +1662,7 @@ export default function HomeScreen() {
       const nextPage = popularPage + 1;
       const res = await getPopularMovies(nextPage);
       const watchedIdSet = new Set(watchedIds);
-      setPopular((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasListData), watchedIdSet)]);
+      setPopular((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasHomeShelfData), watchedIdSet)]);
       setPopularPage(nextPage);
       setPopularTotalPages(res.total_pages ?? popularTotalPages);
     } finally {
@@ -1535,7 +1677,7 @@ export default function HomeScreen() {
       const nextPage = newMoviesPage + 1;
       const res = await getNewMovies(nextPage);
       const watchedIdSet = new Set(watchedIds);
-      setNewMovies((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasListData), watchedIdSet)]);
+      setNewMovies((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasHomeShelfData), watchedIdSet)]);
       setNewMoviesPage(nextPage);
       setNewMoviesTotalPages(res.total_pages ?? newMoviesTotalPages);
     } finally {
@@ -1550,7 +1692,7 @@ export default function HomeScreen() {
       const nextPage = newEpisodesPage + 1;
       const res = await getNewEpisodes(nextPage);
       const watchedIdSet = new Set(watchedIds);
-      setNewEpisodes((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasListData), watchedIdSet)]);
+      setNewEpisodes((prev) => [...prev, ...excludeWatched((res.results ?? []).filter(hasHomeShelfData), watchedIdSet)]);
       setNewEpisodesPage(nextPage);
       setNewEpisodesTotalPages(res.total_pages ?? newEpisodesTotalPages);
     } finally {
@@ -1597,9 +1739,9 @@ export default function HomeScreen() {
                 source={{ uri: heroTopImage }}
                 style={styles.heroGlowImage}
                 contentFit="cover"
-                transition={120}
+                transition={80}
                 cachePolicy="memory-disk"
-                blurRadius={Platform.OS === 'android' ? 24 : 36}
+                blurRadius={Platform.OS === 'android' ? 8 : 14}
               />
               <LinearGradient
                 colors={['rgba(0,0,0,0.05)', 'rgba(0,0,0,0.35)', theme.background, theme.background]}
@@ -1694,17 +1836,84 @@ export default function HomeScreen() {
                             if (!Number.isFinite(id) || id <= 0) return;
                             router.push({ pathname: '/movie/[id]', params: { id: String(id), type: 'movie' } });
                           }}>
-                          {slide.image ? (
-                            <Image
-                              source={{ uri: slide.image }}
-                              style={styles.heroSlideImage}
-                              contentFit="cover"
-                              transition={140}
-                              cachePolicy="memory-disk"
-                            />
+                          {slide.backdrop || slide.poster ? (
+                              <Image
+                                source={{ uri: slide.backdrop || slide.poster || undefined }}
+                                style={styles.heroSlideBackdropImage}
+                                contentFit="cover"
+                                transition={90}
+                                cachePolicy="memory-disk"
+                              />
                           ) : (
-                            <View style={[styles.heroSlideImage, { backgroundColor: theme.backgroundSelected }]} />
+                            <View style={[styles.heroSlideBackdropImage, { backgroundColor: theme.backgroundSelected }]} />
                           )}
+                          <LinearGradient
+                            colors={['rgba(3,5,10,0.12)', 'rgba(3,5,10,0.28)', 'rgba(3,5,10,0.86)']}
+                            locations={[0, 0.35, 1]}
+                            start={{ x: 0.5, y: 0 }}
+                            end={{ x: 0.5, y: 1 }}
+                            style={styles.heroSlideShadeVertical}
+                          />
+                          <LinearGradient
+                            colors={[`${slide.accent}44`, 'rgba(3,5,10,0.02)', 'rgba(3,5,10,0.0)']}
+                            locations={[0, 0.42, 1]}
+                            start={{ x: 0, y: 0.5 }}
+                            end={{ x: 1, y: 0.5 }}
+                            style={styles.heroSlideAccentWash}
+                          />
+                          <LinearGradient
+                            colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0.0)']}
+                            locations={[0, 1]}
+                            start={{ x: 0.5, y: 0 }}
+                            end={{ x: 0.5, y: 1 }}
+                            style={styles.heroSlideEdgeGloss}
+                          />
+                          <View style={styles.heroSlideDetailOverlay}>
+                            <View style={styles.heroSlidePosterWrap}>
+                              {slide.poster ? (
+                                <Image
+                                  source={{ uri: slide.poster }}
+                                  style={styles.heroSlidePoster}
+                                  contentFit="cover"
+                                  transition={90}
+                                  cachePolicy="memory-disk"
+                                />
+                              ) : (
+                                <View style={[styles.heroSlidePoster, { backgroundColor: theme.backgroundSelected }]} />
+                              )}
+                            </View>
+                            <View style={styles.heroSlideCopy}>
+                              <View
+                                style={[
+                                  styles.heroSlideEyebrowPill,
+                                  {
+                                    borderColor: `${slide.accent}88`,
+                                    backgroundColor: `${slide.accent}26`,
+                                  },
+                                ]}>
+                                <Text style={styles.heroSlideEyebrow}>{slide.eyebrow}</Text>
+                              </View>
+                              <Text style={styles.heroSlideTitle} numberOfLines={2}>
+                                {slide.title}
+                              </Text>
+                              {slide.subtitle ? (
+                                <Text style={styles.heroSlideSubtitle} numberOfLines={2}>
+                                  {slide.subtitle}
+                                </Text>
+                              ) : null}
+                              {slide.description ? (
+                                <Text style={styles.heroSlideOverview} numberOfLines={3}>
+                                  {slide.description}
+                                </Text>
+                              ) : null}
+                              <View style={styles.heroSlideMetaRow}>
+                                <View style={styles.heroSlideCta}>
+                                  <Ionicons name="sparkles-outline" size={14} color="#FFFFFF" />
+                                  <Text style={styles.heroSlideCtaText}>Open details</Text>
+                                </View>
+                              </View>
+                            </View>
+                          </View>
                         </Pressable>
                       </Animated.View>
                     );
@@ -1719,59 +1928,83 @@ export default function HomeScreen() {
                         height: heroPosterHeight,
                       },
                     ]}>
-                    <View style={[styles.heroSlideImage, { backgroundColor: theme.backgroundSelected }]} />
+                    <View style={[styles.heroSlideBackdropImage, { backgroundColor: theme.backgroundSelected }]} />
                   </View>
                 )}
               </Animated.ScrollView>
-            ) : heroTopImage ? (
-              <Pressable style={styles.heroCinemaPosterTap} onPress={openCinemaPosterDetails}>
-                <Image
-                  source={{ uri: heroTopImage }}
-                  style={styles.heroImage}
-                  contentFit="contain"
-                  contentPosition="center"
-                  transition={140}
-                  cachePolicy="memory-disk"
-                />
-              </Pressable>
             ) : (
-              <Pressable style={styles.heroCinemaPosterTap} onPress={openCinemaPosterDetails}>
-                <View style={[styles.heroImage, { backgroundColor: theme.backgroundSelected }]} />
-              </Pressable>
+              <View style={styles.heroCinemaStage}>
+                <Pressable style={styles.heroCinemaPosterTap} onPress={openCinemaPosterDetails}>
+                  {heroTopImage ? (
+                    <Image
+                      source={{ uri: heroTopImage }}
+                      style={styles.heroImage}
+                      contentFit="cover"
+                      contentPosition="center"
+                      transition={90}
+                      cachePolicy="memory-disk"
+                    />
+                  ) : (
+                    <View style={[styles.heroImage, { backgroundColor: theme.backgroundSelected }]} />
+                  )}
+                  <LinearGradient
+                    colors={['rgba(3,5,10,0.04)', 'rgba(3,5,10,0.12)', 'rgba(3,5,10,0.42)']}
+                    locations={[0, 0.45, 1]}
+                    start={{ x: 0.5, y: 0 }}
+                    end={{ x: 0.5, y: 1 }}
+                    style={styles.heroSlideShadeVertical}
+                  />
+                  {(cinemaPhase === 'upcoming' || cinemaPhase === 'live') ? (
+                    <View style={styles.heroCinemaPosterBadgeWrap} pointerEvents="box-none">
+                      {cinemaPhase === 'upcoming' ? (
+                        <Pressable
+                          style={[
+                            styles.heroCinemaIconBtn,
+                            cinemaReminderArmed && styles.heroCinemaIconBtnArmed,
+                          ]}
+                          onPress={() => {
+                            if (cinemaReminderArmed) {
+                              void disarmCinemaLiveReminder(cinemaEvent);
+                            } else {
+                              void armCinemaLiveReminder(cinemaEvent);
+                            }
+                          }}>
+                          <Ionicons
+                            name={cinemaReminderArmed ? 'notifications' : 'notifications-outline'}
+                            size={18}
+                            color="#fff"
+                          />
+                        </Pressable>
+                      ) : (
+                        <Pressable style={styles.heroCinemaLiveBadge} onPress={() => router.push('/cinema')}>
+                          <View style={styles.heroCinemaLiveDot} />
+                          <Text style={styles.heroCinemaLiveText}>LIVE</Text>
+                        </Pressable>
+                      )}
+                    </View>
+                  ) : null}
+                </Pressable>
+              </View>
             )}
             {cinemaPhase === 'none' && heroSlides.length > 1 ? (
-              <View style={styles.heroDotsRow}>
-                {heroSlides.map((slide, idx) => (
-                  <View key={slide.id} style={[styles.heroDot, idx === heroIndex && styles.heroDotActive]} />
-                ))}
+              <View style={styles.heroProgressOverlay}>
+                <View style={styles.heroProgressRail}>
+                  {heroSlides.map((slide, idx) => (
+                    <View
+                      key={slide.id}
+                      style={[
+                        styles.heroProgressSegment,
+                        idx === heroIndex && styles.heroProgressSegmentActive,
+                      ]}
+                    />
+                  ))}
+                </View>
+                <Text style={styles.heroProgressText}>
+                  {String(heroIndex + 1).padStart(2, '0')} / {String(heroSlides.length).padStart(2, '0')}
+                </Text>
               </View>
             ) : null}
           </View>
-          {cinemaPhase !== 'none' ? (
-            <View style={styles.cinemaHeroFooter}>
-              {cinemaPhase === 'upcoming' ? (
-                <Pressable
-                  style={[styles.cinemaHeroNotifyBtn, cinemaReminderArmed && styles.cinemaHeroNotifyBtnArmed]}
-                  onPress={() => {
-                    if (cinemaReminderArmed) {
-                      void disarmCinemaLiveReminder(cinemaEvent);
-                    } else {
-                      void armCinemaLiveReminder(cinemaEvent);
-                    }
-                  }}>
-                  <Ionicons name="notifications-outline" size={18} color="#fff" />
-                  <Text style={styles.cinemaHeroNotifyText}>
-                    {cinemaReminderArmed ? 'Reminder on' : 'Notify me'}
-                  </Text>
-                </Pressable>
-              ) : cinemaPhase === 'live' ? (
-                <Pressable style={styles.cinemaHeroNotifyBtn} onPress={() => router.push('/cinema')}>
-                  <Ionicons name="radio-outline" size={18} color="#fff" />
-                  <Text style={styles.cinemaHeroNotifyText}>Go to live</Text>
-                </Pressable>
-              ) : null}
-            </View>
-          ) : null}
         </View>
 
         {error ? (
@@ -1808,6 +2041,14 @@ export default function HomeScreen() {
             items={forYouSectionItems}
           />
         ) : null}
+        {forYouShows.length > 0 ? (
+          <Section
+            title="For You Series"
+            subtitle="Shows shaped by your watch history and TV taste signals"
+            items={forYouShows}
+            isTv
+          />
+        ) : null}
         <Section
           title="Popular Movies"
           subtitle="Top picks regardless of release year"
@@ -1816,6 +2057,29 @@ export default function HomeScreen() {
           hasMore={popularPage < popularTotalPages}
           loadingMore={loadingMore === 'popular'}
         />
+        {popularTv.length > 0 ? (
+          <Section
+            title="Popular Series"
+            subtitle="TV shows drawing the biggest audience right now"
+            items={popularTv}
+            isTv
+          />
+        ) : null}
+        {topRatedMovies.length > 0 ? (
+          <Section
+            title="Top Rated Movies"
+            subtitle="Critically strong films with sustained audience approval"
+            items={topRatedMovies}
+          />
+        ) : null}
+        {topRatedTv.length > 0 ? (
+          <Section
+            title="Top Rated Series"
+            subtitle="Series with strong reception and long-form pull"
+            items={topRatedTv}
+            isTv
+          />
+        ) : null}
         {similarMovies.length > 0 ? (
           <Section
             title={similarSectionTitle}
@@ -1951,7 +2215,7 @@ export default function HomeScreen() {
   );
 }
 
-function Section({
+const Section = React.memo(function Section({
   title,
   subtitle,
   items,
@@ -1969,7 +2233,7 @@ function Section({
   loadingMore?: boolean;
 }) {
   const theme = useTheme();
-  const safeItems = useMemo(() => items.filter((item) => hasListData(item)), [items]);
+  const safeItems = useMemo(() => items.filter((item) => hasHomeShelfData(item)), [items]);
   const listData = useMemo<SectionRowItem[]>(() => {
     const base: SectionRowItem[] = safeItems.map((item, idx) => ({
       kind: 'media',
@@ -1981,6 +2245,32 @@ function Section({
     }
     return base;
   }, [hasMore, safeItems]);
+  const renderItem = useCallback(({ item: entry }: { item: SectionRowItem }) => {
+    if (entry.kind === 'loadMore') {
+      return (
+        <Pressable onPress={onLoadMore} style={styles.loadMoreCard}>
+          {loadingMore ? (
+            <ActivityIndicator color="#fff" />
+          ) : (
+            <Text style={styles.loadMoreText}>Load more</Text>
+          )}
+        </Pressable>
+      );
+    }
+    const mediaType =
+      typeof isTv === 'boolean'
+        ? (isTv ? 'tv' : 'movie')
+        : ('name' in (entry.item as any) && !('title' in (entry.item as any)) ? 'tv' : 'movie');
+    return <SectionMediaCard item={entry.item} mediaType={mediaType} />;
+  }, [isTv, loadingMore, onLoadMore]);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<SectionRowItem> | null | undefined, index: number) => ({
+      length: HOME_ROW_CARD_WIDTH + HOME_ROW_CARD_GAP,
+      offset: (HOME_ROW_CARD_WIDTH + HOME_ROW_CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
 
   return (
     <View style={styles.section}>
@@ -2004,48 +2294,15 @@ function Section({
         maxToRenderPerBatch={6}
         windowSize={5}
         removeClippedSubviews
+        getItemLayout={getItemLayout}
         ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
-        renderItem={({ item: entry }) => {
-          if (entry.kind === 'loadMore') {
-            return (
-              <Pressable onPress={onLoadMore} style={styles.loadMoreCard}>
-                {loadingMore ? (
-                  <ActivityIndicator color="#fff" />
-                ) : (
-                  <Text style={styles.loadMoreText}>Load more</Text>
-                )}
-              </Pressable>
-            );
-          }
-          return (
-            <Pressable
-              style={styles.card}
-              onPress={() => {
-                const mediaType =
-                  typeof isTv === 'boolean'
-                    ? (isTv ? 'tv' : 'movie')
-                    : ('name' in (entry.item as any) && !('title' in (entry.item as any)) ? 'tv' : 'movie');
-                router.push({
-                  pathname: '/movie/[id]',
-                  params: { id: String(entry.item.id), type: mediaType },
-                });
-              }}>
-              <Image
-                source={{ uri: posterUrl(entry.item.poster_path, 'w342') ?? undefined }}
-                style={styles.cardImage}
-                contentFit="cover"
-                transition={120}
-                cachePolicy="memory-disk"
-              />
-            </Pressable>
-          );
-        }}
+        renderItem={renderItem}
       />
     </View>
   );
-}
+});
 
-function SearchSection({
+const SearchSection = React.memo(function SearchSection({
   title,
   items,
   onItemPress,
@@ -2055,6 +2312,17 @@ function SearchSection({
   onItemPress?: (item: SearchResultItem) => void;
 }) {
   const safeItems = useMemo(() => items.filter(hasSearchCardData).slice(0, 24), [items]);
+  const renderItem = useCallback(({ item }: { item: SearchResultItem }) => (
+    <SearchMediaCard item={item} onItemPress={onItemPress} />
+  ), [onItemPress]);
+  const getItemLayout = useCallback(
+    (_: ArrayLike<SearchResultItem> | null | undefined, index: number) => ({
+      length: HOME_SEARCH_CARD_WIDTH + HOME_SEARCH_CARD_GAP,
+      offset: (HOME_SEARCH_CARD_WIDTH + HOME_SEARCH_CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
   if (safeItems.length === 0) return null;
   return (
     <View style={styles.searchSection}>
@@ -2069,37 +2337,75 @@ function SearchSection({
         maxToRenderPerBatch={8}
         windowSize={4}
         removeClippedSubviews
+        getItemLayout={getItemLayout}
         ItemSeparatorComponent={() => <View style={styles.rowSeparator} />}
-        renderItem={({ item }) => (
-          <Pressable
-            style={styles.searchCard}
-            onPress={() => {
-              if (isPersonItem(item)) {
-                router.push({
-                  pathname: '/person/[id]',
-                  params: { id: String(item.id), role: resolvePersonRole(item) },
-                });
-                return;
-              }
-              onItemPress?.(item);
-              router.push({
-                pathname: '/movie/[id]',
-                params: { id: String(item.id), type: isTvItem(item) ? 'tv' : 'movie' },
-              });
-            }}>
-            <Image
-              source={{ uri: posterUrl(resolveSearchImagePath(item), 'w185') ?? undefined }}
-              style={styles.searchCardImage}
-              contentFit="cover"
-              transition={100}
-              cachePolicy="memory-disk"
-            />
-          </Pressable>
-        )}
+        renderItem={renderItem}
       />
     </View>
   );
-}
+});
+
+const SectionMediaCard = React.memo(function SectionMediaCard({
+  item,
+  mediaType,
+}: {
+  item: Movie | TvShow;
+  mediaType: 'movie' | 'tv';
+}) {
+  const handlePress = useCallback(() => {
+    router.push({
+      pathname: '/movie/[id]',
+      params: { id: String(item.id), type: mediaType },
+    });
+  }, [item.id, mediaType]);
+
+  return (
+    <Pressable style={styles.card} onPress={handlePress}>
+      <Image
+        source={{ uri: posterUrl(item.poster_path, 'w300') ?? undefined }}
+        style={styles.cardImage}
+        contentFit="cover"
+        transition={60}
+        cachePolicy="memory-disk"
+      />
+    </Pressable>
+  );
+});
+
+const SearchMediaCard = React.memo(function SearchMediaCard({
+  item,
+  onItemPress,
+}: {
+  item: SearchResultItem;
+  onItemPress?: (item: SearchResultItem) => void;
+}) {
+  const handlePress = useCallback(() => {
+    if (isPersonItem(item)) {
+      router.push({
+        pathname: '/person/[id]',
+        params: { id: String(item.id), role: resolvePersonRole(item) },
+      });
+      return;
+    }
+    onItemPress?.(item);
+    router.push({
+      pathname: '/movie/[id]',
+      params: { id: String(item.id), type: isTvItem(item) ? 'tv' : 'movie' },
+    });
+  }, [item, onItemPress]);
+
+  return (
+    <Pressable style={styles.searchCard} onPress={handlePress}>
+      <Image
+        source={{ uri: posterUrl(resolveSearchImagePath(item), 'w185') ?? undefined }}
+        style={styles.searchCardImage}
+        contentFit="cover"
+        transition={50}
+        cachePolicy="memory-disk"
+      />
+    </Pressable>
+  );
+});
 
 const styles = StyleSheet.create({
   root: {
@@ -2237,8 +2543,71 @@ const styles = StyleSheet.create({
     aspectRatio: 3 / 4,
     backgroundColor: '#05070d',
   },
+  heroCinemaStage: {
+    width: '100%',
+    position: 'relative',
+  },
   heroCinemaPosterTap: {
     width: '100%',
+    position: 'relative',
+  },
+  heroCinemaPosterBadgeWrap: {
+    position: 'absolute',
+    top: 14,
+    left: 14,
+  },
+  heroCinemaIconBtn: {
+    width: 42,
+    height: 42,
+    borderRadius: 21,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(193,18,31,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+    shadowColor: '#C1121F',
+    shadowOpacity: 0.28,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  heroCinemaIconBtnArmed: {
+    backgroundColor: 'rgba(86,94,108,0.92)',
+    borderColor: 'rgba(255,255,255,0.16)',
+    shadowColor: '#000',
+    shadowOpacity: 0.12,
+    shadowRadius: 6,
+    shadowOffset: { width: 0, height: 3 },
+    elevation: 4,
+  },
+  heroCinemaLiveBadge: {
+    minHeight: 40,
+    borderRadius: 999,
+    paddingHorizontal: 14,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'center',
+    gap: 8,
+    backgroundColor: 'rgba(193,18,31,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.24)',
+    shadowColor: '#C1121F',
+    shadowOpacity: 0.3,
+    shadowRadius: 10,
+    shadowOffset: { width: 0, height: 4 },
+    elevation: 8,
+  },
+  heroCinemaLiveDot: {
+    width: 8,
+    height: 8,
+    borderRadius: 4,
+    backgroundColor: '#fff',
+  },
+  heroCinemaLiveText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11.5,
+    letterSpacing: 1,
   },
   cinemaHeroFooter: {
     marginTop: 12,
@@ -2279,25 +2648,137 @@ const styles = StyleSheet.create({
     gap: 0,
   },
   heroSlidePage: {
-    borderRadius: 20,
+    borderRadius: 28,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: '#0c0c0c',
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: '#090C12',
     marginTop: 0,
+    shadowColor: '#000',
+    shadowOpacity: 0.35,
+    shadowRadius: 24,
+    shadowOffset: { width: 0, height: 14 },
+    elevation: 12,
   },
   heroSlideMotion: {
     transform: [{ translateY: 0 }, { scale: 1 }],
   },
   heroSlidePageWeb: {
     height: 336,
-    borderRadius: 0,
+    borderRadius: 24,
     borderWidth: 0,
     marginTop: 0,
   },
-  heroSlideImage: {
+  heroSlideBackdropImage: {
     width: '100%',
     height: '100%',
+  },
+  heroSlideShadeVertical: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroSlideAccentWash: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroSlideEdgeGloss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  heroSlideDetailOverlay: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 16,
+    flexDirection: 'row',
+    alignItems: 'flex-end',
+    gap: 14,
+  },
+  heroSlidePosterWrap: {
+    width: 110,
+    height: 164,
+    borderRadius: 20,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.22)',
+    backgroundColor: 'rgba(7,10,16,0.55)',
+    shadowColor: '#000',
+    shadowOpacity: 0.42,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 10 },
+    elevation: 10,
+  },
+  heroSlidePoster: {
+    width: '100%',
+    height: '100%',
+  },
+  heroSlideCopy: {
+    flex: 1,
+    minHeight: 164,
+    justifyContent: 'flex-end',
+    borderRadius: 22,
+    paddingHorizontal: 16,
+    paddingVertical: 14,
+    backgroundColor: 'rgba(7,10,16,0.68)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+  },
+  heroSlideEyebrowPill: {
+    alignSelf: 'flex-start',
+    borderRadius: 999,
+    borderWidth: 1,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    marginBottom: 10,
+  },
+  heroSlideEyebrow: {
+    color: '#FFFFFF',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+  },
+  heroSlideTitle: {
+    color: '#FFFFFF',
+    fontFamily: Fonts.serif,
+    fontSize: 29,
+    lineHeight: 31,
+    letterSpacing: -0.3,
+  },
+  heroSlideSubtitle: {
+    marginTop: 8,
+    color: 'rgba(244,247,255,0.84)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    lineHeight: 16,
+  },
+  heroSlideOverview: {
+    marginTop: 8,
+    color: 'rgba(235,239,246,0.8)',
+    fontFamily: Fonts.serif,
+    fontSize: 12,
+    lineHeight: 17,
+  },
+  heroSlideMetaRow: {
+    marginTop: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  heroSlideCta: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 7,
+    borderRadius: 999,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.16)',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+  },
+  heroSlideCtaText: {
+    color: '#FFFFFF',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   heroStatsGlass: {
     marginTop: 14,
@@ -2360,25 +2841,36 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.serif,
     fontSize: 14,
   },
-  heroDotsRow: {
+  heroProgressOverlay: {
     position: 'absolute',
-    left: 0,
-    right: 0,
-    bottom: 10,
+    left: 16,
+    right: 16,
+    top: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    justifyContent: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  heroProgressRail: {
+    flex: 1,
+    flexDirection: 'row',
+    alignItems: 'center',
     gap: 6,
   },
-  heroDot: {
-    width: 6,
-    height: 6,
+  heroProgressSegment: {
+    flex: 1,
+    height: 4,
     borderRadius: 999,
-    backgroundColor: 'rgba(255,255,255,0.42)',
+    backgroundColor: 'rgba(255,255,255,0.18)',
   },
-  heroDotActive: {
-    width: 20,
+  heroProgressSegmentActive: {
     backgroundColor: '#fff',
+  },
+  heroProgressText: {
+    color: '#FFFFFF',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    letterSpacing: 0.8,
   },
   topFloatingBar: {
     position: 'absolute',
@@ -2473,11 +2965,11 @@ const styles = StyleSheet.create({
     paddingRight: Spacing.one,
   },
   rowSeparator: {
-    width: Spacing.two,
+    width: HOME_ROW_CARD_GAP,
   },
   searchCard: {
-    width: 120,
-    height: 170,
+    width: HOME_SEARCH_CARD_WIDTH,
+    height: HOME_SEARCH_CARD_HEIGHT,
     borderRadius: 16,
     overflow: 'hidden',
   },
@@ -2513,19 +3005,23 @@ const styles = StyleSheet.create({
     bottom: 0,
     left: 0,
     right: 0,
-    paddingHorizontal: Spacing.two,
-    paddingBottom: Spacing.two,
+    paddingHorizontal: Spacing.three,
+    paddingBottom: Spacing.three,
   },
   heroOverlayGlass: {
-    borderRadius: 18,
+    borderRadius: 22,
     overflow: 'hidden',
-    minHeight: 164,
+    minHeight: 174,
     paddingHorizontal: Spacing.three,
-    paddingVertical: Spacing.two,
+    paddingVertical: Spacing.two + 2,
     justifyContent: 'center',
-    backgroundColor: 'rgba(7,10,14,0.9)',
+    backgroundColor: 'rgba(7,10,14,0.78)',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.18)',
+    borderColor: 'rgba(255,255,255,0.16)',
+  },
+  heroOverlayGlassLive: {
+    backgroundColor: 'rgba(18,8,10,0.8)',
+    borderColor: 'rgba(255,255,255,0.14)',
   },
   heroOverlayGlassCentered: {
     borderRadius: 18,
@@ -2540,15 +3036,16 @@ const styles = StyleSheet.create({
     alignItems: 'center',
   },
   heroTitle: {
-    fontSize: 20,
+    fontSize: 24,
     fontFamily: Fonts.serif,
     marginTop: 6,
-    marginBottom: Spacing.one,
+    marginBottom: 6,
   },
   heroOverview: {
     fontFamily: Fonts.serif,
-    fontSize: 12,
-    color: 'rgba(255,255,255,0.85)',
+    fontSize: 12.5,
+    lineHeight: 18,
+    color: 'rgba(255,255,255,0.88)',
   },
   heroCinemaKickerRow: {
     flexDirection: 'row',
@@ -2559,20 +3056,20 @@ const styles = StyleSheet.create({
   heroCinemaBadge: {
     borderRadius: 999,
     borderWidth: 1,
-    borderColor: 'rgba(253,230,138,0.6)',
-    backgroundColor: 'rgba(120,53,15,0.45)',
-    paddingHorizontal: 10,
-    paddingVertical: 4,
+    borderColor: 'rgba(253,230,138,0.52)',
+    backgroundColor: 'rgba(120,53,15,0.35)',
+    paddingHorizontal: 11,
+    paddingVertical: 5,
   },
   heroCinemaBadgeLive: {
-    borderColor: 'rgba(248,113,113,0.66)',
-    backgroundColor: 'rgba(153,27,27,0.45)',
+    borderColor: 'rgba(248,113,113,0.55)',
+    backgroundColor: 'rgba(153,27,27,0.32)',
   },
   heroCinemaBadgeText: {
     color: '#fef3c7',
     fontFamily: Fonts.mono,
-    fontSize: 10,
-    letterSpacing: 0.5,
+    fontSize: 10.5,
+    letterSpacing: 0.8,
   },
   heroCinemaStartText: {
     color: 'rgba(255,255,255,0.8)',
@@ -2582,9 +3079,10 @@ const styles = StyleSheet.create({
   heroCinemaCountdown: {
     color: '#fb7185',
     fontFamily: Fonts.mono,
-    fontSize: 18,
-    lineHeight: 22,
-    marginBottom: 1,
+    fontSize: 19,
+    lineHeight: 24,
+    marginTop: 4,
+    marginBottom: 3,
   },
   heroCinemaLoading: {
     marginTop: 2,
@@ -2595,27 +3093,28 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 10.5,
     lineHeight: 15,
-    marginTop: 2,
+    marginTop: 4,
   },
   heroCinemaGenres: {
     color: 'rgba(191,219,254,0.92)',
     fontFamily: Fonts.mono,
     fontSize: 10.5,
     lineHeight: 15,
-    marginTop: 2,
+    marginTop: 4,
   },
   heroCinemaActions: {
-    marginTop: 10,
+    marginTop: 14,
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 8,
+    flexWrap: 'wrap',
+    gap: 10,
   },
   cinemaCta: {
     alignSelf: 'flex-start',
     borderRadius: 999,
     backgroundColor: '#C1121F',
-    paddingHorizontal: 14,
-    paddingVertical: 8,
+    paddingHorizontal: 15,
+    paddingVertical: 9,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.3)',
   },
@@ -2623,13 +3122,13 @@ const styles = StyleSheet.create({
     backgroundColor: '#8F0D16',
   },
   cinemaCtaSecondary: {
-    backgroundColor: 'rgba(15,23,42,0.82)',
+    backgroundColor: 'rgba(15,23,42,0.74)',
   },
   cinemaCtaText: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 11,
-    letterSpacing: 0.5,
+    fontSize: 11.5,
+    letterSpacing: 0.6,
   },
   cinemaEndedText: {
     marginTop: 10,
@@ -2686,8 +3185,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: Spacing.four,
   },
   card: {
-    width: 150,
-    height: 220,
+    width: HOME_ROW_CARD_WIDTH,
+    height: HOME_ROW_CARD_HEIGHT,
     borderRadius: Spacing.three,
     overflow: 'hidden',
   },

@@ -73,15 +73,14 @@ function isSectionKey(value: string | string[] | undefined): value is ProfileSec
   return !!raw && PROFILE_SECTION_ORDER.includes(raw as ProfileSectionKey);
 }
 
-function toPublicMovieItem(item: any): ProfileMovieItem | null {
+function toPublicMovieRow(item: any): UserListItem | null {
   const tmdbId = Number(item?.tmdbId ?? item?.tmdb_id ?? 0);
   if (!Number.isFinite(tmdbId) || tmdbId <= 0) return null;
   const mediaType = String(item?.mediaType ?? item?.media_type ?? '').toLowerCase() === 'tv' ? 'tv' : 'movie';
   const rating = Number(item?.rating);
   return {
     tmdbId,
-    title: String(item?.title ?? item?.name ?? `TMDB #${tmdbId}`),
-    poster: String(item?.poster ?? item?.poster_path ?? '').trim() || null,
+    createdAt: String(item?.updated_at ?? item?.created_at ?? new Date().toISOString()),
     mediaType,
     rating: Number.isFinite(rating) ? rating : undefined,
   };
@@ -308,13 +307,39 @@ export default function ProfileListsScreen() {
             return;
           }
 
-          setWatchlistItems((publicProfile.watchlist ?? []).map(toPublicMovieItem).filter((item): item is ProfileMovieItem => !!item));
-          setFavoriteItems((publicProfile.favorites ?? []).map(toPublicMovieItem).filter((item): item is ProfileMovieItem => !!item));
+          const watchRows = (publicProfile.watchlist ?? [])
+            .map(toPublicMovieRow)
+            .filter((item): item is UserListItem => !!item)
+            .slice(0, PROFILE_LIST_LIMIT);
+          const favoriteRows = (publicProfile.favorites ?? [])
+            .map(toPublicMovieRow)
+            .filter((item): item is UserListItem => !!item)
+            .slice(0, PROFILE_LIST_LIMIT);
+          const watchedRows = (publicProfile.watched ?? [])
+            .map(toPublicMovieRow)
+            .filter((item): item is UserListItem => !!item)
+            .slice(0, PROFILE_LIST_LIMIT);
+          const ratedRows = (publicProfile.rated ?? [])
+            .map(toPublicMovieRow)
+            .filter((item): item is UserListItem => !!item)
+            .slice(0, PROFILE_LIST_LIMIT);
+
+          const [watchData, favoriteData, watchedData, ratedData] = await Promise.all([
+            mapWithConcurrency(watchRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+            mapWithConcurrency(favoriteRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+            mapWithConcurrency(watchedRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+            mapWithConcurrency(ratedRows, PROFILE_FETCH_CONCURRENCY, (row) => resolveMovieItem(row)),
+          ]);
+
+          if (activeUserIdRef.current !== targetUserId) return;
+
+          setWatchlistItems(watchData.filter((item): item is ProfileMovieItem => !!item));
+          setFavoriteItems(favoriteData.filter((item): item is ProfileMovieItem => !!item));
           setFavoriteActorItems((publicProfile.favorite_actors ?? []).map(toPublicActorItem).filter((item): item is ProfileActorItem => !!item));
           setFavoriteDirectorItems((publicProfile.favorite_directors ?? []).map(toPublicActorItem).filter((item): item is ProfileActorItem => !!item));
           setFavoriteGalleryItems([]);
-          setWatchedItems((publicProfile.watched ?? []).map(toPublicMovieItem).filter((item): item is ProfileMovieItem => !!item));
-          setRatedItems((publicProfile.rated ?? []).map(toPublicMovieItem).filter((item): item is ProfileMovieItem => !!item));
+          setWatchedItems(watchedData.filter((item): item is ProfileMovieItem => !!item));
+          setRatedItems(ratedData.filter((item): item is ProfileMovieItem => !!item));
           setFollowingTaste([]);
           return;
         }

@@ -18,6 +18,7 @@ import { useSafeAreaInsets } from 'react-native-safe-area-context';
 import { router } from 'expo-router';
 import { useFocusEffect } from '@react-navigation/native';
 import { useAuth } from '@/contexts/AuthContext';
+import { GlassView } from '@/components/glass-view';
 import { Fonts, Spacing } from '@/constants/theme';
 import { getMovieById, getPersonById, getTvById, posterUrl } from '@/lib/tmdb';
 import { getUserFavoriteGallery, type GalleryItem } from '@/db/gallery';
@@ -214,7 +215,6 @@ export default function ProfileScreen() {
       }),
     [scrollY]
   );
-
   const nickname = user?.nickname ?? 'nickname';
   const bio = (user as any)?.bio ?? '';
   const avatarUrl = ((user as any)?.avatar_url ?? '').trim();
@@ -227,14 +227,14 @@ export default function ProfileScreen() {
 
   const sectionMeta = useMemo(
     () => ({
-      watchlist: { title: 'Watchlist', count: watchlistItems.length, icon: 'bookmark' as const },
-      favorites: { title: 'Favorites', count: favoriteItems.length, icon: 'heart' as const },
-      actors: { title: 'Actors', count: favoriteActorItems.length, icon: 'people' as const },
-      directors: { title: 'Directors', count: favoriteDirectorItems.length, icon: 'film' as const },
-      shots: { title: 'Shots', count: favoriteGalleryItems.length, icon: 'aperture' as const },
-      watched: { title: 'Watched', count: watchedItems.length, icon: 'checkmark-circle' as const },
-      rated: { title: 'Rated', count: ratedItems.length, icon: 'star' as const },
-      following: { title: 'Following', count: followingTaste.length, icon: 'person-add' as const },
+      favorites: { title: 'Favorites', count: favoriteItems.length, icon: 'heart' as const, blurb: 'The titles that define your taste immediately.' },
+      watchlist: { title: 'Watchlist', count: watchlistItems.length, icon: 'bookmark' as const, blurb: 'A queue of films and shows waiting for a night in.' },
+      actors: { title: 'Actors', count: favoriteActorItems.length, icon: 'people' as const, blurb: 'Faces and performances you return to often.' },
+      directors: { title: 'Directors', count: favoriteDirectorItems.length, icon: 'film' as const, blurb: 'Authors shaping the mood of your library.' },
+      shots: { title: 'Shots', count: favoriteGalleryItems.length, icon: 'aperture' as const, blurb: 'Frames, stills and visuals saved for atmosphere.' },
+      watched: { title: 'Watched', count: watchedItems.length, icon: 'checkmark-circle' as const, blurb: 'Your completed trail through movies and series.' },
+      rated: { title: 'Rated', count: ratedItems.length, icon: 'star' as const, blurb: 'The opinions that teach the engine who you are.' },
+      following: { title: 'Following', count: followingTaste.length, icon: 'person-add' as const, blurb: 'People whose taste keeps nudging your own.' },
     }),
     [
       favoriteActorItems.length,
@@ -558,11 +558,6 @@ export default function ProfileScreen() {
                     <Text style={styles.heroPlaceholderText}>?</Text>
                   </View>
                 )}
-                <LinearGradient
-                  colors={['rgba(0,0,0,0.03)', 'rgba(0,0,0,0.18)', 'rgba(4,5,7,0.42)']}
-                  locations={[0, 0.7, 1]}
-                  style={styles.heroImageOverlay}
-                />
                 <View style={[styles.heroTopActions, { top: insets.top + 12 }]}>
                   <Pressable
                     onPress={() => router.push('/profile-settings' as any)}
@@ -574,8 +569,41 @@ export default function ProfileScreen() {
             </Animated.View>
 
             <View style={styles.profileMetaBlock}>
+              <LinearGradient
+                colors={['rgba(255,255,255,0.05)', 'rgba(255,255,255,0)', 'rgba(126,24,43,0.1)']}
+                start={{ x: 0, y: 0 }}
+                end={{ x: 1, y: 1 }}
+                style={styles.profileMetaSheen}
+              />
+              <View style={styles.profileMetaOrbLeft} pointerEvents="none" />
+              <View style={styles.profileMetaOrbRight} pointerEvents="none" />
+              <View style={styles.profileControlsRow}>
+                <View
+                  style={[
+                    styles.visibilityToggle,
+                    isTastePublic ? styles.visibilityTogglePublic : styles.visibilityTogglePrivate,
+                  ]}>
+                  <Ionicons
+                    name={isTastePublic ? 'eye-outline' : 'lock-closed-outline'}
+                    size={13}
+                    color="#fff"
+                  />
+                  <Text style={styles.visibilityToggleText}>
+                    {isTastePublic ? 'Taste public' : 'Taste private'}
+                  </Text>
+                </View>
+                <Pressable onPress={() => router.push('/profile-edit')} style={styles.editBtn}>
+                  <Ionicons name="create-outline" size={13} color="#fff" />
+                  <Text style={styles.editBtnText}>Edit profile</Text>
+                </Pressable>
+              </View>
+              <Text style={styles.profileKicker}>Curated identity</Text>
               <Text style={styles.name}>{fullName}</Text>
-              <Text style={styles.nickname}>@{nickname}</Text>
+              <View style={styles.identityLine}>
+                <Text style={styles.nickname}>@{nickname}</Text>
+                <View style={styles.identityDivider} />
+                <Text style={styles.identityTag}>taste journal</Text>
+              </View>
               <Text style={styles.bio} numberOfLines={3}>
                 {bio || 'Design your taste profile and share it with others.'}
               </Text>
@@ -584,10 +612,12 @@ export default function ProfileScreen() {
                   <Text style={styles.statValue}>{favoriteItems.length}</Text>
                   <Text style={styles.statLabel}>Favorites</Text>
                 </Pressable>
+                <View style={styles.statsDivider} />
                 <Pressable onPress={() => openListSection('watched')} style={styles.statCard}>
                   <Text style={styles.statValue}>{watchedItems.length}</Text>
                   <Text style={styles.statLabel}>Watched</Text>
                 </Pressable>
+                <View style={styles.statsDivider} />
                 <Pressable onPress={() => openListSection('following')} style={styles.statCard}>
                   <Text style={styles.statValue}>{followingTaste.length}</Text>
                   <Text style={styles.statLabel}>Following</Text>
@@ -601,33 +631,60 @@ export default function ProfileScreen() {
               styles.sectionRailWrap,
               { opacity: bodyOpacity, transform: [{ translateY: bodyTranslateY }] },
             ]}>
-            <Text style={styles.sectionRailTitle}>Your Lists</Text>
+            <View style={styles.sectionRailHeader}>
+              <Text style={styles.sectionRailTitle}>Your Lists</Text>
+              <Text style={styles.sectionRailSubtitle}>
+                Scroll through the lanes that define your current taste and social orbit.
+              </Text>
+            </View>
             <View style={styles.sectionGrid}>
-              {PROFILE_SECTION_ORDER.map((key) => (
+              {PROFILE_SECTION_ORDER.map((key, index) => (
                 <Pressable
                   key={key}
                   onPress={() => openListSection(key)}
-                  style={styles.sectionTile}>
-                  <View style={styles.sectionTileLeft}>
-                    <Ionicons
-                      name={sectionMeta[key].icon}
-                      size={15}
-                      color="rgba(255,255,255,0.8)"
+                  style={[
+                    styles.sectionTile,
+                    index % 3 === 0 ? styles.sectionTileWide : styles.sectionTileHalf,
+                    index % 3 === 1 ? styles.sectionTileLifted : null,
+                  ]}>
+                  <GlassView intensity={28} tint="dark" style={styles.sectionTileGlass}>
+                    <LinearGradient
+                      colors={['rgba(255,255,255,0.12)', 'rgba(255,255,255,0)', 'rgba(255,255,255,0)']}
+                      start={{ x: 0, y: 0 }}
+                      end={{ x: 1, y: 0.85 }}
+                      style={styles.sectionTileGloss}
                     />
-                    <Text style={styles.sectionTileTitle}>{sectionMeta[key].title}</Text>
-                  </View>
-                  <Text style={styles.sectionTileCount}>{sectionMeta[key].count}</Text>
+                    <Text style={styles.sectionTileGhostCount}>
+                      {String(sectionMeta[key].count).padStart(2, '0')}
+                    </Text>
+                    <View style={styles.sectionTileTop}>
+                      <View style={styles.sectionTileLeft}>
+                        <Ionicons
+                          name={sectionMeta[key].icon}
+                          size={15}
+                          color="rgba(255,255,255,0.84)"
+                        />
+                        <Text style={styles.sectionTileTitle}>{sectionMeta[key].title}</Text>
+                      </View>
+                      <View style={styles.sectionTileCountPill}>
+                        <Text style={styles.sectionTileCount}>{sectionMeta[key].count}</Text>
+                      </View>
+                    </View>
+                    <Text style={styles.sectionTileBlurb}>{sectionMeta[key].blurb}</Text>
+                  </GlassView>
                 </Pressable>
               ))}
             </View>
-            {loadingLists ? (
-              <View style={styles.sectionLoadingWrap}>
-                <ActivityIndicator color="#fff" />
-              </View>
-            ) : null}
-            {!loadingLists && !favoriteItems.length && !watchlistItems.length && !watchedItems.length && !ratedItems.length && !favoriteActorItems.length && !favoriteDirectorItems.length && !favoriteGalleryItems.length && !followingTaste.length ? (
-              <Text style={styles.sectionEmptyHint}>No items yet. Add favorites or watched to build your profile.</Text>
-            ) : null}
+            <View style={styles.sectionFooterRule} />
+            <View style={styles.sectionFooterGlow} />
+              {loadingLists ? (
+                <View style={styles.sectionLoadingWrap}>
+                  <ActivityIndicator color="#fff" />
+                </View>
+              ) : null}
+              {!loadingLists && !favoriteItems.length && !watchlistItems.length && !watchedItems.length && !ratedItems.length && !favoriteActorItems.length && !favoriteDirectorItems.length && !favoriteGalleryItems.length && !followingTaste.length ? (
+                <Text style={styles.sectionEmptyHint}>No items yet. Add favorites or watched to build your profile.</Text>
+              ) : null}
           </Animated.View>
         </Animated.ScrollView>
       </KeyboardAvoidingView>
@@ -657,16 +714,22 @@ const styles = StyleSheet.create({
   heroImageShell: {
     marginHorizontal: 0,
     overflow: 'hidden',
+    borderRadius: 34,
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 26,
+    shadowOffset: { width: 0, height: 16 },
+    elevation: 12,
   },
   heroImage: {
     height: undefined,
-    aspectRatio: 1,
-    borderRadius: 24,
+    aspectRatio: 0.92,
+    borderRadius: 34,
     width: '100%',
     overflow: 'hidden',
-    backgroundColor: '#11151d',
+    backgroundColor: '#0C1018',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.16)',
+    borderColor: 'rgba(255,255,255,0.1)',
   },
   heroImageInner: {
     ...StyleSheet.absoluteFillObject,
@@ -687,9 +750,6 @@ const styles = StyleSheet.create({
     fontSize: 92,
     lineHeight: 96,
   },
-  heroImageOverlay: {
-    ...StyleSheet.absoluteFillObject,
-  },
   heroTopActions: {
     position: 'absolute',
     left: 0,
@@ -700,10 +760,35 @@ const styles = StyleSheet.create({
     paddingHorizontal: 14,
   },
   profileMetaBlock: {
-    marginTop: 14,
-    borderRadius: 16,
-    paddingHorizontal: 4,
-    paddingBottom: 2,
+    marginTop: -54,
+    marginHorizontal: 12,
+    paddingHorizontal: 12,
+    paddingTop: 74,
+    paddingBottom: 8,
+    position: 'relative',
+  },
+  profileMetaSheen: {
+    ...StyleSheet.absoluteFillObject,
+    borderRadius: 30,
+    opacity: 0.9,
+  },
+  profileMetaOrbLeft: {
+    position: 'absolute',
+    width: 136,
+    height: 136,
+    borderRadius: 999,
+    top: 18,
+    left: -18,
+    backgroundColor: 'rgba(138, 28, 48, 0.14)',
+  },
+  profileMetaOrbRight: {
+    position: 'absolute',
+    width: 124,
+    height: 124,
+    borderRadius: 999,
+    right: -12,
+    bottom: 6,
+    backgroundColor: 'rgba(94, 16, 31, 0.1)',
   },
   settingsIconBtn: {
     width: 38,
@@ -737,24 +822,60 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 10,
   },
+  profileControlsRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  profileKicker: {
+    marginTop: 18,
+    color: 'rgba(255,255,255,0.52)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    textTransform: 'uppercase',
+    letterSpacing: 1.2,
+  },
   name: {
     fontFamily: Fonts.serif,
-    fontSize: 39,
-    lineHeight: 41,
+    marginTop: 4,
+    fontSize: 43,
+    lineHeight: 46,
     color: '#FFFFFF',
   },
+  identityLine: {
+    marginTop: 10,
+    flexDirection: 'row',
+    alignItems: 'center',
+    flexWrap: 'wrap',
+    gap: 10,
+  },
   nickname: {
-    marginTop: 6,
     fontFamily: Fonts.mono,
-    fontSize: 12,
+    fontSize: 11,
     color: 'rgba(255,255,255,0.74)',
+    textTransform: 'uppercase',
+    letterSpacing: 1.1,
+  },
+  identityDivider: {
+    width: 26,
+    height: 1,
+    backgroundColor: 'rgba(255,255,255,0.22)',
+  },
+  identityTag: {
+    color: 'rgba(255,255,255,0.5)',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 1.05,
   },
   bio: {
-    marginTop: 12,
+    marginTop: 16,
     fontFamily: Fonts.serif,
-    fontSize: 14,
-    lineHeight: 20,
-    color: 'rgba(255,255,255,0.82)',
+    fontSize: 15,
+    lineHeight: 22,
+    color: 'rgba(255,255,255,0.84)',
+    maxWidth: '92%',
   },
   editBtn: {
     borderRadius: 999,
@@ -765,6 +886,8 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
     paddingHorizontal: 11,
     paddingVertical: 7,
+    flexDirection: 'row',
+    gap: 6,
   },
   editBtnText: {
     color: '#fff',
@@ -773,81 +896,134 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    gap: 9,
-    marginTop: 14,
+    alignItems: 'stretch',
+    gap: 0,
+    marginTop: 22,
   },
   statCard: {
     flex: 1,
-    borderRadius: 11,
-    paddingVertical: 10,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.22)',
-    backgroundColor: 'rgba(9,13,19,0.72)',
+    paddingVertical: 4,
     alignItems: 'center',
     justifyContent: 'center',
+  },
+  statsDivider: {
+    width: 1,
+    backgroundColor: 'rgba(255,255,255,0.12)',
+    marginVertical: 8,
   },
   statValue: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 16,
+    fontSize: 21,
   },
   statLabel: {
-    marginTop: 1,
-    color: 'rgba(255,255,255,0.75)',
+    marginTop: 4,
+    color: 'rgba(255,255,255,0.58)',
     fontFamily: Fonts.mono,
-    fontSize: 10,
+    fontSize: 9.5,
+    textTransform: 'uppercase',
+    letterSpacing: 0.9,
   },
   sectionRailWrap: {
+    marginTop: 10,
     marginBottom: 18,
   },
+  sectionRailHeader: {
+    marginBottom: 18,
+    paddingHorizontal: 2,
+  },
   sectionRailTitle: {
-    marginBottom: 10,
-    color: 'rgba(255,255,255,0.88)',
+    marginBottom: 8,
+    color: 'rgba(255,255,255,0.9)',
     fontFamily: Fonts.mono,
     fontSize: 11,
     textTransform: 'uppercase',
-    letterSpacing: 1.1,
+    letterSpacing: 1.35,
+  },
+  sectionRailSubtitle: {
+    maxWidth: '86%',
+    color: 'rgba(255,255,255,0.66)',
+    fontFamily: Fonts.serif,
+    fontSize: 14,
+    lineHeight: 21,
   },
   sectionGrid: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
+    gap: 12,
   },
   sectionTile: {
-    width: '48.5%',
+    overflow: 'hidden',
+  },
+  sectionTileWide: {
+    width: '100%',
+  },
+  sectionTileHalf: {
+    width: '48.2%',
+  },
+  sectionTileLifted: {
+    marginTop: 18,
+  },
+  sectionTileGlass: {
+    minHeight: 122,
+    borderRadius: 30,
+    paddingHorizontal: 16,
+    paddingVertical: 15,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(9,12,20,0.34)',
+  },
+  sectionTileGloss: {
+    ...StyleSheet.absoluteFillObject,
+  },
+  sectionTileGhostCount: {
+    position: 'absolute',
+    right: 12,
+    bottom: -10,
+    color: 'rgba(255,255,255,0.08)',
+    fontFamily: Fonts.mono,
+    fontSize: 64,
+    lineHeight: 64,
+  },
+  sectionTileTop: {
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
-    borderRadius: 13,
-    paddingVertical: 10,
-    paddingHorizontal: 12,
-    borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(11,14,19,0.72)',
-  },
-  sectionTileActive: {
-    borderColor: 'rgba(225,230,255,0.64)',
-    backgroundColor: 'rgba(33,43,62,0.72)',
+    gap: 8,
   },
   sectionTileLeft: {
     flexDirection: 'row',
     alignItems: 'center',
-    gap: 6,
+    gap: 7,
     flex: 1,
   },
   sectionTileTitle: {
     color: '#fff',
-    fontFamily: Fonts.mono,
-    fontSize: 10.8,
+    fontFamily: Fonts.serif,
+    fontSize: 18,
+  },
+  sectionTileCountPill: {
+    minWidth: 34,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderRadius: 999,
+    paddingHorizontal: 9,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
   },
   sectionTileCount: {
-    color: 'rgba(255,255,255,0.84)',
+    color: 'rgba(255,255,255,0.9)',
     fontFamily: Fonts.mono,
-    fontSize: 9.5,
-    backgroundColor: 'rgba(255,255,255,0.12)',
-    borderRadius: 999,
-    paddingHorizontal: 6,
-    paddingVertical: 2,
+    fontSize: 10,
+  },
+  sectionTileBlurb: {
+    marginTop: 18,
+    maxWidth: '74%',
+    color: 'rgba(255,255,255,0.64)',
+    fontFamily: Fonts.serif,
+    fontSize: 12.5,
+    lineHeight: 18,
   },
   sectionLoadingWrap: {
     paddingVertical: 16,
@@ -855,10 +1031,23 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   sectionEmptyHint: {
-    marginTop: 10,
-    color: 'rgba(255,255,255,0.66)',
+    marginTop: 14,
+    color: 'rgba(255,255,255,0.58)',
     fontFamily: Fonts.serif,
-    fontSize: 12.5,
+    fontSize: 13,
+  },
+  sectionFooterRule: {
+    marginTop: 16,
+    height: 1,
+    width: '72%',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  sectionFooterGlow: {
+    marginTop: 8,
+    width: 84,
+    height: 4,
+    borderRadius: 999,
+    backgroundColor: 'rgba(145, 35, 56, 0.42)',
   },
   previewWrap: {
     marginBottom: 12,

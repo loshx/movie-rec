@@ -121,6 +121,84 @@ function parseBooleanParam(value: unknown) {
   return raw === '1' || raw === 'true' || raw === 'yes';
 }
 
+function truncateText(value: string, maxLength: number) {
+  const text = String(value ?? '').trim();
+  if (!text) return '';
+  if (text.length <= maxLength) return text;
+  return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
+}
+
+const DETAIL_RAIL_CARD_WIDTH = 116;
+const DETAIL_RAIL_CARD_GAP = 10;
+
+const SimilarMediaCard = React.memo(function SimilarMediaCard({
+  item,
+  mediaType,
+}: {
+  item: Movie | TvShow;
+  mediaType: 'movie' | 'tv';
+}) {
+  const handlePress = useCallback(() => {
+    router.push({
+      pathname: '/movie/[id]',
+      params: { id: String(item.id), type: mediaType },
+    });
+  }, [item.id, mediaType]);
+
+  return (
+    <Pressable style={styles.similarCard} onPress={handlePress}>
+      <Image
+        source={{ uri: posterUrl(item.poster_path, 'w185') ?? undefined }}
+        style={styles.similarPoster}
+        contentFit="cover"
+        transition={60}
+        cachePolicy="memory-disk"
+      />
+      <View style={styles.similarGlass}>
+        <Text style={styles.similarTitle} numberOfLines={1}>
+          {'title' in item ? item.title : item.name}
+        </Text>
+      </View>
+    </Pressable>
+  );
+});
+
+const CreditRailCard = React.memo(function CreditRailCard({
+  person,
+  role,
+  subtitle,
+}: {
+  person: TmdbCast | TmdbCrew;
+  role: 'actor' | 'director';
+  subtitle?: string | null;
+}) {
+  const handlePress = useCallback(() => {
+    router.push({ pathname: '/person/[id]', params: { id: String(person.id), role } });
+  }, [person.id, role]);
+
+  return (
+    <Pressable style={styles.castCard} onPress={handlePress}>
+      <Image
+        source={{ uri: posterUrl(person.profile_path, 'w185') ?? undefined }}
+        style={styles.castImage}
+        contentFit="cover"
+        transition={60}
+        cachePolicy="memory-disk"
+      />
+      <View style={styles.castGlass}>
+        <Text style={styles.castName} numberOfLines={1}>
+          {person.name}
+        </Text>
+        {subtitle ? (
+          <Text style={styles.castRole} numberOfLines={1}>
+            {subtitle}
+          </Text>
+        ) : null}
+      </View>
+    </Pressable>
+  );
+});
+
 export default function MovieDetailScreen() {
   const theme = useTheme();
   const { user } = useAuth();
@@ -175,7 +253,7 @@ export default function MovieDetailScreen() {
   const watchToastOpacity = useSharedValue(0);
   const watchToastTranslateY = useSharedValue(14);
   const { width: screenWidth, height: screenHeight } = Dimensions.get('window');
-  const heroHeight = Math.round(Math.min(screenHeight * 0.7, screenWidth * 1.5));
+  const heroHeight = Math.round(Math.min(screenHeight * 0.58, screenWidth * 1.02 + 88));
 
   const accent = useMemo(() => {
     if (!tmdbId) return '#3B82F6';
@@ -190,12 +268,6 @@ export default function MovieDetailScreen() {
   const commentLayoutYRef = useRef<Record<number, number>>({});
   const openedFromParamsRef = useRef(false);
 
-  const heroGradientColors = useMemo<readonly [string, string, string, string]>(() => {
-    if (theme.mode === 'light') {
-      return ['rgba(255,255,255,0)', `${theme.background}33`, `${theme.background}99`, theme.background];
-    }
-    return ['rgba(0,0,0,0)', `${theme.background}22`, `${theme.background}88`, theme.background];
-  }, [theme.background, theme.mode]);
   const heroEdgeFadeColors = useMemo<readonly [string, string, string, string]>(
     () => ['rgba(0,0,0,0)', `${theme.background}66`, `${theme.background}CC`, theme.background],
     [theme.background]
@@ -636,6 +708,25 @@ export default function MovieDetailScreen() {
     return () => clearTimeout(timer);
   }, [commentsOpen, focusParentCommentId, rootComments.length, scrollToFocusedComment]);
 
+  const renderSimilarItem = useCallback(
+    ({ item }: { item: Movie | TvShow }) => <SimilarMediaCard item={item} mediaType={mediaType} />,
+    [mediaType]
+  );
+  const renderCastItem = useCallback(
+    ({ item: person }: { item: TmdbCast }) => (
+      <CreditRailCard person={person} role="actor" subtitle={person.character ?? null} />
+    ),
+    []
+  );
+  const getDetailRailItemLayout = useCallback(
+    (_: ArrayLike<unknown> | null | undefined, index: number) => ({
+      length: DETAIL_RAIL_CARD_WIDTH + DETAIL_RAIL_CARD_GAP,
+      offset: (DETAIL_RAIL_CARD_WIDTH + DETAIL_RAIL_CARD_GAP) * index,
+      index,
+    }),
+    []
+  );
+
   if (loading || !movie) {
     return (
       <View style={[styles.loader, { backgroundColor: theme.background }]}>
@@ -672,11 +763,15 @@ export default function MovieDetailScreen() {
         : '';
   const yearText =
     typeof dateText === 'string' && /^\d{4}/.test(dateText) ? dateText.slice(0, 4) : null;
-  const heroImageUri =
-    posterUrl(movie?.poster_path, 'w500') ??
+  const backdropImageUri =
     backdropUrl(movie?.backdrop_path, 'w1280') ??
+    posterUrl(movie?.poster_path, 'w500') ??
     undefined;
-  const hasHeroImage = !!heroImageUri;
+  const posterImageUri =
+    posterUrl(movie?.poster_path, 'w500') ??
+    backdropUrl(movie?.backdrop_path, 'w780') ??
+    undefined;
+  const hasHeroImage = !!backdropImageUri;
   const hasVoteAverage = (movie.vote_average ?? 0) > 0;
   const isWeb = Platform.OS === 'web';
   const activeActionColor = isWeb ? '#E5E7EB' : accentColor;
@@ -686,6 +781,40 @@ export default function MovieDetailScreen() {
     keyboardHeight - (Platform.OS === 'ios' ? insets.bottom : 0)
   );
   const commentsComposerBottom = Platform.OS === 'ios' ? Math.max(insets.bottom + 8, 12) : 8;
+  const genreNames = Array.isArray((movie as any)?.genres)
+    ? ((movie as any).genres as { id?: number; name?: string }[])
+        .map((genre) => String(genre?.name ?? '').trim())
+        .filter(Boolean)
+    : [];
+  const metaGenreText = genreNames.slice(0, 2).join(' / ');
+  const runtimeMinutes =
+    mediaType === 'movie'
+      ? Number((movie as any)?.runtime ?? 0)
+      : Array.isArray((movie as any)?.episode_run_time)
+        ? Number((movie as any).episode_run_time[0] ?? 0)
+        : 0;
+  const seasonsCount = Number((movie as any)?.number_of_seasons ?? 0);
+  const runtimeText =
+    runtimeMinutes > 0
+      ? mediaType === 'movie'
+        ? `${runtimeMinutes} min`
+        : `${runtimeMinutes} min/ep`
+      : seasonsCount > 0
+        ? `${seasonsCount} season${seasonsCount === 1 ? '' : 's'}`
+        : null;
+  const languageText = String((movie as any)?.original_language ?? '')
+    .trim()
+    .toUpperCase();
+  const heroOverviewText = truncateText(
+    overviewText || (mediaType === 'tv' ? 'A curated series profile.' : 'A curated film profile.'),
+    168
+  );
+  const heroPosterWidth = Math.min(148, Math.round(screenWidth * 0.34));
+  const heroPosterHeight = Math.round(heroPosterWidth * 1.48);
+  const heroMetaItems = [yearText, metaGenreText, runtimeText].filter(Boolean) as string[];
+  const aboutLabel = mediaType === 'tv' ? 'About series' : 'About movie';
+  const heroKicker = mediaType === 'tv' ? 'Series dossier' : 'Film dossier';
+  const heroSubline = languageText ? `Original ${languageText}` : 'Editorial spotlight';
 
   return (
     <View style={[styles.root, { backgroundColor: theme.background }]}>
@@ -704,130 +833,198 @@ export default function MovieDetailScreen() {
           onScrollEndDrag={tryOpenCommentsFromBottom}
           onMomentumScrollEnd={tryOpenCommentsFromBottom}>
           {hasHeroImage ? (
-            <View style={[styles.hero, { backgroundColor: theme.background, height: heroHeight }]}>
+            <View style={[styles.hero, { backgroundColor: theme.background, height: heroHeight }]}> 
               <Image
-                source={{ uri: heroImageUri }}
-                style={styles.heroImage}
+                source={{ uri: backdropImageUri }}
+                style={styles.heroBackdropImage}
                 contentFit="cover"
-                contentPosition="top"
-                transition={120}
+                contentPosition="center"
+                transition={80}
                 cachePolicy="memory-disk"
               />
               <LinearGradient
-                colors={heroGradientColors}
-                style={styles.heroGradient}
+                colors={['rgba(5,7,11,0.04)', 'rgba(7,10,16,0.34)', 'rgba(6,8,14,0.88)', theme.background]}
+                style={styles.heroShade}
               />
+              <LinearGradient
+                colors={['rgba(255,255,255,0.18)', 'rgba(255,255,255,0.04)', 'transparent']}
+                style={styles.heroTopBloom}
+              />
+              <LinearGradient colors={[accentColor, 'transparent']} style={styles.heroAccentWash} />
+              <View style={styles.heroNoiseVeil} />
+              <View style={styles.heroContentWrap}>
+                {posterImageUri ? (
+                  <View style={styles.heroPosterFrame}>
+                    <Image
+                      source={{ uri: posterImageUri }}
+                      style={[styles.heroPoster, { width: heroPosterWidth, height: heroPosterHeight }]}
+                      contentFit="cover"
+                      transition={80}
+                      cachePolicy="memory-disk"
+                    />
+                  </View>
+                ) : null}
+              </View>
               <LinearGradient colors={heroEdgeFadeColors} style={styles.heroSeamFade} />
             </View>
           ) : (
-            <View style={[styles.heroFallback, { backgroundColor: theme.background }]} />
+            <View style={[styles.heroFallback, { backgroundColor: theme.background }]}> 
+              <View style={styles.heroFallbackSurface}>
+                <Text style={styles.heroFallbackKicker}>{heroKicker}</Text>
+                <Text style={styles.heroFallbackTitle}>{titleText}</Text>
+                {yearText ? <Text style={styles.heroFallbackMeta}>{yearText}</Text> : null}
+              </View>
+            </View>
           )}
 
-          <View style={[styles.headerRow, !hasHeroImage && styles.headerRowNoHero]}>
-            <View>
-              <Text style={[styles.title, styles.textShadow]}>{titleText}</Text>
-              <Pressable style={styles.aboutRow} onPress={() => setAboutOpen((v) => !v)}>
-                <Text style={styles.aboutLabel}>About movie</Text>
-                {yearText ? <Text style={styles.aboutYear}>• {yearText}</Text> : null}
-                <Ionicons name={aboutOpen ? 'chevron-up' : 'chevron-down'} size={18} color="#fff" />
-              </Pressable>
-            </View>
-            {hasVoteAverage ? (
-              <View style={styles.ratingChip}>
-                <Text style={[styles.ratingText, styles.textShadow]}>{movie.vote_average.toFixed(1)}</Text>
-                <Ionicons name="star" size={14} color="#facc15" />
+          <View style={[styles.bodyContent, hasHeroImage ? styles.bodyContentLifted : styles.bodyContentFlat]}>
+            <View style={styles.titleCard}>
+              <View style={styles.titleCardTopRow}>
+                <View style={[styles.heroKickerPill, { borderColor: `${accentColor}66` }]}>
+                  <Text style={styles.heroKickerText}>{heroKicker}</Text>
+                </View>
+                {hasVoteAverage ? (
+                  <View style={styles.heroScorePill}>
+                    <Ionicons name="star" size={13} color="#FACC15" />
+                    <Text style={styles.heroScoreText}>{movie.vote_average.toFixed(1)}</Text>
+                  </View>
+                ) : null}
               </View>
-            ) : null}
-          </View>
-
-          {aboutOpen ? (
-            <Text style={styles.overview}>{overviewText || 'No overview available.'}</Text>
-          ) : null}
-
-          <View style={styles.actionsRow}>
-            <Pressable
-              style={styles.watchBtn}
-              onPress={() => {
-                if (watchProviders.length > 0) {
-                  setShowWatchProviders((prev) => !prev);
-                  return;
-                }
-                if (watchProvidersLink) {
-                  Linking.openURL(watchProvidersLink).catch(() => {});
-                  return;
-                }
-                triggerWatchUnavailableFeedback();
-              }}>
-              <Ionicons name="play-circle-outline" size={20} color="#fff" />
-              <Text style={styles.watchText}>Watch</Text>
-            </Pressable>
-            <View style={styles.quickActionsRow}>
-              <Pressable
-                style={[styles.quickActionBtn, state.inWatchlist && styles.quickActionBtnActive]}
-                onPress={async () => {
-                  if (!user) return;
-                  await toggleWatchlist(user.id, tmdbId, mediaType);
-                  refreshState();
-                }}>
-                <Ionicons
-                  name={state.inWatchlist ? 'bookmark' : 'bookmark-outline'}
-                  size={16}
-                  color={state.inWatchlist ? activeActionColor : '#fff'}
-                />
-                <Text style={styles.quickActionText}>Watchlist</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.quickActionBtn, state.inFavorites && styles.quickActionBtnActive]}
-                onPress={async () => {
-                  if (!user) return;
-                  await toggleFavorite(user.id, tmdbId, mediaType);
-                  refreshState();
-                }}>
-                <Ionicons
-                  name={state.inFavorites ? 'heart' : 'heart-outline'}
-                  size={16}
-                  color={state.inFavorites ? '#EF4444' : '#fff'}
-                />
-                <Text style={styles.quickActionText}>Favorite</Text>
-              </Pressable>
-              <Pressable
-                style={[styles.quickActionBtn, state.watched && styles.quickActionBtnActive]}
-                onPress={async () => {
-                  if (!user) return;
-                  await toggleWatched(user.id, tmdbId, mediaType);
-                  refreshState();
-                }}>
-                <Ionicons
-                  name={state.watched ? 'checkmark-circle' : 'checkmark-circle-outline'}
-                  size={16}
-                  color={state.watched ? '#22C55E' : '#fff'}
-                />
-                <Text style={styles.quickActionText}>Watched</Text>
+              <Text style={styles.titleCardTitle}>{titleText}</Text>
+              {heroMetaItems.length > 0 ? (
+                <View style={styles.heroMetaRow}>
+                  {heroMetaItems.map((item) => (
+                    <View key={`meta-${item}`} style={styles.heroMetaChip}>
+                      <Text style={styles.heroMetaText}>{item}</Text>
+                    </View>
+                  ))}
+                </View>
+              ) : null}
+              <Text style={styles.titleCardSubline}>{heroSubline}</Text>
+              <Text style={styles.titleCardOverview}>
+                {(aboutOpen ? overviewText : heroOverviewText) || 'No overview available.'}
+              </Text>
+              <Pressable style={styles.heroAboutBtn} onPress={() => setAboutOpen((v) => !v)}>
+                <Text style={styles.heroAboutBtnText}>{aboutOpen ? 'Hide full text' : aboutLabel}</Text>
+                <Ionicons name={aboutOpen ? 'arrow-up' : 'arrow-forward'} size={14} color="#fff" />
               </Pressable>
             </View>
-          </View>
 
-          <View style={styles.starsRow}>
-            {Array.from({ length: 10 }).map((_, idx) => {
-              const value = idx + 1;
-              const active = (state.rating ?? 0) >= value;
-              return (
+            <View style={styles.actionsCard}>
+              <View style={styles.actionsCardHeader}>
+                <View>
+                  <Text style={styles.actionsCardEyebrow}>Playback + collection</Text>
+                  <Text style={styles.actionsCardTitle}>Set the tone for this title</Text>
+                </View>
+                {metaGenreText ? (
+                  <View style={styles.actionsCardSideChip}>
+                    <Text style={styles.actionsCardSideChipText}>{genreNames[0]}</Text>
+                  </View>
+                ) : null}
+              </View>
+              <Pressable
+                style={styles.watchBtn}
+                onPress={() => {
+                  if (watchProviders.length > 0) {
+                    setShowWatchProviders((prev) => !prev);
+                    return;
+                  }
+                  if (watchProvidersLink) {
+                    Linking.openURL(watchProvidersLink).catch(() => {});
+                    return;
+                  }
+                  triggerWatchUnavailableFeedback();
+                }}>
+                <Ionicons name="play-circle-outline" size={20} color="#fff" />
+                <Text style={styles.watchText}>Watch</Text>
+              </Pressable>
+              <View style={styles.quickActionsRow}>
                 <Pressable
-                  key={value}
+                  style={[styles.quickActionBtn, state.inWatchlist && styles.quickActionBtnActive]}
                   onPress={async () => {
                     if (!user) return;
-                    await setRating(user.id, tmdbId, value, mediaType);
+                    await toggleWatchlist(user.id, tmdbId, mediaType);
                     refreshState();
                   }}>
                   <Ionicons
-                    name={active ? 'star' : 'star-outline'}
-                    size={20}
-                    color={active ? activeActionColor : '#777'}
+                    name={state.inWatchlist ? 'bookmark' : 'bookmark-outline'}
+                    size={16}
+                    color={state.inWatchlist ? activeActionColor : '#fff'}
                   />
+                  <Text style={styles.quickActionText}>Watchlist</Text>
                 </Pressable>
-              );
-            })}
-          </View>
+                <Pressable
+                  style={[styles.quickActionBtn, state.inFavorites && styles.quickActionBtnActive]}
+                  onPress={async () => {
+                    if (!user) return;
+                    await toggleFavorite(user.id, tmdbId, mediaType);
+                    refreshState();
+                  }}>
+                  <Ionicons
+                    name={state.inFavorites ? 'heart' : 'heart-outline'}
+                    size={16}
+                    color={state.inFavorites ? '#EF4444' : '#fff'}
+                  />
+                  <Text style={styles.quickActionText}>Favorite</Text>
+                </Pressable>
+                <Pressable
+                  style={[styles.quickActionBtn, state.watched && styles.quickActionBtnActive]}
+                  onPress={async () => {
+                    if (!user) return;
+                    await toggleWatched(user.id, tmdbId, mediaType);
+                    refreshState();
+                  }}>
+                  <Ionicons
+                    name={state.watched ? 'checkmark-circle' : 'checkmark-circle-outline'}
+                    size={16}
+                    color={state.watched ? '#22C55E' : '#fff'}
+                  />
+                  <Text style={styles.quickActionText}>Watched</Text>
+                </Pressable>
+              </View>
+              <View style={styles.ratingSurface}>
+                <View style={styles.ratingSurfaceHeader}>
+                  <Text style={styles.ratingSurfaceTitle}>Your rating pulse</Text>
+                  <Text style={styles.ratingSurfaceHint}>Tap to score this title</Text>
+                </View>
+                <View style={styles.starsRow}>
+                  {Array.from({ length: 10 }).map((_, idx) => {
+                    const value = idx + 1;
+                    const active = (state.rating ?? 0) >= value;
+                    return (
+                      <Pressable
+                        key={value}
+                        onPress={async () => {
+                          if (!user) return;
+                          await setRating(user.id, tmdbId, value, mediaType);
+                          refreshState();
+                        }}>
+                        <Ionicons
+                          name={active ? 'star' : 'star-outline'}
+                          size={20}
+                          color={active ? activeActionColor : '#777'}
+                        />
+                      </Pressable>
+                    );
+                  })}
+                </View>
+              </View>
+            </View>
+
+            {!hasHeroImage ? (
+              <View style={styles.titleFallbackCard}>
+                <Text style={styles.titleFallbackCardTitle}>{titleText}</Text>
+                {heroMetaItems.length > 0 ? (
+                  <View style={styles.heroMetaRow}>
+                    {heroMetaItems.map((item) => (
+                      <View key={`fallback-${item}`} style={styles.heroMetaChip}>
+                        <Text style={styles.heroMetaText}>{item}</Text>
+                      </View>
+                    ))}
+                  </View>
+                ) : null}
+              </View>
+            ) : null}
 
           <View style={styles.extraSection}>
             <Text style={styles.sectionLabel}>TRAILER</Text>
@@ -874,29 +1071,8 @@ export default function MovieDetailScreen() {
                 maxToRenderPerBatch={6}
                 windowSize={4}
                 removeClippedSubviews
-                renderItem={({ item }) => (
-                  <Pressable
-                    style={styles.similarCard}
-                    onPress={() =>
-                      router.push({
-                        pathname: '/movie/[id]',
-                        params: { id: String(item.id), type: mediaType },
-                      })
-                    }>
-                    <Image
-                      source={{ uri: posterUrl(item.poster_path, 'w342') ?? undefined }}
-                      style={styles.similarPoster}
-                      contentFit="cover"
-                      transition={120}
-                      cachePolicy="memory-disk"
-                    />
-                    <View style={styles.similarGlass}>
-                      <Text style={styles.similarTitle} numberOfLines={1}>
-                        {'title' in item ? item.title : item.name}
-                      </Text>
-                    </View>
-                  </Pressable>
-                )}
+                getItemLayout={getDetailRailItemLayout}
+                renderItem={renderSimilarItem}
               />
             ) : (
               <Text style={styles.emptyText}>No recommendations right now.</Text>
@@ -906,25 +1082,7 @@ export default function MovieDetailScreen() {
           <View style={styles.extraSection}>
             <Text style={styles.sectionLabel}>DIRECTOR</Text>
             {director ? (
-              <Pressable
-                style={styles.castCard}
-                onPress={() => router.push({ pathname: '/person/[id]', params: { id: String(director.id), role: 'director' } })}>
-                <Image
-                  source={{ uri: posterUrl(director.profile_path, 'w342') ?? undefined }}
-                  style={styles.castImage}
-                  contentFit="cover"
-                  transition={120}
-                  cachePolicy="memory-disk"
-                />
-                <View style={styles.castGlass}>
-                  <Text style={styles.castName} numberOfLines={1}>
-                    {director.name}
-                  </Text>
-                  <Text style={styles.castRole} numberOfLines={1}>
-                    Director
-                  </Text>
-                </View>
-              </Pressable>
+              <CreditRailCard person={director} role="director" subtitle="Director" />
             ) : (
               <Text style={styles.emptyText}>Director unavailable.</Text>
             )}
@@ -943,37 +1101,15 @@ export default function MovieDetailScreen() {
                 maxToRenderPerBatch={6}
                 windowSize={4}
                 removeClippedSubviews
-                renderItem={({ item: person }) => (
-                  <Pressable
-                    style={styles.castCard}
-                    onPress={() =>
-                      router.push({ pathname: '/person/[id]', params: { id: String(person.id), role: 'actor' } })
-                    }>
-                    <Image
-                      source={{ uri: posterUrl(person.profile_path, 'w342') ?? undefined }}
-                      style={styles.castImage}
-                      contentFit="cover"
-                      transition={120}
-                      cachePolicy="memory-disk"
-                    />
-                    <View style={styles.castGlass}>
-                      <Text style={styles.castName} numberOfLines={1}>
-                        {person.name}
-                      </Text>
-                      {person.character ? (
-                        <Text style={styles.castRole} numberOfLines={1}>
-                          {person.character}
-                        </Text>
-                      ) : null}
-                    </View>
-                  </Pressable>
-                )}
+                getItemLayout={getDetailRailItemLayout}
+                renderItem={renderCastItem}
               />
             ) : (
               <Text style={styles.emptyText}>Cast unavailable.</Text>
             )}
           </View>
 
+          </View>
           <GestureDetector gesture={commentsPromptGesture}>
             <View style={styles.commentsPrompt}>
               <Animated.View style={promptArrowStyle}>
@@ -1216,11 +1352,11 @@ const styles = StyleSheet.create({
     justifyContent: 'center',
   },
   hero: {
-    height: 420,
-    overflow: 'visible',
+    overflow: 'hidden',
   },
   heroFallback: {
-    height: 88,
+    paddingHorizontal: Spacing.four,
+    paddingTop: 84,
   },
   heroSeamFade: {
     position: 'absolute',
@@ -1229,16 +1365,45 @@ const styles = StyleSheet.create({
     bottom: -2,
     height: 220,
   },
-  heroImage: {
+  heroBackdropImage: {
     width: '100%',
     height: '100%',
   },
-  heroGradient: {
+  heroShade: {
     position: 'absolute',
     left: 0,
     right: 0,
-    bottom: -120,
-    height: 460,
+    top: 0,
+    bottom: 0,
+  },
+  heroTopBloom: {
+    position: 'absolute',
+    left: 0,
+    right: 0,
+    top: 0,
+    height: 180,
+  },
+  heroAccentWash: {
+    position: 'absolute',
+    right: -36,
+    top: 96,
+    width: 220,
+    height: 220,
+    borderRadius: 999,
+    opacity: 0.18,
+    transform: [{ rotate: '-14deg' }],
+  },
+  heroNoiseVeil: {
+    position: 'absolute',
+    left: -40,
+    right: -40,
+    top: 26,
+    bottom: 40,
+    borderRadius: 48,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.03)',
+    backgroundColor: 'rgba(255,255,255,0.02)',
+    opacity: 0.45,
   },
   floatingBackBtn: {
     position: 'absolute',
@@ -1253,68 +1418,226 @@ const styles = StyleSheet.create({
     borderColor: 'rgba(255,255,255,0.2)',
     zIndex: 20,
   },
-  headerRow: {
-    marginTop: -80,
-    paddingHorizontal: Spacing.four,
-  },
-  headerRowNoHero: {
-    marginTop: Spacing.one,
-  },
-  title: {
-    fontFamily: Fonts.serif,
-    fontSize: 28,
-    color: '#fff',
-  },
-  aboutRow: {
-    flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
-    marginTop: 6,
-  },
-  aboutLabel: {
-    color: '#fff',
-    fontFamily: Fonts.serif,
-    fontSize: 14,
-  },
-  aboutYear: {
-    color: 'rgba(255,255,255,0.8)',
-    fontFamily: Fonts.mono,
-    fontSize: 13,
-  },
-  ratingChip: {
+  heroContentWrap: {
     position: 'absolute',
     left: Spacing.four,
-    top: -30,
+    right: Spacing.four,
+    bottom: 26,
     flexDirection: 'row',
-    alignItems: 'center',
-    gap: 6,
+    alignItems: 'flex-end',
+    justifyContent: 'flex-start',
   },
-  ratingText: {
+  heroPosterFrame: {
+    borderRadius: 22,
+    padding: 2,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.28,
+    shadowRadius: 18,
+    shadowOffset: { width: 0, height: 12 },
+    elevation: 12,
+  },
+  heroPoster: {
+    borderRadius: 20,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  heroKickerPill: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    borderWidth: 1,
+    backgroundColor: 'rgba(255,255,255,0.05)',
+  },
+  heroKickerText: {
     color: '#fff',
     fontFamily: Fonts.mono,
-    fontSize: 14,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  heroScorePill: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 5,
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(0,0,0,0.34)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  heroScoreText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+  },
+  heroMetaRow: {
+    flexDirection: 'row',
+    flexWrap: 'wrap',
+    gap: 8,
+    marginTop: 10,
+  },
+  heroMetaChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 5,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  heroMetaText: {
+    color: 'rgba(255,255,255,0.92)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  heroAboutBtn: {
+    marginTop: 14,
+    alignSelf: 'flex-start',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+    borderRadius: 999,
+    paddingHorizontal: 12,
+    paddingVertical: 9,
+    backgroundColor: 'rgba(255,255,255,0.08)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  heroAboutBtnText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.4,
+    textTransform: 'uppercase',
+  },
+  heroFallbackSurface: {
+    borderRadius: 22,
+    padding: 18,
+    backgroundColor: 'rgba(8,10,16,0.76)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+  },
+  heroFallbackKicker: {
+    color: 'rgba(255,255,255,0.68)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  heroFallbackTitle: {
+    marginTop: 8,
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 28,
+  },
+  heroFallbackMeta: {
+    marginTop: 6,
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
   },
   textShadow: {
     textShadowColor: 'rgba(0,0,0,0.6)',
     textShadowOffset: { width: 0, height: 2 },
     textShadowRadius: 6,
   },
-  overview: {
+  bodyContent: {
     paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.two,
-    color: 'rgba(255,255,255,0.7)',
-    fontFamily: Fonts.serif,
-    fontSize: 13,
-    textShadowColor: 'rgba(0,0,0,0.65)',
-    textShadowOffset: { width: 0, height: 2 },
-    textShadowRadius: 6,
   },
-  actionsRow: {
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.four,
+  bodyContentLifted: {
+    marginTop: -34,
+  },
+  bodyContentFlat: {
+    marginTop: Spacing.three,
+  },
+  titleCard: {
+    borderRadius: 26,
+    padding: 16,
+    backgroundColor: 'rgba(7,10,16,0.92)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.14,
+    shadowRadius: 12,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 7,
+    marginBottom: Spacing.three,
+  },
+  titleCardTopRow: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  titleCardTitle: {
+    marginTop: 12,
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 32,
+    lineHeight: 38,
+  },
+  titleCardSubline: {
+    marginTop: 10,
+    color: 'rgba(255,255,255,0.68)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.7,
+    textTransform: 'uppercase',
+  },
+  titleCardOverview: {
+    marginTop: 12,
+    color: 'rgba(255,255,255,0.84)',
+    fontFamily: Fonts.serif,
+    fontSize: 14,
+    lineHeight: 22,
+  },
+  actionsCard: {
+    borderRadius: 26,
+    padding: 16,
+    backgroundColor: 'rgba(7,10,16,0.94)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+    shadowColor: '#000',
+    shadowOpacity: 0.16,
+    shadowRadius: 14,
+    shadowOffset: { width: 0, height: 8 },
+    elevation: 8,
+  },
+  actionsCardHeader: {
+    flexDirection: 'row',
+    alignItems: 'flex-start',
+    justifyContent: 'space-between',
+    gap: 10,
+    marginBottom: 14,
+  },
+  actionsCardEyebrow: {
+    color: 'rgba(255,255,255,0.58)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.9,
+    textTransform: 'uppercase',
+  },
+  actionsCardTitle: {
+    marginTop: 6,
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 22,
+  },
+  actionsCardSideChip: {
+    borderRadius: 999,
+    paddingHorizontal: 10,
+    paddingVertical: 6,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+  },
+  actionsCardSideChipText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
   },
   quickActionsRow: {
-    marginTop: 8,
+    marginTop: 10,
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
@@ -1343,21 +1666,47 @@ const styles = StyleSheet.create({
   },
   watchBtn: {
     width: '100%',
-    height: 54,
-    borderRadius: 14,
+    height: 56,
+    borderRadius: 18,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'center',
     gap: 8,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    backgroundColor: 'rgba(14,18,24,0.92)',
+    borderColor: 'rgba(255,255,255,0.18)',
+    backgroundColor: 'rgba(18,24,34,0.98)',
   },
   watchText: {
     color: '#fff',
     fontFamily: Fonts.mono,
     fontSize: 14,
     letterSpacing: 0.2,
+  },
+  ratingSurface: {
+    marginTop: 14,
+    borderRadius: 20,
+    padding: 14,
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  ratingSurfaceHeader: {
+    flexDirection: 'row',
+    alignItems: 'baseline',
+    justifyContent: 'space-between',
+    gap: 10,
+  },
+  ratingSurfaceTitle: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 17,
+  },
+  ratingSurfaceHint: {
+    color: 'rgba(255,255,255,0.58)',
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    letterSpacing: 0.5,
+    textTransform: 'uppercase',
   },
   watchToast: {
     position: 'absolute',
@@ -1381,21 +1730,40 @@ const styles = StyleSheet.create({
   starsRow: {
     flexDirection: 'row',
     gap: 6,
-    paddingHorizontal: Spacing.four,
-    paddingTop: Spacing.three,
+    flexWrap: 'wrap',
+    marginTop: 12,
+  },
+  titleFallbackCard: {
+    marginTop: Spacing.three,
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: 'rgba(8,10,16,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
+  },
+  titleFallbackCardTitle: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 28,
   },
   extraSection: {
     marginTop: Spacing.three,
-    paddingHorizontal: Spacing.four,
+    borderRadius: 22,
+    padding: 16,
+    backgroundColor: 'rgba(7,10,16,0.72)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   sectionLabel: {
     color: '#fff',
-    fontFamily: Fonts.serif,
-    fontSize: 18,
-    marginBottom: Spacing.two,
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 1.05,
+    textTransform: 'uppercase',
+    marginBottom: 12,
   },
   trailerPlayerWrap: {
-    borderRadius: 14,
+    borderRadius: 18,
     overflow: 'hidden',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
@@ -1405,12 +1773,12 @@ const styles = StyleSheet.create({
     flexDirection: 'row',
     alignItems: 'center',
     gap: 8,
-    borderRadius: 12,
+    borderRadius: 16,
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.14)',
-    backgroundColor: 'rgba(255,255,255,0.08)',
-    paddingVertical: 10,
-    paddingHorizontal: 12,
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingVertical: 12,
+    paddingHorizontal: 14,
   },
   trailerText: {
     color: '#fff',
@@ -1428,15 +1796,15 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   similarCard: {
-    width: 116,
-    borderRadius: 12,
+    width: DETAIL_RAIL_CARD_WIDTH,
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
   },
   similarPoster: {
     width: '100%',
     aspectRatio: 2 / 3,
-    borderRadius: 12,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   similarGlass: {
@@ -1444,10 +1812,12 @@ const styles = StyleSheet.create({
     left: 6,
     right: 6,
     bottom: 6,
-    borderRadius: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    paddingVertical: 7,
     paddingHorizontal: 8,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    backgroundColor: 'rgba(6,8,14,0.46)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   similarTitle: {
     color: '#fff',
@@ -1533,15 +1903,15 @@ const styles = StyleSheet.create({
     paddingBottom: 4,
   },
   castCard: {
-    width: 116,
-    borderRadius: 12,
+    width: DETAIL_RAIL_CARD_WIDTH,
+    borderRadius: 16,
     overflow: 'hidden',
     position: 'relative',
   },
   castImage: {
     width: '100%',
     aspectRatio: 2 / 3,
-    borderRadius: 12,
+    borderRadius: 16,
     backgroundColor: 'rgba(255,255,255,0.08)',
   },
   castGlass: {
@@ -1549,10 +1919,12 @@ const styles = StyleSheet.create({
     left: 6,
     right: 6,
     bottom: 6,
-    borderRadius: 10,
-    paddingVertical: 6,
+    borderRadius: 12,
+    paddingVertical: 7,
     paddingHorizontal: 8,
-    backgroundColor: 'rgba(0,0,0,0.28)',
+    backgroundColor: 'rgba(6,8,14,0.46)',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.08)',
   },
   castName: {
     color: '#fff',

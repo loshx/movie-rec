@@ -14,6 +14,7 @@ import {
   KeyboardAvoidingView,
   Platform,
   Pressable,
+  ScrollView,
   StyleSheet,
   Text,
   TextInput,
@@ -1026,8 +1027,6 @@ export default function CinemaScreen() {
   const cinemaFactsRow = [eventMeta?.year, eventMeta?.runtimeLabel, eventMeta?.voteAverage ? `${eventMeta.voteAverage.toFixed(1)} / 10` : null]
     .filter((item): item is string => !!item);
   const phasePosterImage = String(event?.poster_url ?? '').trim() || eventMeta?.backdrop || eventMeta?.poster || '';
-  const phaseHeading = String(event?.title ?? '').trim() || eventMeta?.title || 'Cinema Event';
-  const phaseSummary = String(event?.description ?? '').trim() || eventMeta?.overview || 'Live stream will begin soon.';
   const composerBottomInset =
     Platform.OS === 'ios'
       ? Math.max(8, insets.bottom + 6)
@@ -1106,13 +1105,28 @@ export default function CinemaScreen() {
       }
       keyboardVerticalOffset={Platform.OS === 'ios' && !isImmersiveLive ? insets.top + 4 : 0}>
       {phase === 'upcoming' ? (
-        <View style={[styles.phaseShell, { paddingTop: Math.max(insets.top + 10, Spacing.three + 8) }]}>
+        <ScrollView
+          showsVerticalScrollIndicator={false}
+          contentContainerStyle={[
+            styles.phaseShell,
+            {
+              paddingTop: Math.max(insets.top + 10, Spacing.three + 8),
+              paddingBottom: Math.max(insets.bottom + 120, Spacing.five + 8),
+            },
+          ]}>
           <View style={styles.phasePosterWrap}>
             {phasePosterImage ? (
               <Image source={{ uri: phasePosterImage }} style={styles.phasePoster} resizeMode="cover" />
             ) : (
               <View style={styles.upcomingPosterFallback} />
             )}
+            <LinearGradient
+              colors={['rgba(7,10,18,0.04)', 'rgba(7,10,18,0.16)', 'rgba(7,10,18,0.88)']}
+              locations={[0, 0.45, 1]}
+              start={{ x: 0.5, y: 0 }}
+              end={{ x: 0.5, y: 1 }}
+              style={StyleSheet.absoluteFillObject}
+            />
             <View style={styles.phasePosterTopRow}>
               <View style={styles.phaseBadge}>
                 <Ionicons name="videocam" size={12} color="#fde68a" />
@@ -1126,15 +1140,10 @@ export default function CinemaScreen() {
               ) : null}
             </View>
           </View>
-          <LinearGradient
-            colors={['rgba(9,14,26,0.95)', 'rgba(8,12,20,0.96)', 'rgba(6,10,16,0.98)']}
-            start={{ x: 0, y: 0 }}
-            end={{ x: 1, y: 1 }}
-            style={styles.phaseInfoCard}>
-            <Text style={styles.phaseTitle}>{phaseHeading}</Text>
-            <View style={styles.phaseCountdownBlock}>
-              <Text style={styles.phaseCountdownLabel}>Starts in</Text>
-              <Text style={styles.phaseCountdown}>{countdownText ?? '0d:0h:0m:0s'}</Text>
+          <View style={styles.phaseInfoStack}>
+            <View style={styles.phaseCountdownRow}>
+              <Text style={styles.phaseSectionEyebrow}>Starts in</Text>
+              <Text style={styles.phaseCountdownHero}>{countdownText ?? '0d:0h:0m:0s'}</Text>
             </View>
             {cinemaFactsRow.length > 0 ? (
               <View style={styles.phaseFactsRow}>
@@ -1145,39 +1154,41 @@ export default function CinemaScreen() {
                 ))}
               </View>
             ) : null}
-            {eventMetaLoading ? <ActivityIndicator color="#fff" /> : null}
-            {cinemaDirectorLabel ? (
-              <Text style={styles.phaseMetaLine} numberOfLines={1}>
-                {cinemaDirectorLabel}
-              </Text>
+            {eventMetaLoading ? <ActivityIndicator color="#fff" style={styles.phaseMetaLoader} /> : null}
+            {cinemaDirectorLabel || cinemaCastLabel || cinemaGenresLabel ? (
+              <View style={styles.phaseMetaCluster}>
+                {cinemaDirectorLabel ? (
+                  <Text style={styles.phaseMetaLine} numberOfLines={1}>
+                    {cinemaDirectorLabel}
+                  </Text>
+                ) : null}
+                {cinemaCastLabel ? (
+                  <Text style={styles.phaseMetaLine} numberOfLines={2}>
+                    {cinemaCastLabel}
+                  </Text>
+                ) : null}
+                {cinemaGenresLabel ? (
+                  <Text style={styles.phaseGenresText} numberOfLines={1}>
+                    {cinemaGenresLabel}
+                  </Text>
+                ) : null}
+              </View>
             ) : null}
-            {cinemaCastLabel ? (
-              <Text style={styles.phaseMetaLine} numberOfLines={2}>
-                {cinemaCastLabel}
-              </Text>
-            ) : null}
-            {cinemaGenresLabel ? (
-              <Text style={styles.phaseGenresText} numberOfLines={1}>
-                {cinemaGenresLabel}
-              </Text>
-            ) : null}
-            <Text style={styles.phaseHint} numberOfLines={4}>
-              {phaseSummary}
-            </Text>
             {eventMeta?.tmdbId ? (
               <Pressable
-                style={styles.phaseDetailsBtn}
+                style={styles.phaseDetailsBtnWide}
                 onPress={() =>
                   router.push({
                     pathname: '/movie/[id]',
                     params: { id: String(eventMeta.tmdbId), type: eventMeta.mediaType },
                   })
                 }>
-                <Text style={styles.phaseDetailsBtnText}>Open full details</Text>
+                <Text style={styles.phaseDetailsBtnWideText}>Open full details</Text>
+                <Ionicons name="arrow-forward" size={16} color="#fff" />
               </Pressable>
             ) : null}
-          </LinearGradient>
-        </View>
+          </View>
+        </ScrollView>
       ) : null}
 
       {phase === 'live' ? (
@@ -1408,18 +1419,17 @@ const styles = StyleSheet.create({
     textShadowRadius: 6,
   },
   phaseShell: {
-    flex: 1,
     gap: 14,
     paddingHorizontal: Spacing.four,
     paddingTop: Spacing.three,
     paddingBottom: Spacing.three,
   },
   phasePosterWrap: {
-    height: 360,
-    borderRadius: 26,
+    height: 420,
+    borderRadius: 28,
     overflow: 'hidden',
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.14)',
+    borderColor: 'rgba(255,255,255,0.12)',
     backgroundColor: '#0b0b0b',
   },
   phasePoster: {
@@ -1433,13 +1443,32 @@ const styles = StyleSheet.create({
   },
   phasePosterTopRow: {
     position: 'absolute',
-    top: 12,
-    left: 12,
-    right: 12,
+    top: 14,
+    left: 14,
+    right: 14,
     flexDirection: 'row',
     alignItems: 'center',
     justifyContent: 'space-between',
     gap: 8,
+  },
+  phasePosterBottomPanel: {
+    position: 'absolute',
+    left: 16,
+    right: 16,
+    bottom: 18,
+    gap: 6,
+  },
+  phasePosterTitle: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 28,
+    lineHeight: 32,
+  },
+  phasePosterSummary: {
+    color: 'rgba(255,255,255,0.82)',
+    fontFamily: Fonts.serif,
+    fontSize: 13.5,
+    lineHeight: 19,
   },
   phaseBadge: {
     flexDirection: 'row',
@@ -1474,11 +1503,42 @@ const styles = StyleSheet.create({
     fontSize: 10,
   },
   phaseInfoCard: {
-    borderRadius: 22,
+    borderRadius: 20,
     borderWidth: 1,
-    borderColor: 'rgba(255,255,255,0.2)',
-    padding: 16,
-    gap: 8,
+    borderColor: 'rgba(255,255,255,0.16)',
+    padding: 14,
+    gap: 7,
+  },
+  phaseInfoStack: {
+    gap: 12,
+    paddingHorizontal: 2,
+  },
+  phaseSectionEyebrow: {
+    color: 'rgba(255,255,255,0.64)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  phaseCountdownRow: {
+    gap: 6,
+  },
+  phaseCountdownHero: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 28,
+    letterSpacing: 0.2,
+    fontWeight: '700',
+  },
+  phaseMetaLoader: {
+    alignSelf: 'flex-start',
+    marginTop: 2,
+  },
+  phaseMetaCluster: {
+    gap: 6,
+    paddingTop: 6,
+    borderTopWidth: 1,
+    borderTopColor: 'rgba(255,255,255,0.08)',
   },
   phaseTitle: {
     color: '#fff',
@@ -1487,7 +1547,6 @@ const styles = StyleSheet.create({
     lineHeight: 28,
   },
   phaseCountdownBlock: {
-    marginTop: 2,
     borderRadius: 14,
     borderWidth: 1,
     borderColor: 'rgba(225,29,72,0.45)',
@@ -1547,8 +1606,8 @@ const styles = StyleSheet.create({
   phaseHint: {
     color: 'rgba(255,255,255,0.78)',
     fontFamily: Fonts.serif,
-    fontSize: 13.5,
-    lineHeight: 19,
+    fontSize: 13,
+    lineHeight: 18,
   },
   phaseDetailsBtn: {
     alignSelf: 'flex-start',
@@ -1564,6 +1623,25 @@ const styles = StyleSheet.create({
     color: '#dbeafe',
     fontFamily: Fonts.mono,
     fontSize: 11,
+  },
+  phaseDetailsBtnWide: {
+    minHeight: 54,
+    marginTop: 2,
+    borderRadius: 18,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+    paddingHorizontal: 16,
+    paddingVertical: 12,
+    flexDirection: 'row',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+  },
+  phaseDetailsBtnWideText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 12,
+    letterSpacing: 0.2,
   },
   pollLoadingWrap: {
     paddingVertical: 8,

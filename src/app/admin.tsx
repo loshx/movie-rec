@@ -1,17 +1,24 @@
 import React, { useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
-import { Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
+import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
 import { router } from 'expo-router';
 
 import { useAuth } from '@/contexts/AuthContext';
 import { addGalleryItem, clearGalleryAll, type GalleryDetails } from '@/db/gallery';
-import { closeCinemaPoll, createCinemaEvent, createCinemaPoll, getCurrentCinemaPoll, getLatestCinemaEvent } from '@/db/cinema';
+import {
+  closeCinemaPoll,
+  createCinemaEvent,
+  createCinemaPoll,
+  getCurrentCinemaPoll,
+  getLatestCinemaEvent,
+  type CinemaPoll,
+} from '@/db/cinema';
 import { hasCloudinaryConfig, uploadImageToCloudinary, uploadVideoToCloudinary } from '@/lib/cloudinary';
 import { hasBackendApi } from '@/lib/cinema-backend';
 import { setRuntimeAdminKey } from '@/lib/admin-session';
 import { checkMlApiHealth, getMlApiBaseUrl, hasMlApi } from '@/lib/ml-recommendations';
-import { getMovieById, getMovieCredits, posterUrl } from '@/lib/tmdb';
+import { getMovieById, posterUrl } from '@/lib/tmdb';
 import { Fonts, Spacing } from '@/constants/theme';
 import { useTheme } from '@/hooks/use-theme';
 
@@ -288,14 +295,28 @@ function isRemoteHttpUrl(value: string) {
   return /^https?:\/\//i.test(value.trim());
 }
 
+function isRenderableMediaUri(value: string) {
+  return /^(https?:\/\/|file:\/\/|content:\/\/|ph:\/\/|blob:)/i.test(value.trim());
+}
+
+function getMediaDisplayName(value: string, fallback: string) {
+  const clean = String(value || '').trim();
+  if (!clean) return fallback;
+  try {
+    const normalized = clean.split('?')[0].split('#')[0];
+    const raw = normalized.split('/').filter(Boolean).pop() || fallback;
+    return decodeURIComponent(raw).slice(0, 80);
+  } catch {
+    return clean.slice(0, 80);
+  }
+}
+
 export default function AdminScreen() {
   const { user } = useAuth();
   const theme = useTheme();
 
   const [adminApiKey, setAdminApiKey] = useState('');
   const rounded = useMemo(() => roundToNextFiveMinutes(), []);
-  const [cinemaTitle, setCinemaTitle] = useState('');
-  const [cinemaDesc, setCinemaDesc] = useState('');
   const [cinemaTmdbId, setCinemaTmdbId] = useState('');
   const [startDayOffset, setStartDayOffset] = useState(0);
   const [startHour, setStartHour] = useState(rounded.getHours());
@@ -312,6 +333,7 @@ export default function AdminScreen() {
   const [pollTmdb3, setPollTmdb3] = useState('');
   const [pollSubmitting, setPollSubmitting] = useState(false);
   const [pollCurrentId, setPollCurrentId] = useState<number | null>(null);
+  const [pollCurrent, setPollCurrent] = useState<CinemaPoll | null>(null);
   const [pollMessage, setPollMessage] = useState<string | null>(null);
   const [galleryImageInputs, setGalleryImageInputs] = useState<string[]>([]);
   const [galleryJsonInput, setGalleryJsonInput] = useState('');
@@ -324,6 +346,48 @@ export default function AdminScreen() {
 
   const cloudinaryReady = hasCloudinaryConfig();
   const cleanAdminKey = adminApiKey.trim();
+  const cinemaPosterPreviewUri = useMemo(
+    () => (isRenderableMediaUri(posterInput) ? posterInput.trim() : ''),
+    [posterInput]
+  );
+  const cinemaPosterDisplayName = useMemo(
+    () => getMediaDisplayName(posterInput, 'No poster selected'),
+    [posterInput]
+  );
+  const cinemaVideoDisplayName = useMemo(
+    () => getMediaDisplayName(videoInput, 'No video selected'),
+    [videoInput]
+  );
+  const cinemaVideoDurationLabel = useMemo(() => {
+    if (!pickedDurationSec || pickedDurationSec <= 0) return '';
+    const totalMinutes = Math.max(1, Math.round(pickedDurationSec / 60));
+    const hours = Math.floor(totalMinutes / 60);
+    const minutes = totalMinutes % 60;
+    if (hours > 0) return `${hours}h ${minutes}m`;
+    return `${minutes} min`;
+  }, [pickedDurationSec]);
+  const sortedPollOptions = useMemo(
+    () =>
+      [...(pollCurrent?.options ?? [])].sort((a, b) => {
+        const votesDiff = Number(b.votes || 0) - Number(a.votes || 0);
+        if (votesDiff !== 0) return votesDiff;
+        return Number(b.percent || 0) - Number(a.percent || 0);
+      }),
+    [pollCurrent]
+  );
+
+  const refreshCurrentPoll = async () => {
+    try {
+      const currentPoll = await getCurrentCinemaPoll();
+      setPollCurrent(currentPoll);
+      setPollCurrentId(currentPoll ? Number(currentPoll.id) : null);
+      return currentPoll;
+    } catch {
+      setPollCurrent(null);
+      setPollCurrentId(null);
+      return null;
+    }
+  };
 
   useEffect(() => {
     setRuntimeAdminKey(cleanAdminKey);
@@ -362,10 +426,7 @@ export default function AdminScreen() {
       if (latest) {
         setLatestCinemaInfo(`${latest.title} (${fmtShortIso(latest.start_at)})`);
       }
-      const currentPoll = await getCurrentCinemaPoll();
-      if (currentPoll) {
-        setPollCurrentId(Number(currentPoll.id));
-      }
+      await refreshCurrentPoll();
     })();
   }, []);
 
@@ -650,11 +711,6 @@ export default function AdminScreen() {
       setCinemaMessage('TMDB ID is required for cinema event.');
       return;
     }
-    const cleanTitle = cinemaTitle.trim();
-    if (!cleanTitle) {
-      setCinemaMessage('Cinema title is required.');
-      return;
-    }
     if (!videoInput.trim()) {
       setCinemaMessage('Video URL or local video is required.');
       return;
@@ -673,6 +729,15 @@ export default function AdminScreen() {
 
     try {
       setUploading(true);
+      let resolvedTitle = `Cinema ${movieId}`;
+      let resolvedDescription: string | null = null;
+      try {
+        const movie = await getMovieById(movieId);
+        resolvedTitle = String(movie.title ?? '').trim() || resolvedTitle;
+        resolvedDescription = String(movie.overview ?? '').trim() || null;
+      } catch {
+        resolvedTitle = resolvedTitle || `Cinema ${movieId}`;
+      }
       let finalVideoUrl = videoInput.trim();
       let finalPosterUrl = posterInput.trim() || null;
       let durationSec = pickedDurationSec;
@@ -704,8 +769,8 @@ export default function AdminScreen() {
 
       await createCinemaEvent(
         {
-          title: cleanTitle,
-          description: cinemaDesc.trim() || null,
+          title: resolvedTitle,
+          description: resolvedDescription,
           videoUrl: finalVideoUrl,
           posterUrl: finalPosterUrl,
           tmdbId: movieId,
@@ -722,24 +787,6 @@ export default function AdminScreen() {
       setCinemaMessage(err instanceof Error ? err.message : 'Could not publish cinema event.');
     } finally {
       setUploading(false);
-    }
-  };
-
-  const onFetchCinemaFromTmdb = async () => {
-    setCinemaMessage(null);
-    const movieId = Number(cinemaTmdbId);
-    if (!Number.isFinite(movieId) || movieId <= 0) {
-      setCinemaMessage('Invalid cinema TMDB ID.');
-      return;
-    }
-    try {
-      const [movie, credits] = await Promise.all([getMovieById(movieId), getMovieCredits(movieId)]);
-      const director = (credits.crew ?? []).find((p) => p.job === 'Director')?.name ?? 'Unknown director';
-      setCinemaTitle(movie.title ?? '');
-      setCinemaDesc(movie.overview ?? '');
-      setCinemaMessage(`Fetched movie details. Director: ${director}`);
-    } catch (err) {
-      setCinemaMessage(err instanceof Error ? err.message : 'TMDB fetch failed.');
     }
   };
 
@@ -790,6 +837,7 @@ export default function AdminScreen() {
         },
         { adminKey: cleanAdminKey || null }
       );
+      setPollCurrent(poll);
       setPollCurrentId(Number(poll.id));
       setPollMessage('Cinema poll published.');
     } catch (err) {
@@ -815,9 +863,10 @@ export default function AdminScreen() {
     }
     try {
       setPollSubmitting(true);
-      await closeCinemaPoll(pollCurrentId, { adminKey: cleanAdminKey || null });
-      setPollCurrentId(null);
-      setPollMessage('Cinema poll closed.');
+      const poll = await closeCinemaPoll(pollCurrentId, { adminKey: cleanAdminKey || null });
+      setPollCurrent(poll);
+      setPollCurrentId(Number(poll.id));
+      setPollMessage('Cinema poll closed. Final results are shown below.');
     } catch (err) {
       setPollMessage(err instanceof Error ? err.message : 'Could not close cinema poll.');
     } finally {
@@ -891,7 +940,7 @@ export default function AdminScreen() {
 
       <View style={styles.card}>
         <Text style={styles.cardTitle}>Cinema Scheduler</Text>
-        <Text style={styles.subtitle}>Publish one live cinema event with MP4 + chat room.</Text>
+        <Text style={styles.subtitle}>Publish one live cinema event with MP4, poster and chat room.</Text>
         <View style={styles.infoRow}>
           <View style={styles.infoBox}>
             <Text style={styles.infoLabel}>Latest event</Text>
@@ -911,28 +960,6 @@ export default function AdminScreen() {
           placeholder="ex: 603692"
           placeholderTextColor="rgba(255,255,255,0.55)"
           keyboardType="number-pad"
-        />
-        <Pressable onPress={onFetchCinemaFromTmdb} style={styles.fetchBtn}>
-          <Text style={styles.fetchText}>Fetch title/about/director/actors from TMDB</Text>
-        </Pressable>
-
-        <Text style={styles.label}>Event title</Text>
-        <TextInput
-          style={styles.input}
-          value={cinemaTitle}
-          onChangeText={setCinemaTitle}
-          placeholder="Cinema Night #1"
-          placeholderTextColor="rgba(255,255,255,0.55)"
-        />
-
-        <Text style={styles.label}>Description</Text>
-        <TextInput
-          style={[styles.input, styles.textarea]}
-          value={cinemaDesc}
-          onChangeText={setCinemaDesc}
-          multiline
-          placeholder="Live watch + chat"
-          placeholderTextColor="rgba(255,255,255,0.55)"
         />
 
         <Text style={styles.label}>Start time</Text>
@@ -979,29 +1006,57 @@ export default function AdminScreen() {
         <Text style={styles.mini}>Start: {fmtShortIso(startIso)}</Text>
         <Text style={styles.mini}>End auto (estimated): {fmtShortIso(estimatedEndIso)}</Text>
 
-        <Text style={styles.label}>Video URL or picked local video</Text>
-        <TextInput
-          style={styles.input}
-          value={videoInput}
-          onChangeText={setVideoInput}
-          placeholder="https://...mp4 or pick from gallery"
-          placeholderTextColor="rgba(255,255,255,0.55)"
-        />
-        <Pressable onPress={onPickVideo} style={styles.fetchBtn}>
-          <Text style={styles.fetchText}>Select local MP4</Text>
-        </Pressable>
+        <View style={styles.schedulerMediaGrid}>
+          <View style={styles.schedulerMediaCard}>
+            <Text style={styles.schedulerMediaLabel}>Poster</Text>
+            <View style={styles.posterPreviewFrame}>
+              {cinemaPosterPreviewUri ? (
+                <Image source={{ uri: cinemaPosterPreviewUri }} style={styles.posterPreviewImage} resizeMode="cover" />
+              ) : (
+                <View style={styles.posterPreviewEmpty}>
+                  <Ionicons name="image-outline" size={26} color="rgba(255,255,255,0.58)" />
+                </View>
+              )}
+            </View>
+            <Text style={styles.schedulerMediaName} numberOfLines={1}>
+              {cinemaPosterDisplayName}
+            </Text>
+            <Pressable onPress={onPickPoster} style={styles.mediaSelectBtn}>
+              <Text style={styles.mediaSelectText}>Select poster</Text>
+            </Pressable>
+            <TextInput
+              style={[styles.input, styles.mediaUrlInput]}
+              value={isRemoteHttpUrl(posterInput) ? posterInput : ''}
+              onChangeText={setPosterInput}
+              placeholder="or paste poster URL"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+            />
+          </View>
 
-        <Text style={styles.label}>Poster image (required)</Text>
-        <Pressable onPress={onPickPoster} style={styles.fetchBtn}>
-          <Text style={styles.fetchText}>Select local poster</Text>
-        </Pressable>
-        <TextInput
-          style={styles.input}
-          value={posterInput}
-          onChangeText={setPosterInput}
-          placeholder="Selected poster URI (auto-upload to Cloudinary)"
-          placeholderTextColor="rgba(255,255,255,0.55)"
-        />
+          <View style={styles.schedulerMediaCard}>
+            <Text style={styles.schedulerMediaLabel}>Video</Text>
+            <View style={styles.videoPreviewFrame}>
+              <View style={styles.videoPreviewBadge}>
+                <Ionicons name="videocam" size={24} color="#fff" />
+              </View>
+              <Text style={styles.videoPreviewText}>MP4 source</Text>
+              <Text style={styles.videoPreviewSubtext}>{cinemaVideoDurationLabel || 'Duration will be detected automatically'}</Text>
+            </View>
+            <Text style={styles.schedulerMediaName} numberOfLines={1}>
+              {cinemaVideoDisplayName}
+            </Text>
+            <Pressable onPress={onPickVideo} style={styles.mediaSelectBtn}>
+              <Text style={styles.mediaSelectText}>Select MP4</Text>
+            </Pressable>
+            <TextInput
+              style={[styles.input, styles.mediaUrlInput]}
+              value={isRemoteHttpUrl(videoInput) ? videoInput : ''}
+              onChangeText={setVideoInput}
+              placeholder="or paste video URL"
+              placeholderTextColor="rgba(255,255,255,0.45)"
+            />
+          </View>
+        </View>
 
         {cinemaMessage ? <Text style={styles.message}>{cinemaMessage}</Text> : null}
 
@@ -1017,6 +1072,14 @@ export default function AdminScreen() {
           <View style={styles.infoBox}>
             <Text style={styles.infoLabel}>Current poll</Text>
             <Text style={styles.infoValue}>{pollCurrentId ? `#${pollCurrentId}` : 'none'}</Text>
+          </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Status</Text>
+            <Text style={styles.infoValue}>{pollCurrent?.status ?? 'idle'}</Text>
+          </View>
+          <View style={styles.infoBox}>
+            <Text style={styles.infoLabel}>Votes</Text>
+            <Text style={styles.infoValue}>{Number(pollCurrent?.total_votes ?? 0)}</Text>
           </View>
         </View>
         <Text style={styles.label}>Poll question</Text>
@@ -1059,8 +1122,43 @@ export default function AdminScreen() {
           <Pressable onPress={onCloseCinemaPoll} style={[styles.resetBtn, styles.inlineBtn]} disabled={pollSubmitting}>
             <Text style={styles.resetText}>Close poll</Text>
           </Pressable>
+          <Pressable
+            onPress={() => {
+              void refreshCurrentPoll();
+            }}
+            style={[styles.fetchBtn, styles.inlineBtn]}
+            disabled={pollSubmitting}>
+            <Text style={styles.fetchText}>Refresh results</Text>
+          </Pressable>
         </View>
         {pollMessage ? <Text style={styles.message}>{pollMessage}</Text> : null}
+        {pollCurrent ? (
+          <View style={styles.pollResultsWrap}>
+            <Text style={styles.pollResultsTitle}>Poll results</Text>
+            <Text style={styles.pollResultsQuestion}>{pollCurrent.question}</Text>
+            {sortedPollOptions.map((option, index) => (
+              <View key={option.id} style={styles.pollResultRow}>
+                <View style={styles.pollResultTop}>
+                  <Text style={styles.pollResultRank}>{index + 1}.</Text>
+                  <Text style={styles.pollResultName} numberOfLines={1}>
+                    {option.title}
+                  </Text>
+                  <Text style={styles.pollResultValue}>
+                    {option.votes} vote{option.votes === 1 ? '' : 's'} · {option.percent}%
+                  </Text>
+                </View>
+                <View style={styles.pollResultBarTrack}>
+                  <View
+                    style={[
+                      styles.pollResultBarFill,
+                      { width: `${Math.max(6, Math.min(100, Number(option.percent || 0)))}%` },
+                    ]}
+                  />
+                </View>
+              </View>
+            ))}
+          </View>
+        ) : null}
       </View>
 
       <View style={styles.card}>
@@ -1202,7 +1300,7 @@ const styles = StyleSheet.create({
     backgroundColor: '#0f1114',
     borderWidth: 1,
     borderColor: 'rgba(255,255,255,0.1)',
-    borderRadius: 16,
+    borderRadius: 18,
     padding: Spacing.four,
   },
   title: {
@@ -1407,6 +1505,106 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 12,
   },
+  schedulerMediaGrid: {
+    flexDirection: 'row',
+    alignItems: 'stretch',
+    gap: Spacing.two,
+    marginBottom: Spacing.two + 2,
+  },
+  schedulerMediaCard: {
+    flex: 1,
+    minWidth: 0,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    borderRadius: 16,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    padding: 12,
+    gap: 10,
+  },
+  schedulerMediaLabel: {
+    fontFamily: Fonts.mono,
+    fontSize: 10,
+    textTransform: 'uppercase',
+    letterSpacing: 0.8,
+    color: 'rgba(255,255,255,0.56)',
+  },
+  posterPreviewFrame: {
+    height: 176,
+    borderRadius: 14,
+    overflow: 'hidden',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+  },
+  posterPreviewImage: {
+    width: '100%',
+    height: '100%',
+  },
+  posterPreviewEmpty: {
+    flex: 1,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(255,255,255,0.035)',
+  },
+  videoPreviewFrame: {
+    height: 176,
+    borderRadius: 14,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.1)',
+    backgroundColor: 'rgba(255,255,255,0.04)',
+    alignItems: 'center',
+    justifyContent: 'center',
+    paddingHorizontal: 12,
+    gap: 8,
+  },
+  videoPreviewBadge: {
+    width: 56,
+    height: 56,
+    borderRadius: 28,
+    alignItems: 'center',
+    justifyContent: 'center',
+    backgroundColor: 'rgba(239,68,68,0.18)',
+    borderWidth: 1,
+    borderColor: 'rgba(239,68,68,0.32)',
+  },
+  videoPreviewText: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 16,
+  },
+  videoPreviewSubtext: {
+    color: 'rgba(255,255,255,0.66)',
+    fontFamily: Fonts.mono,
+    fontSize: 10.5,
+    textAlign: 'center',
+    lineHeight: 15,
+  },
+  schedulerMediaName: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 13,
+    lineHeight: 18,
+    minHeight: 18,
+  },
+  mediaSelectBtn: {
+    minHeight: 40,
+    borderRadius: 12,
+    alignItems: 'center',
+    justifyContent: 'center',
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.14)',
+    backgroundColor: 'rgba(255,255,255,0.06)',
+  },
+  mediaSelectText: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11.5,
+  },
+  mediaUrlInput: {
+    marginBottom: 0,
+    paddingVertical: 9,
+    fontSize: 12.5,
+  },
   message: {
     marginBottom: Spacing.two + 2,
     borderWidth: 1,
@@ -1418,6 +1616,64 @@ const styles = StyleSheet.create({
     fontFamily: Fonts.mono,
     fontSize: 11,
     color: '#fff',
+  },
+  pollResultsWrap: {
+    marginTop: Spacing.one,
+    borderWidth: 1,
+    borderColor: 'rgba(255,255,255,0.12)',
+    borderRadius: 14,
+    backgroundColor: 'rgba(255,255,255,0.035)',
+    padding: 12,
+    gap: 10,
+  },
+  pollResultsTitle: {
+    color: '#fff',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+    letterSpacing: 0.8,
+    textTransform: 'uppercase',
+  },
+  pollResultsQuestion: {
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 18,
+    lineHeight: 24,
+  },
+  pollResultRow: {
+    gap: 6,
+  },
+  pollResultTop: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: 8,
+  },
+  pollResultRank: {
+    width: 18,
+    color: 'rgba(255,255,255,0.72)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  pollResultName: {
+    flex: 1,
+    color: '#fff',
+    fontFamily: Fonts.serif,
+    fontSize: 14,
+  },
+  pollResultValue: {
+    color: 'rgba(255,255,255,0.78)',
+    fontFamily: Fonts.mono,
+    fontSize: 11,
+  },
+  pollResultBarTrack: {
+    height: 8,
+    borderRadius: 999,
+    overflow: 'hidden',
+    backgroundColor: 'rgba(255,255,255,0.08)',
+  },
+  pollResultBarFill: {
+    height: '100%',
+    borderRadius: 999,
+    backgroundColor: 'rgba(255,255,255,0.9)',
   },
   saveBtn: {
     borderWidth: 1,
