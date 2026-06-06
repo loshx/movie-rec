@@ -1342,14 +1342,66 @@ function serializeLocalAuthUser(userIdInput) {
     user_id: canonicalUserId,
     nickname,
     name: normalizeText(profile.name, 80) || null,
-    email: null,
-    date_of_birth: null,
-    country: null,
+    email: normalizeEmail(profile.email) || null,
+    date_of_birth: normalizeText(profile.date_of_birth, 20) || null,
+    country: normalizeText(profile.country, 80) || null,
     bio: normalizeText(profile.bio, 300) || null,
     avatar_url: normalizeAvatarUrl(profile.avatar_url),
     role: nicknameKey(nickname) === 'admin' ? 'admin' : 'user',
-    auth_provider: 'local',
+    auth_provider: normalizeText(profile.auth_provider, 20) || 'local',
     created_at: auth?.created_at || nowIso(),
+    updated_at: normalizeIso(profile.updated_at, nowIso()),
+  };
+}
+
+function normalizeEmail(value) {
+  const clean = normalizeText(value, 180).toLowerCase();
+  if (!clean || !/^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(clean)) return '';
+  return clean;
+}
+
+function normalizeOAuthProvider(value) {
+  const clean = String(value || '').trim().toLowerCase();
+  return clean === 'google' ? 'google' : 'auth0';
+}
+
+function findCanonicalUserIdByAuth0Sub(subInput) {
+  const clean = normalizeText(subInput, 240);
+  if (!clean) return null;
+  for (const profile of Object.values(store.users || {})) {
+    if (normalizeText(profile?.auth0_sub, 240) !== clean) continue;
+    return resolveCanonicalUserId(profile?.user_id) || parsePositiveNumber(profile?.user_id);
+  }
+  return null;
+}
+
+function findCanonicalUserIdByEmail(emailInput) {
+  const clean = normalizeEmail(emailInput);
+  if (!clean) return null;
+  for (const profile of Object.values(store.users || {})) {
+    if (normalizeEmail(profile?.email) !== clean) continue;
+    return resolveCanonicalUserId(profile?.user_id) || parsePositiveNumber(profile?.user_id);
+  }
+  return null;
+}
+
+function serializeOAuthUser(userIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(userIdInput) || parsePositiveNumber(userIdInput);
+  if (!canonicalUserId) return null;
+  const profile = ensureUserProfile(canonicalUserId, null);
+  if (!profile) return null;
+  return {
+    user_id: canonicalUserId,
+    nickname: normalizeText(profile.nickname, 40) || `user_${canonicalUserId}`,
+    name: normalizeText(profile.name, 80) || null,
+    email: normalizeEmail(profile.email) || null,
+    date_of_birth: normalizeText(profile.date_of_birth, 20) || null,
+    country: normalizeText(profile.country, 80) || null,
+    bio: normalizeText(profile.bio, 300) || null,
+    avatar_url: normalizeAvatarUrl(profile.avatar_url),
+    role: normalizeText(profile.role, 20) === 'admin' ? 'admin' : 'user',
+    auth_provider: normalizeOAuthProvider(profile.auth_provider),
+    created_at: normalizeIso(profile.created_at, nowIso()),
     updated_at: normalizeIso(profile.updated_at, nowIso()),
   };
 }
@@ -1605,6 +1657,41 @@ function findCanonicalUserIdByNickname(nicknameInput) {
   const profile = Object.values(store.users || {}).find((row) => nicknameKey(row?.nickname) === clean);
   if (!profile) return null;
   return resolveCanonicalUserId(profile.user_id);
+}
+
+function cleanNicknameCandidate(value, fallbackUserId) {
+  const fallback = fallbackUserId ? `user_${fallbackUserId}` : 'user';
+  const cleaned = String(value || fallback)
+    .toLowerCase()
+    .replace(/\s+/g, '.')
+    .replace(/[^a-z0-9._-]/g, '')
+    .replace(/\.+/g, '.')
+    .replace(/^\.|\.$/g, '')
+    .slice(0, 20);
+  if (cleaned.length >= 3) return cleaned;
+  return fallback.slice(0, 20);
+}
+
+function findNicknameOwnerUserId(nicknameInput) {
+  const byProfile = findCanonicalUserIdByNickname(nicknameInput);
+  if (byProfile) return byProfile;
+  const byLocalAuth = findLocalAuthEntryByNickname(nicknameInput);
+  if (byLocalAuth?.user_id) {
+    return resolveCanonicalUserId(byLocalAuth.user_id) || parsePositiveNumber(byLocalAuth.user_id);
+  }
+  return null;
+}
+
+function makeUniqueProfileNickname(baseNicknameInput, canonicalUserIdInput) {
+  const canonicalUserId = resolveCanonicalUserId(canonicalUserIdInput) || parsePositiveNumber(canonicalUserIdInput);
+  const base = cleanNicknameCandidate(baseNicknameInput, canonicalUserId);
+  const safeBase = base.length > 16 ? base.slice(0, 16).replace(/[._-]+$/g, '') || 'user' : base;
+  for (let suffix = 0; suffix < 1000; suffix += 1) {
+    const candidate = suffix === 0 ? base : `${safeBase}${suffix}`.slice(0, 20);
+    const owner = findNicknameOwnerUserId(candidate);
+    if (!owner || owner === canonicalUserId) return candidate;
+  }
+  return `user_${canonicalUserId}`.slice(0, 20);
 }
 
 function resolveCanonicalUserIdForNickname(userIdInput, nicknameInput) {
@@ -3765,6 +3852,53 @@ const server = http.createServer(async (req, res) => {
       });
     }
 
+    if (method === 'POST' && pathname === '/api/auth/oauth/upsert') {
+      const body = await readBody(req);
+      const sub = normalizeText(body?.sub, 240);
+      if (!sub) {
+        return json(res, 400, { error: 'OAuth sub is required.' });
+      }
+      const email = normalizeEmail(body?.email);
+      const name = normalizeText(body?.name, 80) || null;
+      const provider = normalizeOAuthProvider(body?.provider || body?.auth_provider);
+      const existingBySub = findCanonicalUserIdByAuth0Sub(sub);
+      const existingByEmail = existingBySub ? null : findCanonicalUserIdByEmail(email);
+      const canonicalUserId = existingBySub || existingByEmail || allocateCanonicalUserId();
+      const isNewUser = !existingBySub && !existingByEmail;
+      const profile = ensureUserProfile(canonicalUserId, null);
+      const baseNickname =
+        normalizeText(body?.nickname, 40) ||
+        (email ? email.split('@')[0] : '') ||
+        normalizeText(body?.given_name, 40) ||
+        normalizeText(name, 40) ||
+        `user_${canonicalUserId}`;
+      const currentNickname = normalizeText(profile.nickname, 40);
+      const currentOwner = currentNickname ? findNicknameOwnerUserId(currentNickname) : null;
+      if (
+        !currentNickname ||
+        /^user_\d+$/i.test(String(currentNickname || '')) ||
+        (currentOwner && currentOwner !== canonicalUserId)
+      ) {
+        profile.nickname = makeUniqueProfileNickname(baseNickname, canonicalUserId);
+      }
+      profile.auth_provider = provider;
+      profile.auth0_sub = sub;
+      profile.email = email || profile.email || null;
+      profile.name = name || profile.name || null;
+      profile.role = profile.role === 'admin' ? 'admin' : 'user';
+      profile.created_at = normalizeIso(profile.created_at, nowIso());
+      profile.updated_at = nowIso();
+      const session = upsertUserSession(canonicalUserId, null);
+      saveStore(store);
+      return json(res, isNewUser ? 201 : 200, {
+        ok: true,
+        user: serializeOAuthUser(canonicalUserId),
+        session_token: session.token,
+        canonical_user_id: canonicalUserId,
+        is_new_user: isNewUser,
+      });
+    }
+
     if (method === 'POST' && pathname === '/api/auth/local/sync') {
       const body = await readBody(req);
       const requestedUserId =
@@ -3940,13 +4074,25 @@ const server = http.createServer(async (req, res) => {
       if (!nickname) {
         return json(res, 400, { error: 'nickname is required.' });
       }
-      const canonicalUserId =
-        resolveCanonicalUserIdForNickname(requestedUserId, nickname) ||
-        resolveCanonicalUserId(requestedUserId) ||
-        requestedUserId;
-      if (canonicalUserId !== requestedUserId) {
-        setUserAlias(requestedUserId, canonicalUserId);
-        mergeUserIntoCanonicalUserId(requestedUserId, canonicalUserId);
+      const canonicalFromInput = resolveCanonicalUserId(requestedUserId) || requestedUserId;
+      const inputProfile = store.users[String(canonicalFromInput)];
+      const inputNickname = normalizeText(inputProfile?.nickname, 40);
+      const nicknameOwner = findCanonicalUserIdByNickname(nickname);
+      if (
+        inputProfile &&
+        inputNickname &&
+        nicknameKey(inputNickname) !== nicknameKey(nickname)
+      ) {
+        if (nicknameOwner && nicknameOwner !== canonicalFromInput) {
+          const session = upsertUserSession(nicknameOwner, null);
+          saveStore(store);
+          return json(res, 200, { ok: true, session_token: session.token, canonical_user_id: nicknameOwner });
+        }
+        return json(res, 403, { error: 'User id already belongs to a different backend profile.' });
+      }
+      const canonicalUserId = nicknameOwner || canonicalFromInput;
+      if (nicknameOwner && nicknameOwner !== requestedUserId) {
+        setUserAlias(requestedUserId, nicknameOwner);
       }
       ensureUserProfile(canonicalUserId, nickname);
       const session = upsertUserSession(canonicalUserId, null);
