@@ -59,9 +59,14 @@ export function getMlApiBaseUrl() {
 async function fetchWithTimeout(url: string, init?: RequestInit) {
   const controller = init?.signal ? null : new AbortController();
   const timeout = controller ? setTimeout(() => controller.abort(), ML_REQUEST_TIMEOUT_MS) : null;
+  const headers = {
+    'ngrok-skip-browser-warning': 'true',
+    ...((init?.headers as Record<string, string> | undefined) ?? {}),
+  };
   try {
     return await fetch(url, {
       ...(init ?? {}),
+      headers,
       signal: init?.signal ?? controller?.signal,
     });
   } finally {

@@ -21,6 +21,7 @@ import { clearBackendUserSession, getBackendUserSession, resolveBackendUserId } 
 import { bootstrapBackendUserSession, deletePublicAccount } from '@/lib/social-backend';
 import {
   BackendLocalAuthError,
+  backendOAuthUpsert,
   backendLocalLogin,
   backendLocalNicknameAvailable,
   backendLocalRegister,
@@ -241,11 +242,28 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         await initDb();
         setError(null);
         clearBackendUserSession();
-        const result = await upsertAuth0User(profile);
-        const u = result.user;
         const backendEnabled = hasBackendApi();
+        const remote = await backendOAuthUpsert({ ...profile, provider: 'auth0' });
+        let u: User;
+        let isNewUser: boolean;
+        if (remote?.user) {
+          u = await upsertLocalUserFromBackend({
+            user: remote.user,
+            password: `${profile.sub}:oauth`,
+          });
+          isNewUser = !!remote.is_new_user;
+        } else {
+          if (backendEnabled) {
+            throw new Error('Google sign-in needs backend connection to keep accounts isolated across devices.');
+          }
+          const result = await upsertAuth0User(profile);
+          u = result.user;
+          isNewUser = result.isNewUser;
+        }
         const bootstrapUserId = Number(u.backend_user_id ?? u.id);
-        await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
+        if (!remote?.user) {
+          await bootstrapBackendUserSession(bootstrapUserId, u.nickname).catch(() => null);
+        }
         if (backendEnabled && u.role !== 'admin') {
           const session = getBackendUserSession();
           if (!session?.token) {
@@ -256,7 +274,7 @@ export function AuthProvider({ children }: { children: React.ReactNode }) {
         }
         setUser(u);
         void syncUserHistoryToMl(Number(u.backend_user_id ?? u.id)).catch(() => {});
-        return { isNewUser: result.isNewUser };
+        return { isNewUser };
       },
       checkNicknameAvailability: async (nickname, excludeUserId) => {
         await initDb();

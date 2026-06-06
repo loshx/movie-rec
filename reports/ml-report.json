@@ -1,0 +1,32 @@
+{
+  "generated_at": "2026-06-05T20:29:42.865Z",
+  "top_k": 20,
+  "min_history_per_user": 5,
+  "config": {
+    "ml_api_configured": true,
+    "tmdb_configured": false,
+    "store_path": "D:\\APP\\movie-rec\\server\\data\\cinema-events.json"
+  },
+  "dataset": {
+    "users_evaluated": 0,
+    "users_movie": 0,
+    "users_tv": 0
+  },
+  "results": {
+    "movie": {
+      "ml": null,
+      "tmdb": null,
+      "per_user": []
+    },
+    "tv": {
+      "ml": null,
+      "tmdb": null,
+      "per_user": []
+    }
+  },
+  "notes": [
+    "TMDB token/key is missing, TMDB baseline metrics could not be computed.",
+    "Not enough movie history to evaluate (minimum history per user: 5).",
+    "Not enough tv history to evaluate (minimum history per user: 5)."
+  ]
+}

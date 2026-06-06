@@ -1,0 +1,139 @@
+{
+  "generated_at": "2026-05-31T18:11:12.735Z",
+  "user_id": 2,
+  "media_type": "movie",
+  "source_endpoints": {
+    "recommendations": "http://127.0.0.1:8008/recommendations/2?media_type=movie&top_n=10",
+    "explain": "http://127.0.0.1:8008/explain/2/1226863?media_type=movie"
+  },
+  "model_rows": 71,
+  "top_recommendations": [
+    {
+      "rank": 1,
+      "tmdb_id": 1226863,
+      "title": "The Super Mario Galaxy Movie",
+      "score": 0.5962145748041182,
+      "reason": "profile+hybrid",
+      "release_date": "2026-04-01"
+    },
+    {
+      "rank": 2,
+      "tmdb_id": 1084242,
+      "title": "Zootopia 2",
+      "score": 0.5793188046323064,
+      "reason": "profile+hybrid",
+      "release_date": "2025-11-26"
+    },
+    {
+      "rank": 3,
+      "tmdb_id": 1272837,
+      "title": "28 Years Later: The Bone Temple",
+      "score": 0.44342354575321874,
+      "reason": "profile+hybrid",
+      "release_date": "2026-01-14"
+    },
+    {
+      "rank": 4,
+      "tmdb_id": 1022787,
+      "title": "Elio",
+      "score": 0.324190554713972,
+      "reason": "profile+hybrid",
+      "release_date": "2025-06-18"
+    },
+    {
+      "rank": 5,
+      "tmdb_id": 459151,
+      "title": "The Boss Baby: Family Business",
+      "score": 0.32419054634071015,
+      "reason": "profile+hybrid",
+      "release_date": "2021-07-01"
+    },
+    {
+      "rank": 6,
+      "tmdb_id": 228165,
+      "title": "The SpongeBob Movie: Sponge Out of Water",
+      "score": 0.3241905332061016,
+      "reason": "profile+hybrid",
+      "release_date": "2015-01-28"
+    },
+    {
+      "rank": 7,
+      "tmdb_id": 228161,
+      "title": "Home",
+      "score": 0.32419052408496585,
+      "reason": "profile+hybrid",
+      "release_date": "2015-03-18"
+    },
+    {
+      "rank": 8,
+      "tmdb_id": 9552,
+      "title": "The Exorcist",
+      "score": 0.3241905150743139,
+      "reason": "profile+hybrid",
+      "release_date": "1973-12-26"
+    },
+    {
+      "rank": 9,
+      "tmdb_id": 177572,
+      "title": "Big Hero 6",
+      "score": 0.3241905061656471,
+      "reason": "profile+hybrid",
+      "release_date": "2014-10-24"
+    },
+    {
+      "rank": 10,
+      "tmdb_id": 137106,
+      "title": "The Lego Movie",
+      "score": 0.3241904970657634,
+      "reason": "profile+hybrid",
+      "release_date": "2014-02-06"
+    }
+  ],
+  "explain": {
+    "tmdb_id": 1226863,
+    "title": "The Super Mario Galaxy Movie",
+    "final_score": 0.5962145748041182,
+    "score_parts": {
+      "user_knn": 0.2518494416925925,
+      "item_knn": 0.20693060808248975,
+      "svd": 0.09363613318005737,
+      "follow_taste": 0,
+      "popularity": 0.04379839184897861
+    },
+    "top_neighbor_users": [
+      {
+        "user_id": 3,
+        "similarity": 0.6550847683586003,
+        "interaction_score": 3.616668048560983
+      }
+    ],
+    "similar_seen_items": [
+      {
+        "tmdb_id": 1422096,
+        "similarity": 0.6404713626929894,
+        "user_strength": 4.8162310372530985
+      },
+      {
+        "tmdb_id": 128,
+        "similarity": 0.6404713625848872,
+        "user_strength": 2.4494669883723628
+      },
+      {
+        "tmdb_id": 13,
+        "similarity": 0.6752220202290852,
+        "user_strength": 0.9632243597515389
+      },
+      {
+        "tmdb_id": 680,
+        "similarity": 0.6752220195441062,
+        "user_strength": 0.9632243587310664
+      },
+      {
+        "tmdb_id": 157336,
+        "similarity": 0.675222019361943,
+        "user_strength": 0.963224358437827
+      }
+    ]
+  },
+  "evaluation_note": "Offline evaluation metrics remain unavailable because the local evaluation dataset has insufficient user history in server/data/cinema-events.json."
+}

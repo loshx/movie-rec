@@ -1,9 +1,15 @@
 import Constants from 'expo-constants';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
 
 import { getBackendApiUrl, hasBackendApi } from '@/lib/cinema-backend';
 import { getBackendUserTokenForUser, resolveBackendUserId } from '@/lib/backend-session';
+
+type NotificationsModule = typeof import('expo-notifications');
+type NotificationResponse = Parameters<NotificationsModule['addNotificationResponseReceivedListener']>[0] extends (
+  response: infer Response
+) => void
+  ? Response
+  : never;
 
 type RegisterPushTokenInput = {
   userId: number;
@@ -13,18 +19,45 @@ type RegisterPushTokenInput = {
 };
 
 let configured = false;
+let notificationsModulePromise: Promise<NotificationsModule | null> | null = null;
+
+function isExpoGoRuntime() {
+  const constants = Constants as typeof Constants & {
+    appOwnership?: string;
+    executionEnvironment?: string;
+  };
+  return constants.appOwnership === 'expo' || constants.executionEnvironment === 'storeClient';
+}
+
+export function canUseNativeNotifications() {
+  return !isExpoGoRuntime();
+}
+
+async function getNotificationsModule() {
+  if (!canUseNativeNotifications()) return null;
+  if (!notificationsModulePromise) {
+    notificationsModulePromise = import('expo-notifications').catch((err) => {
+      console.warn('[push] expo-notifications unavailable:', err instanceof Error ? err.message : String(err));
+      return null;
+    });
+  }
+  return notificationsModulePromise;
+}
 
 export function configureForegroundNotificationBehavior() {
   if (configured) return;
   configured = true;
-  Notifications.setNotificationHandler({
-    handleNotification: async () => ({
-      shouldShowAlert: true,
-      shouldPlaySound: true,
-      shouldSetBadge: true,
-      shouldShowBanner: true,
-      shouldShowList: true,
-    }),
+  void getNotificationsModule().then((Notifications) => {
+    if (!Notifications) return;
+    Notifications.setNotificationHandler({
+      handleNotification: async () => ({
+        shouldShowAlert: true,
+        shouldPlaySound: true,
+        shouldSetBadge: true,
+        shouldShowBanner: true,
+        shouldShowList: true,
+      }),
+    });
   });
 }
 
@@ -45,6 +78,8 @@ function normalizeExpoPushToken(value: unknown) {
 }
 
 export async function ensureDefaultNotificationChannel() {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return;
   if (Device.osName !== 'Android') return;
   await Notifications.setNotificationChannelAsync('default', {
     name: 'Default',
@@ -56,6 +91,8 @@ export async function ensureDefaultNotificationChannel() {
 }
 
 export async function askForNotificationPermission() {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return null;
   const current = await Notifications.getPermissionsAsync();
   if (current.granted || current.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL) {
     return current;
@@ -64,8 +101,11 @@ export async function askForNotificationPermission() {
 }
 
 export async function getExpoPushTokenSafe() {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return null;
   if (!Device.isDevice) return null;
   const permission = await askForNotificationPermission();
+  if (!permission) return null;
   const granted =
     permission.granted || permission.ios?.status === Notifications.IosAuthorizationStatus.PROVISIONAL;
   if (!granted) return null;
@@ -147,6 +187,8 @@ export async function scheduleLocalLiveReminder(
   },
   options?: { actionPath?: string }
 ) {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return null;
   const startDate = new Date(event.startAt);
   if (!Number.isFinite(startDate.getTime())) return null;
   const fireAt = new Date(startDate.getTime() - 2000);
@@ -174,6 +216,15 @@ export async function scheduleLocalLiveReminder(
 export async function cancelScheduledLocalNotification(identifier: string | null | undefined) {
   const clean = String(identifier ?? '').trim();
   if (!clean) return;
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return;
   await Notifications.cancelScheduledNotificationAsync(clean).catch(() => {});
 }
 
+export async function addNotificationResponseListener(
+  listener: (response: NotificationResponse) => void
+) {
+  const Notifications = await getNotificationsModule();
+  if (!Notifications) return null;
+  return Notifications.addNotificationResponseReceivedListener(listener);
+}

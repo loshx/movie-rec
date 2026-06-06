@@ -48,6 +48,12 @@ export default function LoginScreen() {
     path: 'login',
   });
 
+  React.useEffect(() => {
+    if (__DEV__) {
+      console.log('[auth0] redirectUri:', redirectUri);
+    }
+  }, [redirectUri]);
+
   const discovery = useMemo(
     () =>
       auth0Domain

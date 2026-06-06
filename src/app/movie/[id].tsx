@@ -128,6 +128,26 @@ function truncateText(value: string, maxLength: number) {
   return `${text.slice(0, Math.max(0, maxLength - 3)).trimEnd()}...`;
 }
 
+function getProviderSearchUrl(providerName: string, title: string) {
+  const query = encodeURIComponent(String(title ?? '').trim());
+  if (!query) return null;
+
+  const provider = String(providerName ?? '').toLowerCase();
+  if (provider.includes('netflix')) return `https://www.netflix.com/search?q=${query}`;
+  if (provider.includes('disney')) return `https://www.disneyplus.com/search?q=${query}`;
+  if (provider.includes('prime') || provider.includes('amazon')) {
+    return `https://www.primevideo.com/search/ref=atv_nb_sr?phrase=${query}`;
+  }
+  if (provider.includes('apple')) return `https://tv.apple.com/search?term=${query}`;
+  if (provider.includes('hulu')) return `https://www.hulu.com/search?q=${query}`;
+  if (provider.includes('max') || provider.includes('hbo')) return `https://www.max.com/search?q=${query}`;
+  if (provider.includes('paramount')) return `https://www.paramountplus.com/search/?query=${query}`;
+  if (provider.includes('peacock')) return `https://www.peacocktv.com/search?q=${query}`;
+  if (provider.includes('youtube')) return `https://www.youtube.com/results?search_query=${query}`;
+
+  return null;
+}
+
 const DETAIL_RAIL_CARD_WIDTH = 116;
 const DETAIL_RAIL_CARD_GAP = 10;
 
@@ -1298,8 +1318,10 @@ export default function MovieDetailScreen() {
                     style={styles.watchModalLogoBtn}
                     onPress={() => {
                       setShowWatchProviders(false);
-                      if (watchProvidersLink) {
-                        void Linking.openURL(watchProvidersLink);
+                      const providerUrl =
+                        getProviderSearchUrl(provider.provider_name, titleText) ?? watchProvidersLink;
+                      if (providerUrl) {
+                        void Linking.openURL(providerUrl);
                       }
                     }}>
                     {provider.logo_path ? (

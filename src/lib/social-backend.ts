@@ -111,7 +111,7 @@ export async function getPublicProfile(userId: number) {
 }
 
 export async function bootstrapBackendUserSession(userId: number, nickname: string) {
-  const requestedUserId = Number(resolveBackendUserId(userId) ?? userId);
+  const requestedUserId = Number(userId);
   if (!Number.isFinite(requestedUserId) || requestedUserId <= 0) return null;
   const cleanNickname = String(nickname || '').trim();
   if (!cleanNickname) return null;

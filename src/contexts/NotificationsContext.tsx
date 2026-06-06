@@ -2,7 +2,6 @@ import React, { createContext, useCallback, useContext, useEffect, useMemo, useR
 import { AppState, AppStateStatus, Pressable, StyleSheet, Text, View } from 'react-native';
 import { router } from 'expo-router';
 import * as Device from 'expo-device';
-import * as Notifications from 'expo-notifications';
 import { useSafeAreaInsets } from 'react-native-safe-area-context';
 
 import { useAuth } from '@/contexts/AuthContext';
@@ -26,6 +25,7 @@ import { hasBackendApi, backendGetCommentReplyNotifications } from '@/lib/cinema
 import { SPECIAL_GENRE_ANIME, SPECIAL_GENRE_CARTOON_MOVIES } from '@/lib/tmdb';
 import {
   cancelScheduledLocalNotification,
+  addNotificationResponseListener,
   configureForegroundNotificationBehavior,
   getExpoPushTokenSafe,
   registerPushTokenOnBackend,
@@ -400,15 +400,24 @@ export function NotificationsProvider({ children }: { children: React.ReactNode 
   }, [ensurePushRegistration, user?.id]);
 
   useEffect(() => {
-    const responseSub = Notifications.addNotificationResponseReceivedListener((response) => {
+    let mounted = true;
+    let responseSub: { remove: () => void } | null = null;
+    void addNotificationResponseListener((response) => {
       const data = (response.notification.request.content.data ?? {}) as Record<string, unknown>;
       const actionPath = String(data?.actionPath ?? '').trim();
       if (actionPath) {
         router.push(actionPath as never);
       }
+    }).then((sub) => {
+      if (!mounted) {
+        sub?.remove();
+        return;
+      }
+      responseSub = sub;
     });
     return () => {
-      responseSub.remove();
+      mounted = false;
+      responseSub?.remove();
     };
   }, []);
 

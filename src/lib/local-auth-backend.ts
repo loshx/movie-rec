@@ -153,3 +153,28 @@ export async function backendLocalSyncCredentials(input: {
   );
   return payload;
 }
+
+export async function backendOAuthUpsert(profile: {
+  sub: string;
+  email?: string | null;
+  name?: string | null;
+  given_name?: string | null;
+  family_name?: string | null;
+  provider?: 'auth0' | 'google';
+}) {
+  const payload = await requestBackend<BackendLocalAuthResponse & { is_new_user?: boolean }>(
+    '/api/auth/oauth/upsert',
+    {
+      method: 'POST',
+      body: JSON.stringify({
+        provider: profile.provider ?? 'auth0',
+        sub: String(profile.sub || '').trim(),
+        email: profile.email ? String(profile.email).trim() : null,
+        name: profile.name ? String(profile.name).trim() : null,
+        given_name: profile.given_name ? String(profile.given_name).trim() : null,
+        family_name: profile.family_name ? String(profile.family_name).trim() : null,
+      }),
+    }
+  );
+  return payload;
+}

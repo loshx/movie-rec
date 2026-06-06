@@ -78,13 +78,17 @@ export function GlobalBottomDock() {
 
   useEffect(() => {
     let active = true;
+    let checking = false;
     if (!pathname.startsWith('/cinema')) {
       setCinemaIsLive(false);
       return () => {
         active = false;
       };
     }
-    (async () => {
+
+    const refreshCinemaLiveState = async () => {
+      if (checking) return;
+      checking = true;
       try {
         const event = await getCinemaEventByStatusNow();
         if (!active) return;
@@ -104,10 +108,19 @@ export function GlobalBottomDock() {
       } catch {
         if (!active) return;
         setCinemaIsLive(false);
+      } finally {
+        checking = false;
       }
-    })();
+    };
+
+    void refreshCinemaLiveState();
+    const timer = setInterval(() => {
+      void refreshCinemaLiveState();
+    }, 2000);
+
     return () => {
       active = false;
+      clearInterval(timer);
     };
   }, [pathname]);
 

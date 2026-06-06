@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useState } from 'react';
+import React, { useCallback, useEffect, useMemo, useState } from 'react';
 import * as ImagePicker from 'expo-image-picker';
 import { Image, Platform, Pressable, ScrollView, StyleSheet, Text, TextInput, View } from 'react-native';
 import { Ionicons } from '@expo/vector-icons';
@@ -376,6 +376,20 @@ export default function AdminScreen() {
     [pollCurrent]
   );
 
+  const refreshMlStatus = useCallback(async () => {
+    if (!hasMlApi()) {
+      setMlStatus('disabled');
+      return;
+    }
+    setMlStatus('checking');
+    try {
+      const ok = await checkMlApiHealth();
+      setMlStatus(ok ? 'connected' : 'offline');
+    } catch {
+      setMlStatus('offline');
+    }
+  }, []);
+
   const refreshCurrentPoll = async () => {
     try {
       const currentPoll = await getCurrentCinemaPoll();
@@ -411,24 +425,18 @@ export default function AdminScreen() {
 
   useEffect(() => {
     (async () => {
-      if (!hasMlApi()) {
-        setMlStatus('disabled');
-      } else {
-        setMlStatus('checking');
-        try {
-          const ok = await checkMlApiHealth();
-          setMlStatus(ok ? 'connected' : 'offline');
-        } catch {
-          setMlStatus('offline');
-        }
-      }
+      await refreshMlStatus();
       const latest = await getLatestCinemaEvent();
       if (latest) {
         setLatestCinemaInfo(`${latest.title} (${fmtShortIso(latest.start_at)})`);
       }
       await refreshCurrentPoll();
     })();
-  }, []);
+    const interval = setInterval(() => {
+      void refreshMlStatus();
+    }, 15_000);
+    return () => clearInterval(interval);
+  }, [refreshMlStatus]);
 
   const isAdmin = user?.role === 'admin';
   const startIso = useMemo(

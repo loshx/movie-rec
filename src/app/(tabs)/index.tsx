@@ -2362,7 +2362,7 @@ const SectionMediaCard = React.memo(function SectionMediaCard({
   return (
     <Pressable style={styles.card} onPress={handlePress}>
       <Image
-        source={{ uri: posterUrl(item.poster_path, 'w300') ?? undefined }}
+        source={{ uri: posterUrl(item.poster_path, 'w342') ?? undefined }}
         style={styles.cardImage}
         contentFit="cover"
         transition={60}
