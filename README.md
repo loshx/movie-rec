@@ -1,28 +1,45 @@
-# Movie Rec Dev Guide
+# movie-rec
 
-## Architecture (simplified)
+Expo and React Native movie discovery app backed by a Node service and a FastAPI recommendation layer.
 
-- Mobile/Web app: Expo + React Native (`src/`)
-- Backend (single source of truth for users/data): Node server (`server/cinema-ws-server.js`)
-- ML recommendations service: FastAPI (`ml/api.py`)
+## Overview
 
-When backend URL is configured, app data paths use backend-first logic and avoid local fallback writes.
+This repository combines three parts into one project:
+
+- mobile and web client built with Expo and React Native
+- Node backend used as the main data layer for app state
+- FastAPI service for recommendation and ML-related flows
+
+## Highlights
+
+- Modern Expo / React Native app structure
+- Local backend-first development workflow
+- Separate ML service with Python dependencies
+- Environment template for local secrets
+- USB and LAN development scripts for device testing
+
+## Architecture
+
+- `src/` - app screens, routes, and UI logic
+- `server/` - Node backend services
+- `ml/` - FastAPI service and ML dependencies
+- `scripts/` - local development orchestration
 
 ## Prerequisites
 
 - Node.js 20+
 - Python 3.10+
-- Android platform tools (`adb`) for USB phone flow
+- Android platform tools (`adb`) for USB device flow
 
 ## One-time setup
 
-1. Install JS deps:
+Install JavaScript dependencies:
 
 ```bash
 npm install
 ```
 
-2. Install ML deps:
+Install ML dependencies:
 
 ```bash
 python -m venv ml/.venv
@@ -30,66 +47,55 @@ ml/.venv/Scripts/activate
 pip install -r ml/requirements.txt
 ```
 
-## Local secrets and private config
+## Environment and private config
 
 1. Copy `.env.example` to `.env` and fill in the values you actually use.
 2. Keep `android/app/google-services.json` only on your machine, or provide it to EAS through the `GOOGLE_SERVICES_JSON` file secret.
-3. Do not commit runtime tokens or local service files back into Git.
+3. Do not commit runtime tokens or local service files.
 
-## Start everything (recommended)
+## Development
 
-### Android phone via USB (most stable)
+Recommended USB flow:
 
 ```bash
 npm run dev:usb
 ```
 
-This starts backend + ML + Expo and configures `adb reverse` automatically.
-
-### LAN mode (same Wi-Fi)
+LAN mode:
 
 ```bash
 npm run dev:all
 ```
 
-### Start without ML (fallback mode)
+Start without ML:
 
 ```bash
 npm run dev:no-ml
 ```
 
-## Build/install app on Android device
+## Useful commands
+
+Build on Android:
 
 ```bash
 npx expo run:android --device
 ```
 
-If Metro port conflict appears:
-
-```bash
-npx expo start --dev-client -c --port 8081
-```
-
-## Reset local dev data
-
-This clears local backend store and ML sqlite DB:
+Reset local backend and ML data:
 
 ```bash
 npm run reset:data
 ```
 
-Then reinstall app / clear app storage on phone to remove local sqlite cache.
-
-## Manual service commands (optional)
-
-Backend only:
+Run backend only:
 
 ```bash
 npm run backend
 ```
 
-ML only:
+Run ML service only:
 
 ```bash
 ml/.venv/Scripts/python -m uvicorn api:app --host 0.0.0.0 --port 8008 --app-dir ml
 ```
+

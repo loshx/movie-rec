@@ -50,3 +50,4 @@ ml/*.db
 ml_local.db
 server/data/*.bak
 logs/
+gradle-*.log
